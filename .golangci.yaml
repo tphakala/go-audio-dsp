@@ -1,0 +1,76 @@
+# Shared linting standard from github.com/tphakala/go-flac (which adapts
+# birdnet-go's config), kept in sync across tphakala projects, including the
+# rules/*.go ruleguard matchers. go-audio-dsp notes:
+#   - gocritic hugeParam stays disabled to match the shared standard; loudnorm
+#     only passes small value types (Options, Measurement, Result), so it would
+#     not fire here regardless.
+#   - modernization is enforced by the rules/*.go ruleguard matchers and the
+#     standalone `modernize` analyzer rather than a golangci linter; both run
+#     clean here. Toolchain baseline: Go 1.27, golangci-lint v2.13.2.
+version: "2"
+output:
+  sort-order:
+    - linter
+    - severity
+    - file
+linters:
+  enable:
+    - bodyclose
+    - copyloopvar
+    - dupl
+    - durationcheck
+    - errname
+    - errorlint
+    - exhaustive
+    - fatcontext
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - iface
+    - ineffassign
+    - misspell
+    - nilerr
+    - nilnil
+    - predeclared
+    - prealloc
+    - revive
+    - staticcheck
+    - testifylint
+    - thelper
+    - unconvert
+    - unused
+    - wastedassign
+  settings:
+    gocognit:
+      min-complexity: 50
+    gocritic:
+      # gocritic auto-enables the ruleguard check when settings.ruleguard.rules
+      # is set; the rules/*.go matchers carry the //go:build ruleguard tag so
+      # the normal toolchain ignores them.
+      disabled-checks:
+        - commentFormatting
+        - commentedOutCode
+        - hugeParam
+      enabled-tags:
+        - style
+        - diagnostic
+        - performance
+      settings:
+        ruleguard:
+          rules: "rules/*.go"
+    revive:
+      rules:
+        - name: unused-parameter
+          disabled: true
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: true
+    exhaustive:
+      default-signifies-exhaustive: true
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: true
+  new: false

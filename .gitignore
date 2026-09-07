@@ -1,0 +1,36 @@
+# Compiled / test artifacts
+*.exe
+*.test
+*.out
+*.prof
+
+# Go workspace / vendor
+/vendor/
+go.work
+go.work.sum
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# Tooling caches
+.serena/
+.sentrux/
+.codegraph/
+
+# Private planning docs (specs, plans, research); tracked separately, never published
+docs/
+
+# Real-clip corpus for A/B tuning against ffmpeg afftdn: supplied locally, never committed
+testdata/corpus/
+
+# Build artifacts
+/bin/
+*.exe
+*.test
+*.out
+*.prof
+*.pprof
