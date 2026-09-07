@@ -1,0 +1,163 @@
+package denoiser
+
+import (
+	"fmt"
+
+	"github.com/tphakala/simd/f32"
+)
+
+// Denoiser is a streaming single-channel spectral denoiser. Create one with
+// New, then call Process (or ProcessInto) with consecutive chunks and Flush at
+// the end of the stream. It holds scratch and stream state and is not safe for
+// concurrent use.
+type Denoiser struct {
+	cfg        Config
+	params     Params
+	sampleRate int
+	n, hop     int // FrameSize, HopSize
+	ovl        int // n/hop: frames overlapping any sample
+	bins       int // n/2+1
+
+	plan    *f32.STFTPlan
+	window  []float32 // periodic Hann, analysis and synthesis
+	invNorm []float32 // len hop: 1 / WOLA normalization per position in a block
+
+	gains    *gainState
+	noise    []float32 // active noise power: noiseBuf (fixed profile) or tracker.noise
+	noiseBuf []float32
+	profile  *NoiseProfile
+	tracker  *mcra
+
+	// stream state
+	inBuf             []float32 // analysis buffer, len n; the next frame once inFill == n
+	inFill            int
+	spec              []complex64
+	power             []float32
+	gain              []float32
+	synth             []float32 // inverse frame, len n
+	ola               []float32 // overlap-add accumulator, len n
+	zeros             []float32 // len hop, fed by Flush
+	frames            int64     // frames processed in this stream
+	totalIn, totalOut int64
+}
+
+// New returns a Denoiser for cfg. The noise power is currently held at a fixed
+// floor in every bin, so at the default settings the stream is close to a
+// passthrough.
+func New(cfg Config) (*Denoiser, error) {
+	rc, p, err := cfg.resolve()
+	if err != nil {
+		return nil, err
+	}
+	plan, err := f32.NewSTFTPlan(rc.FrameSize)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
+	d := &Denoiser{
+		cfg:        rc,
+		params:     p,
+		sampleRate: rc.SampleRate,
+		n:          rc.FrameSize,
+		hop:        rc.HopSize,
+		ovl:        rc.FrameSize / rc.HopSize,
+		bins:       plan.NumBins(),
+		plan:       plan,
+	}
+	d.window = hannPeriodic(d.n)
+	norm := wolaNorm(d.window, d.window, d.hop)
+	d.invNorm = make([]float32, d.hop)
+	for i, v := range norm {
+		d.invNorm[i] = 1 / v
+	}
+	d.gains = newGainState(d.bins, p)
+	d.noiseBuf = make([]float32, d.bins)
+	d.inBuf = make([]float32, d.n)
+	d.spec = make([]complex64, d.bins)
+	d.power = make([]float32, d.bins)
+	d.gain = make([]float32, d.bins)
+	d.synth = make([]float32, d.n)
+	d.ola = make([]float32, d.n)
+	d.zeros = make([]float32, d.hop)
+	d.initNoiseSource()
+	d.Reset()
+	return d, nil
+}
+
+// initNoiseSource points the noise slot at its default source: a fixed floor of
+// epsPower in every bin.
+func (d *Denoiser) initNoiseSource() {
+	for k := range d.noiseBuf {
+		d.noiseBuf[k] = epsPower
+	}
+	d.noise = d.noiseBuf
+}
+
+// Latency returns how many samples the output lags the input in steady state:
+// FrameSize - HopSize. Output is emitted in whole hop blocks, so between block
+// boundaries the lag is up to HopSize-1 samples more; Flush drains the rest.
+func (d *Denoiser) Latency() int { return d.n - d.hop }
+
+// Reset clears the stream state (analysis buffer, overlap-add accumulator,
+// decision-directed and tracker state, sample counters) so the next Process
+// starts a new stream. The configuration and any set noise profile are kept.
+func (d *Denoiser) Reset() {
+	clear(d.inBuf)
+	d.inFill = d.n - d.hop // the stream is preceded by n-hop zeros
+	clear(d.ola)
+	d.frames = 0
+	d.totalIn, d.totalOut = 0, 0
+	d.gains.reset()
+	if d.tracker != nil {
+		d.tracker.reset()
+	}
+}
+
+// Process denoises the next chunk of the stream and returns the output samples
+// that became final, in a freshly allocated slice (possibly empty). Output is
+// aligned sample-for-sample with input and lags by Latency(); see Flush.
+func (d *Denoiser) Process(in []float32) ([]float32, error) {
+	out := make([]float32, d.pendingOutput(len(in)))
+	n, err := d.ProcessInto(in, out)
+	return out[:n], err
+}
+
+// ProcessInto is Process without allocation: it writes the output samples that
+// become final into out and returns their count. The count is known before
+// any work is done; if len(out) is smaller, ErrBufferTooSmall is returned and
+// nothing is consumed. len(out) >= len(in)+HopSize always suffices.
+func (d *Denoiser) ProcessInto(in, out []float32) (int, error) {
+	need := d.pendingOutput(len(in))
+	if len(out) < need {
+		return 0, ErrBufferTooSmall
+	}
+	n := d.feed(in, out[:need], false)
+	d.totalIn += int64(len(in))
+	d.totalOut += int64(n)
+	return n, nil
+}
+
+// Flush ends the stream: it completes the frames overlapping the last input
+// samples (with a frozen noise estimate), returns the remaining output so the
+// total output length equals the total input length, and resets the stream
+// state so the Denoiser can start a new stream.
+func (d *Denoiser) Flush() ([]float32, error) {
+	out := make([]float32, int(d.totalIn-d.totalOut))
+	n, err := d.FlushInto(out)
+	return out[:n], err
+}
+
+// FlushInto is Flush without allocation. It returns ErrBufferTooSmall (and
+// does nothing) if len(out) is smaller than the remaining output;
+// len(out) >= FrameSize always suffices.
+func (d *Denoiser) FlushInto(out []float32) (int, error) {
+	need := int(d.totalIn - d.totalOut)
+	if len(out) < need {
+		return 0, ErrBufferTooSmall
+	}
+	written := 0
+	for written < need {
+		written += d.feed(d.zeros, out[written:need], true)
+	}
+	d.Reset()
+	return written, nil
+}
