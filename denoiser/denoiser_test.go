@@ -77,12 +77,21 @@ func TestIdentityPassthrough(t *testing.T) {
 	}
 }
 
-func TestDefaultParamsNegligibleNoiseIsIdentity(t *testing.T) {
-	// Before any profile or tracker is set, the noise slot holds epsPower, so
-	// every bin with real energy sees a huge SNR and unity gain.
+func TestDefaultParamsNegligibleNoiseProfileIsIdentity(t *testing.T) {
+	// With a fixed near-silent noise profile, every bin with real energy sees a
+	// huge SNR and unity gain, so the stream passes through. (The default with
+	// no profile is an adaptive tracker, which treats a stationary multi-sine as
+	// noise and attenuates it; that behaviour is covered elsewhere.)
 	x := testTone(20000)
 	d, err := New(Config{SampleRate: 48000})
 	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := d.NoiseProfileFromSamples(whiteNoise(4096, 1e-6, 1)) // -120 dBFS hiss
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetNoiseProfile(p); err != nil {
 		t.Fatal(err)
 	}
 	y := runStream(t, d, x, []int{1000})
@@ -225,5 +234,90 @@ func TestProcessIntoZeroAlloc(t *testing.T) {
 		}
 	}); a != 0 {
 		t.Errorf("FlushInto allocated %v per run, want 0", a)
+	}
+}
+
+func TestDenoiseMatchesManualSequence(t *testing.T) {
+	const sr = 48000
+	x := whiteNoise(6*sr, 0.01, 40)
+	toneAt(x, sr, 2*sr, 3*sr, 2000, 0.2)
+	cfg := Config{SampleRate: sr, Preset: Heavy}
+	got, err := Denoise(x, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, _ := New(cfg)
+	p, err := d.EstimateNoiseProfile(x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetNoiseProfile(p); err != nil {
+		t.Fatal(err)
+	}
+	want := runStream(t, d, x, []int{len(x)})
+	if len(got) != len(x) || len(want) != len(x) {
+		t.Fatalf("lengths %d %d, want %d", len(got), len(want), len(x))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Denoise differs from the manual sequence at %d", i)
+		}
+	}
+	// Tier 2 variant.
+	noise := x[:sr]
+	got2, err := DenoiseWithNoise(x, noise, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d2, _ := New(cfg)
+	p2, _ := d2.NoiseProfileFromSamples(noise)
+	_ = d2.SetNoiseProfile(p2)
+	want2 := runStream(t, d2, x, []int{len(x)})
+	for i := range want2 {
+		if got2[i] != want2[i] {
+			t.Fatalf("DenoiseWithNoise differs from the manual sequence at %d", i)
+		}
+	}
+}
+
+func TestDenoiseFallbacksAndErrors(t *testing.T) {
+	const sr = 48000
+	// Featureless noise has no distinct quiet region: Denoise falls back to
+	// adaptive tracking and still returns a full-length result.
+	x := whiteNoise(3*sr, 0.01, 41)
+	y, err := Denoise(x, Config{SampleRate: sr})
+	if err != nil || len(y) != len(x) {
+		t.Fatalf("fallback: len %d err %v", len(y), err)
+	}
+	// Tiny input (shorter than a frame) works too.
+	y, err = Denoise(x[:100], Config{SampleRate: sr})
+	if err != nil || len(y) != 100 {
+		t.Fatalf("tiny input: len %d err %v", len(y), err)
+	}
+	if _, err := Denoise(x, Config{}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("invalid config err = %v", err)
+	}
+	if _, err := DenoiseWithNoise(x, x[:10], Config{SampleRate: sr}); !errors.Is(err, ErrProfileTooShort) {
+		t.Errorf("short noise err = %v", err)
+	}
+	// DenoiseWithProfile: same result as the Tier 2 path with the same profile,
+	// mismatch rejected, nil means adaptive.
+	d, _ := New(Config{SampleRate: sr})
+	p, _ := d.NoiseProfileFromSamples(x[:sr])
+	a, err := DenoiseWithProfile(x, p, Config{SampleRate: sr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := DenoiseWithNoise(x, x[:sr], Config{SampleRate: sr})
+	for i := range a {
+		if a[i] != b[i] {
+			t.Fatalf("DenoiseWithProfile differs from DenoiseWithNoise at %d", i)
+		}
+	}
+	if _, err := DenoiseWithProfile(x, p, Config{SampleRate: sr, FrameSize: 512}); !errors.Is(err, ErrProfileMismatch) {
+		t.Errorf("mismatched profile err = %v", err)
+	}
+	if y, err := DenoiseWithProfile(x, nil, Config{SampleRate: sr}); err != nil || len(y) != len(x) {
+		t.Errorf("nil profile (adaptive): len %d err %v", len(y), err)
 	}
 }
