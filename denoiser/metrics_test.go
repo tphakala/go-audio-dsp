@@ -167,13 +167,14 @@ func TestMetricInstruments(t *testing.T) {
 		t.Errorf("shifted did not undo the delay at n/2: %g vs %g", undone[n/2], x[n/2])
 	}
 
-	// lsdDB: identical spectra distance is 0; halving the amplitude quarters
-	// every bin's power. The shared spectral floor (derived from the reference
-	// peak, added to both spectra) sits >70 dB below every bin for this
-	// broadband signal, so it is negligible and each bin's dB difference is a
-	// uniform 10*log10(4)=6.02 dB, giving a distance of ~6.02 dB.
-	if got := lsdDB(x, x, full, 1024, 256); got != 0 {
-		t.Errorf("lsdDB(x, x) = %g, want 0", got)
+	// lsdDB: identical spectra give ~0 distance (bit-identical on amd64, a
+	// sub-1e-15 residual on arm64's NEON path, so compare with a tolerance).
+	// Halving the amplitude quarters every bin's power. The shared spectral
+	// floor (derived from the reference peak, added to both spectra) sits >70 dB
+	// below every bin for this broadband signal, so it is negligible and each
+	// bin's dB difference is a uniform 10*log10(4)=6.02 dB, giving ~6.02 dB.
+	if got := lsdDB(x, x, full, 1024, 256); math.Abs(got) > 1e-6 {
+		t.Errorf("lsdDB(x, x) = %g, want ~0 (identical spectra)", got)
 	}
 	half := make([]float32, n)
 	for i := range half {
