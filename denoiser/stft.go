@@ -73,9 +73,11 @@ func (d *Denoiser) processFrame(flushing bool) {
 	f32.Add(d.ola, d.ola, d.synth)
 }
 
-// updateNoise advances the adaptive noise estimate for the current frame when a
-// tracker is the active source. No tracker is wired in yet, so the noise slot
-// is currently constant.
+// updateNoise advances the adaptive noise estimate for the current frame when
+// the tracker is the active source: there is no fixed profile, the stream is
+// not flushing (the tail freezes the estimate), and the frame is past the
+// leading all-zero warm-up blocks that would otherwise feed WOLA padding into
+// the estimate. With a fixed profile the noise slot is constant.
 func (d *Denoiser) updateNoise(flushing bool) {
 	if d.tracker == nil || d.profile != nil || flushing || d.frames < int64(d.ovl-1) {
 		return

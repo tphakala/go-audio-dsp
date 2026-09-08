@@ -41,9 +41,9 @@ type Denoiser struct {
 	totalIn, totalOut int64
 }
 
-// New returns a Denoiser for cfg. The noise power is currently held at a fixed
-// floor in every bin, so at the default settings the stream is close to a
-// passthrough.
+// New returns a Denoiser for cfg. Until SetNoiseProfile is called the noise
+// estimate is adaptive: a minima-controlled tracker that needs about
+// Params.TrackWindowSec of audio to converge.
 func New(cfg Config) (*Denoiser, error) {
 	rc, p, err := cfg.resolve()
 	if err != nil {
@@ -83,13 +83,14 @@ func New(cfg Config) (*Denoiser, error) {
 	return d, nil
 }
 
-// initNoiseSource points the noise slot at its default source: a fixed floor of
-// epsPower in every bin.
+// initNoiseSource points the noise slot at the adaptive tracker (the default
+// until SetNoiseProfile is called with a profile).
 func (d *Denoiser) initNoiseSource() {
-	for k := range d.noiseBuf {
-		d.noiseBuf[k] = epsPower
+	if d.tracker == nil {
+		d.tracker = newMCRA(d.bins, trackWindowFrames(d.params.TrackWindowSec, d.sampleRate, d.hop))
 	}
-	d.noise = d.noiseBuf
+	d.tracker.reset()
+	d.noise = d.tracker.noise
 }
 
 // Latency returns how many samples the output lags the input in steady state:
@@ -160,4 +161,66 @@ func (d *Denoiser) FlushInto(out []float32) (int, error) {
 	}
 	d.Reset()
 	return written, nil
+}
+
+// Denoise denoises a whole clip held in memory: it measures the noise profile
+// from the clip's quietest window (EstimateNoiseProfile), falling back to
+// adaptive tracking when no distinct quiet region exists, then runs the stream
+// to completion. The result has len(x) samples aligned with x.
+func Denoise(x []float32, cfg Config) ([]float32, error) {
+	d, err := New(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if p, err := d.EstimateNoiseProfile(x); err == nil {
+		_ = d.SetNoiseProfile(p) // same Denoiser, same FrameSize: cannot mismatch
+	}
+	return d.denoiseAll(x)
+}
+
+// DenoiseWithNoise denoises a whole clip using a profile measured from the
+// given noise-only samples (for example a user-selected region of the same
+// clip). The result has len(x) samples aligned with x.
+func DenoiseWithNoise(x, noise []float32, cfg Config) ([]float32, error) {
+	d, err := New(cfg)
+	if err != nil {
+		return nil, err
+	}
+	p, err := d.NoiseProfileFromSamples(noise)
+	if err != nil {
+		return nil, err
+	}
+	if err := d.SetNoiseProfile(p); err != nil {
+		return nil, err
+	}
+	return d.denoiseAll(x)
+}
+
+// DenoiseWithProfile denoises a whole clip with an existing profile (for
+// example one measured once and applied to every clip from the same station).
+// A nil profile means adaptive tracking. The result has len(x) samples.
+func DenoiseWithProfile(x []float32, p *NoiseProfile, cfg Config) ([]float32, error) {
+	d, err := New(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := d.SetNoiseProfile(p); err != nil {
+		return nil, err
+	}
+	return d.denoiseAll(x)
+}
+
+// denoiseAll runs x through the stream and flushes into one exact-length
+// result.
+func (d *Denoiser) denoiseAll(x []float32) ([]float32, error) {
+	out := make([]float32, len(x))
+	n, err := d.ProcessInto(x, out)
+	if err != nil {
+		return nil, err
+	}
+	m, err := d.FlushInto(out[n:])
+	if err != nil {
+		return nil, err
+	}
+	return out[:n+m], nil
 }
