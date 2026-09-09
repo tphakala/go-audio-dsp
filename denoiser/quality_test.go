@@ -17,6 +17,12 @@ import (
 // synthetic bar is the live reduction guard.
 const minReductionMarginDB = 4
 
+// TestPresetsOnSyntheticClips runs each preset over seeded white and pink
+// synthetic clips and checks the properties that define correct denoising:
+// noise-region reduction clears the preset's floor, segmental SNR does not
+// degrade, the output stays sample-aligned with the input, and the noise region
+// is not zeroed to the silence sentinel. A monotonic subtest per clip asserts
+// reduction grows with preset strength (Light < Medium < Heavy).
 func TestPresetsOnSyntheticClips(t *testing.T) {
 	// A few fixed seeds so the bars are not validated on a single noise
 	// realization (guards against a cherry-picked seed).
