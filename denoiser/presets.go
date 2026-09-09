@@ -43,7 +43,8 @@ const (
 	Medium Preset = iota
 	// Light reduces noise by at most 6 dB and preserves the most detail.
 	Light
-	// Heavy reduces noise by up to 20 dB with frequency smoothing.
+	// Heavy reduces noise by up to 20 dB with aggressive over-subtraction; the
+	// most reduction, best on steady broadband noise.
 	Heavy
 )
 
@@ -109,12 +110,12 @@ func (p Params) validate() error {
 	return nil
 }
 
-// presetParams are the starting values; they are refined against a real-clip
-// corpus.
+// presetParams are tuned against the synthetic quality harness (see
+// quality_test.go); refinement against a real bird-clip corpus is future work.
 var presetParams = [...]Params{
 	Medium: {MaxAttenuationDB: 12, OverSubtraction: 1.2, SNRSmoothing: 0.96, MinPriorSNRDB: -18, FreqSmoothBins: 0, Estimator: MMSELSA, TrackWindowSec: 2},
 	Light:  {MaxAttenuationDB: 6, OverSubtraction: 1.0, SNRSmoothing: 0.95, MinPriorSNRDB: -15, FreqSmoothBins: 0, Estimator: MMSELSA, TrackWindowSec: 2},
-	Heavy:  {MaxAttenuationDB: 20, OverSubtraction: 1.5, SNRSmoothing: 0.97, MinPriorSNRDB: -22, FreqSmoothBins: 3, Estimator: MMSELSA, TrackWindowSec: 2},
+	Heavy:  {MaxAttenuationDB: 20, OverSubtraction: 2.0, SNRSmoothing: 0.97, MinPriorSNRDB: -22, FreqSmoothBins: 0, Estimator: MMSELSA, TrackWindowSec: 2},
 }
 
 // Params returns the preset's knob values (Medium's for an unknown preset).

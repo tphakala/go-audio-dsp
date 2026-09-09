@@ -24,8 +24,8 @@ import (
 // leaves afftdn barely engaged, so BOTH bars are easy to clear for it: afftdn
 // reduces little (so our reduction trivially matches) and distorts the signal
 // little (so its LSD is trivially low and our LSD comparison is lenient too).
-// The definitive apples-to-apples comparison runs on the real corpus in
-// Task 14, where noise floors match production.
+// The definitive apples-to-apples comparison runs on a real bird-clip corpus,
+// where noise floors match production.
 var afftdnPresets = map[Preset][2]int{Light: {6, -30}, Medium: {12, -40}, Heavy: {20, -50}}
 
 func ffmpegPath(t *testing.T) string {
@@ -114,15 +114,15 @@ func TestAsGoodAsAfftdnSynthetic(t *testing.T) {
 				// The spec's bar is "within 1 dB of afftdn", but the host
 				// ffmpeg/afftdn build is unpinned and the margin on the weak
 				// presets is sub-dB, so a miss records the numbers and defers to
-				// Task 14's real-corpus comparison (the authoritative one) instead
+				// the real-corpus comparison (the authoritative one) instead
 				// of turning shared CI red on an oracle-side version drift. Our own
 				// reduction is guarded live and ffmpeg-independently by
 				// TestPresetsOnSyntheticClips.
 				switch {
 				case redOurs < redRef-1:
-					t.Skipf("afftdn oracle pending (Task 14): reduction %.1f dB is %.1f below afftdn's %.1f (1 dB bar; host ffmpeg unpinned)", redOurs, redRef-redOurs, redRef)
+					t.Skipf("afftdn oracle pending (real corpus): reduction %.1f dB is %.1f below afftdn's %.1f (1 dB bar; host ffmpeg unpinned)", redOurs, redRef-redOurs, redRef)
 				case lsdOurs > lsdRef+1:
-					t.Skipf("afftdn oracle pending (Task 14): signal LSD %.2f dB exceeds afftdn's %.2f by more than 1 dB (host ffmpeg unpinned)", lsdOurs, lsdRef)
+					t.Skipf("afftdn oracle pending (real corpus): signal LSD %.2f dB exceeds afftdn's %.2f by more than 1 dB (host ffmpeg unpinned)", lsdOurs, lsdRef)
 				}
 			})
 		}

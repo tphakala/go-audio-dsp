@@ -11,7 +11,7 @@ via [`github.com/tphakala/simd`](https://github.com/tphakala/simd).
 | Package | Status | What it does |
 | ------- | ------ | ------------ |
 | [`loudnorm`](loudnorm/) | stable | EBU R 128 / ITU-R BS.1770-4 loudness normalization of in-memory PCM (LUFS measurement, true-peak limiting, linear gain). |
-| [`denoiser`](denoiser/) | in progress | Spectral audio denoiser (STFT, measured or adaptive noise profile, Wiener / MMSE-LSA gain, overlap-add reconstruction). Replaces ffmpeg `afftdn` on the BirdNET-Go clip path. |
+| [`denoiser`](denoiser/) | beta | Spectral audio denoiser (STFT, measured or adaptive noise profile, Wiener / MMSE-LSA gain, overlap-add reconstruction). Replaces ffmpeg `afftdn` on the BirdNET-Go clip path. |
 
 More processors may follow (high-pass, gain, and related building blocks) as the
 need arises.

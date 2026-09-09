@@ -20,7 +20,7 @@ func (d *Denoiser) pendingOutput(extra int) int {
 		return 0
 	}
 	completing := int64((total-d.n)/d.hop) + 1 // frames that will complete
-	warm := int64(d.ovl - 1)                    // frames whose block is leading zeros
+	warm := int64(d.ovl - 1)                   // frames whose block is leading zeros
 	emitFrom := max(d.frames, warm)
 	cnt := d.frames + completing - emitFrom
 	if cnt <= 0 {
@@ -65,9 +65,7 @@ func (d *Denoiser) processFrame(flushing bool) {
 	c64.AbsSq(d.power, d.spec)
 	d.updateNoise(flushing)
 	d.gains.compute(d.gain, d.power, d.noise)
-	for k, g := range d.gain {
-		d.spec[k] = complex(real(d.spec[k])*g, imag(d.spec[k])*g)
-	}
+	c64.MulReal(d.spec, d.spec, d.gain) // per-bin real gain; alias-safe (dst == a), scalar in simd v1.10.0
 	d.plan.IRFFT(d.synth, d.spec)
 	f32.Mul(d.synth, d.synth, d.window)
 	f32.Add(d.ola, d.ola, d.synth)
@@ -89,9 +87,7 @@ func (d *Denoiser) updateNoise(flushing bool) {
 // divided by the WOLA normalization, into dst (at most hop samples; empty when
 // the block is discarded), then advances the accumulator by one hop.
 func (d *Denoiser) finishBlock(dst []float32) {
-	for i := range dst {
-		dst[i] = d.ola[i] * d.invNorm[i]
-	}
+	f32.Mul(dst, d.ola[:len(dst)], d.invNorm[:len(dst)])
 	copy(d.ola, d.ola[d.hop:])
 	clear(d.ola[d.n-d.hop:])
 }

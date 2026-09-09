@@ -66,9 +66,7 @@ func New(cfg Config) (*Denoiser, error) {
 	d.window = hannPeriodic(d.n)
 	norm := wolaNorm(d.window, d.window, d.hop)
 	d.invNorm = make([]float32, d.hop)
-	for i, v := range norm {
-		d.invNorm[i] = 1 / v
-	}
+	f32.Reciprocal(d.invNorm, norm) // full-precision division, not approximate rcp
 	d.gains = newGainState(d.bins, p)
 	d.noiseBuf = make([]float32, d.bins)
 	d.inBuf = make([]float32, d.n)
