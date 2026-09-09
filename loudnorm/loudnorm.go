@@ -1,4 +1,4 @@
-// Package audionorm performs two-pass loudness normalization of in-memory PCM
+// Package loudnorm performs two-pass loudness normalization of in-memory PCM
 // audio to the EBU R 128 / ITU-R BS.1770-4 standard.
 //
 // Pass one measures the gated integrated loudness and the true peak; pass two
@@ -13,8 +13,8 @@
 // true-peak estimate uses BS.1770-4 4x oversampling, which is specified for
 // rates up to 48 kHz and is less precise above that.
 //
-//	opts := audionorm.DefaultOptions() // -23 LUFS, -1.0 dBTP, 48 kHz mono
-//	res, err := audionorm.NormalizeInt16(pcm, opts)
+//	opts := loudnorm.DefaultOptions() // -23 LUFS, -1.0 dBTP, 48 kHz mono
+//	res, err := loudnorm.NormalizeInt16(pcm, opts)
 package loudnorm
 
 import (
@@ -186,31 +186,36 @@ func PlanGain(meas Measurement, opts Options) Result {
 	return res
 }
 
+// validateDims reports whether n interleaved samples at the given sample rate
+// and channel count form a valid buffer for the meter, returning a descriptive
+// error otherwise.
 func validateDims(sampleRate, channels, n int) error {
 	switch {
 	case sampleRate < minSampleRate:
-		return fmt.Errorf("audionorm: sample rate %d Hz too low; minimum is %d Hz (K-weighting is undefined below it)", sampleRate, minSampleRate)
+		return fmt.Errorf("loudnorm: sample rate %d Hz too low; minimum is %d Hz (K-weighting is undefined below it)", sampleRate, minSampleRate)
 	case channels <= 0:
-		return fmt.Errorf("audionorm: channels must be positive, got %d", channels)
+		return fmt.Errorf("loudnorm: channels must be positive, got %d", channels)
 	case n%channels != 0:
-		return fmt.Errorf("audionorm: sample count %d is not a multiple of channels %d", n, channels)
+		return fmt.Errorf("loudnorm: sample count %d is not a multiple of channels %d", n, channels)
 	}
 	return nil
 }
 
+// validate checks the options against a buffer of n interleaved samples,
+// returning the first invalid field as a descriptive error.
 func (o Options) validate(n int) error {
 	if err := validateDims(o.SampleRate, o.Channels, n); err != nil {
 		return err
 	}
 	switch {
 	case math.IsNaN(o.TargetLUFS) || math.IsInf(o.TargetLUFS, 0):
-		return fmt.Errorf("audionorm: target loudness must be finite, got %v", o.TargetLUFS)
+		return fmt.Errorf("loudnorm: target loudness must be finite, got %v", o.TargetLUFS)
 	case o.TargetLUFS >= 0 || o.TargetLUFS <= absoluteGateLUFS:
-		return fmt.Errorf("audionorm: target loudness %.2f LUFS out of range (%.0f, 0)", o.TargetLUFS, absoluteGateLUFS)
+		return fmt.Errorf("loudnorm: target loudness %.2f LUFS out of range (%.0f, 0)", o.TargetLUFS, absoluteGateLUFS)
 	case math.IsNaN(o.TruePeakDBTP) || math.IsInf(o.TruePeakDBTP, 0):
-		return fmt.Errorf("audionorm: true-peak ceiling must be finite, got %v", o.TruePeakDBTP)
+		return fmt.Errorf("loudnorm: true-peak ceiling must be finite, got %v", o.TruePeakDBTP)
 	case o.TruePeakDBTP > 0:
-		return fmt.Errorf("audionorm: true-peak ceiling %.2f dBTP must be <= 0", o.TruePeakDBTP)
+		return fmt.Errorf("loudnorm: true-peak ceiling %.2f dBTP must be <= 0", o.TruePeakDBTP)
 	}
 	return nil
 }

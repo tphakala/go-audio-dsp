@@ -18,7 +18,7 @@ field and nature recordings.
 A survey of the Go ecosystem found no library that is pure-Go, works at
 arbitrary sample rates, and normalizes an in-memory buffer: `exaring/ebur128` is
 pure-Go but measure-only and 48 kHz-locked; the other two wrap C `libebur128`
-via cgo. So this implements BS.1770-4 from scratch. See [DESIGN.md](DESIGN.md).
+via cgo. So this implements BS.1770-4 from scratch.
 
 ## Install
 

@@ -1,6 +1,9 @@
 package denoiser
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // Estimator selects the per-bin gain rule. MMSELSA is the default and the
 // recommended choice; the others exist for comparison and tuning.
@@ -94,8 +97,10 @@ type Params struct {
 // validate reports the first out-of-range field wrapped in ErrInvalidConfig.
 func (p Params) validate() error {
 	switch {
-	case p.MaxAttenuationDB < 0:
+	case !(p.MaxAttenuationDB >= 0): // rejects NaN and negatives; +Inf is allowed (a bottomless floor, i.e. full gating)
 		return fmt.Errorf("%w: MaxAttenuationDB must be >= 0, got %g", ErrInvalidConfig, p.MaxAttenuationDB)
+	case math.IsNaN(float64(p.MinPriorSNRDB)) || math.IsInf(float64(p.MinPriorSNRDB), 0):
+		return fmt.Errorf("%w: MinPriorSNRDB must be finite, got %g", ErrInvalidConfig, p.MinPriorSNRDB)
 	case !(p.OverSubtraction > 0):
 		return fmt.Errorf("%w: OverSubtraction must be > 0, got %g", ErrInvalidConfig, p.OverSubtraction)
 	case !(p.SNRSmoothing >= 0 && p.SNRSmoothing < 1):
