@@ -145,3 +145,27 @@ func TestMeterTooShortIsSilent(t *testing.T) {
 		t.Errorf("integrated loudness = %.3f, want -Inf for sub-400ms input", got)
 	}
 }
+
+// NewMeter panics on a non-positive channel count or a sample rate below the
+// supported minimum; the validated top-level API never reaches these, so they
+// are exercised directly here.
+func TestNewMeterPanics(t *testing.T) {
+	cases := []struct {
+		name       string
+		sampleRate int
+		channels   int
+	}{
+		{"non-positive channels", 48000, 0},
+		{"sample rate below minimum", 4000, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("NewMeter(%d, %d) did not panic", c.sampleRate, c.channels)
+				}
+			}()
+			NewMeter(c.sampleRate, c.channels)
+		})
+	}
+}
