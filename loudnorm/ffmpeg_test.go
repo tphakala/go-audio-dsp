@@ -55,7 +55,7 @@ func ffmpegEBUR128(t *testing.T, samples []float64, sampleRate, channels int) (i
 	t.Helper()
 	bin := ffmpegPath(t)
 
-	tmp, err := os.CreateTemp(t.TempDir(), "audionorm-*.f32le")
+	tmp, err := os.CreateTemp(t.TempDir(), "loudnorm-*.f32le")
 	if err != nil {
 		t.Fatal(err)
 	}

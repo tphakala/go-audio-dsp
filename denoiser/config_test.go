@@ -2,6 +2,7 @@ package denoiser
 
 import (
 	"errors"
+	"math"
 	"testing"
 )
 
@@ -50,6 +51,9 @@ func TestConfigInvalid(t *testing.T) {
 		{SampleRate: 48000, FrameSize: 256, HopSize: 256}, // ovl==1: no overlap, periodic Hann cannot reconstruct
 		{SampleRate: 48000, Preset: Preset(99)},
 		{SampleRate: 48000, Params: &Params{MaxAttenuationDB: -1, OverSubtraction: 1, SNRSmoothing: 0.9, TrackWindowSec: 1}},
+		{SampleRate: 48000, Params: &Params{MaxAttenuationDB: float32(math.NaN()), OverSubtraction: 1, SNRSmoothing: 0.9, TrackWindowSec: 1}}, // NaN slips past a bare < 0 check
+		{SampleRate: 48000, Params: &Params{OverSubtraction: 1, SNRSmoothing: 0.9, TrackWindowSec: 1, MinPriorSNRDB: float32(math.NaN())}},
+		{SampleRate: 48000, Params: &Params{OverSubtraction: 1, SNRSmoothing: 0.9, TrackWindowSec: 1, MinPriorSNRDB: float32(math.Inf(1))}},
 		{SampleRate: 48000, Params: &Params{OverSubtraction: 0, SNRSmoothing: 0.9, TrackWindowSec: 1}},
 		{SampleRate: 48000, Params: &Params{OverSubtraction: 1, SNRSmoothing: 1, TrackWindowSec: 1}},
 		{SampleRate: 48000, Params: &Params{OverSubtraction: 1, SNRSmoothing: 0.9, FreqSmoothBins: -1, TrackWindowSec: 1}},

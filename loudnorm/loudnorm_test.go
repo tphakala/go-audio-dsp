@@ -137,6 +137,24 @@ func TestNormalizeValidation(t *testing.T) {
 			_, err := NormalizeFloat32([]float32{0, 0, 0}, opts)
 			return err
 		},
+		"non-positive channels": func() error {
+			o := opts
+			o.Channels = 0
+			_, err := NormalizeFloat32([]float32{0, 0}, o)
+			return err
+		},
+		"NaN target": func() error {
+			o := opts
+			o.TargetLUFS = math.NaN()
+			_, err := NormalizeFloat32([]float32{0, 0}, o)
+			return err
+		},
+		"non-finite true-peak ceiling": func() error {
+			o := opts
+			o.TruePeakDBTP = math.Inf(-1)
+			_, err := NormalizeFloat32([]float32{0, 0}, o)
+			return err
+		},
 		"zero sample rate": func() error {
 			o := opts
 			o.SampleRate = 0

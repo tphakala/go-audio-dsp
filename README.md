@@ -28,7 +28,7 @@ Import the package you need:
 import "github.com/tphakala/go-audio-dsp/loudnorm"
 ```
 
-See each package's README for usage: [`loudnorm`](loudnorm/README.md).
+See each package's README for usage: [`loudnorm`](loudnorm/README.md) and [`denoiser`](denoiser/README.md).
 
 ## Design goals
 

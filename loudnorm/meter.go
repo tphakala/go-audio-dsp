@@ -21,8 +21,9 @@ const (
 	minSampleRate = 8000
 )
 
-// Gating is performed in the energy domain (float32 comparisons) to avoid a
-// per-block log; only the final integrated value is converted to dB.
+// Gating is performed in the energy domain (comparing weighted energies, not
+// dB) to avoid a per-block log; only the final integrated value is converted
+// to dB.
 var (
 	// absGateEnergy is the absolute -70 LUFS gate as a weighted-energy threshold:
 	// a block passes when z > absGateEnergy, equivalent to
@@ -60,8 +61,8 @@ func (s *biquadState) resetState() { s.x1, s.x2, s.y1, s.y2 = 0, 0, 0, 0 }
 // Meter accumulates K-weighted energy from interleaved PCM and computes the
 // BS.1770-4 gated integrated loudness. Feed all samples with AddFloat64/Float32/
 // Int16 (one or many calls), then read IntegratedLoudness. A Meter is not safe
-// for concurrent use. The numeric path is float32; the returned loudness and
-// true-peak values are float64.
+// for concurrent use. The per-sample numeric path is float32; the gate
+// summation and the returned loudness and true-peak values are float64.
 type Meter struct {
 	sampleRate   int
 	channels     int
@@ -97,10 +98,10 @@ func subBlockSamples(sampleRate int) int {
 // that.
 func NewMeter(sampleRate, channels int) *Meter {
 	if channels <= 0 {
-		panic("audionorm: NewMeter requires positive channels")
+		panic("loudnorm: NewMeter requires positive channels")
 	}
 	if sampleRate < minSampleRate {
-		panic("audionorm: NewMeter requires sample rate >= 8000 Hz")
+		panic("loudnorm: NewMeter requires sample rate >= 8000 Hz")
 	}
 	s1, s2 := kWeightingStages(float64(sampleRate))
 	m := &Meter{
@@ -273,8 +274,9 @@ func (m *Meter) blockEnergies() []float32 {
 
 // IntegratedLoudness returns the BS.1770-4 gated integrated loudness in LUFS.
 // It returns negative infinity when the input is shorter than one 400 ms block
-// or entirely below the absolute gate (silence). Gating runs in the energy
-// domain (float32); only the final dB conversion uses float64.
+// or entirely below the absolute gate (silence). Per-block energies are
+// computed in float32; the gate sums accumulate in float64 so precision holds
+// on very long inputs, with the final dB conversion in float64.
 func (m *Meter) IntegratedLoudness() float64 {
 	z := m.blockEnergies()
 	if len(z) == 0 {
@@ -282,11 +284,11 @@ func (m *Meter) IntegratedLoudness() float64 {
 	}
 
 	// Absolute gate at -70 LUFS (z > absGateEnergy).
-	var sumAbs float32
+	var sumAbs float64
 	var cntAbs int
 	for _, zj := range z {
 		if zj > absGateEnergy {
-			sumAbs += zj
+			sumAbs += float64(zj)
 			cntAbs++
 		}
 	}
@@ -295,19 +297,19 @@ func (m *Meter) IntegratedLoudness() float64 {
 	}
 
 	// Relative gate: 10 LU below the absolute-gated mean (z > 0.1 * meanAbs).
-	relGate := (sumAbs / float32(cntAbs)) * relGateEnergyFactor
-	var sumRel float32
+	relGate := (sumAbs / float64(cntAbs)) * float64(relGateEnergyFactor)
+	var sumRel float64
 	var cntRel int
 	for _, zj := range z {
-		if zj > absGateEnergy && zj > relGate {
-			sumRel += zj
+		if zj > absGateEnergy && float64(zj) > relGate {
+			sumRel += float64(zj)
 			cntRel++
 		}
 	}
 	if cntRel == 0 {
 		return math.Inf(-1)
 	}
-	return loudnessOffset + 10*math.Log10(float64(sumRel)/float64(cntRel))
+	return loudnessOffset + 10*math.Log10(sumRel/float64(cntRel))
 }
 
 // TruePeakDBTP returns the maximum true peak across all channels in dBTP (full
