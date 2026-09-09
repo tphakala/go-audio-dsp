@@ -216,3 +216,24 @@ func TestNormalizeValidationMessages(t *testing.T) {
 		}
 	}
 }
+
+// TestMeterPoolFor checks that meters are pooled per config: the same config
+// resolves to one pool and distinct configs resolve to distinct pools, so a
+// mixed-config caller never pops and discards another config's meter.
+func TestMeterPoolFor(t *testing.T) {
+	p1 := meterPoolFor(meterKey{48000, 1})
+	if meterPoolFor(meterKey{48000, 1}) != p1 {
+		t.Error("same config should resolve to the same pool")
+	}
+	if meterPoolFor(meterKey{44100, 2}) == p1 {
+		t.Error("distinct configs should resolve to distinct pools")
+	}
+
+	// A meter released under one config is never handed to another config.
+	releaseMeter(NewMeter(44100, 2))
+	m := acquireMeter(48000, 1)
+	defer releaseMeter(m)
+	if m.sampleRate != 48000 || m.channels != 1 {
+		t.Fatalf("acquireMeter(48000, 1) returned a %d/%d meter", m.sampleRate, m.channels)
+	}
+}

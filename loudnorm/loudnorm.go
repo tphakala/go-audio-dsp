@@ -23,25 +23,41 @@ import (
 	"sync"
 )
 
-// meterPool reuses Meters across the convenience functions so repeated calls at
-// a fixed sample rate and channel count are allocation-free in steady state.
-var meterPool sync.Pool
+// meterKey identifies a pooled Meter by the config it was built for.
+type meterKey struct{ sampleRate, channels int }
+
+// meterPools holds one sync.Pool per config so repeated calls at a fixed sample
+// rate and channel count are allocation-free in steady state. Pooling per
+// config (rather than a single shared pool) means a call at one config never
+// pops and discards a meter built for another: under concurrent mixed-config
+// use a single shared pool would thrash, since every Get could return a
+// mismatch and force a fresh allocation.
+var meterPools sync.Map // meterKey -> *sync.Pool
+
+// meterPoolFor returns the pool for a config, creating it on first use.
+func meterPoolFor(k meterKey) *sync.Pool {
+	if p, ok := meterPools.Load(k); ok {
+		return p.(*sync.Pool)
+	}
+	p, _ := meterPools.LoadOrStore(k, new(sync.Pool))
+	return p.(*sync.Pool)
+}
 
 // acquireMeter returns a reset meter for the given config, reusing a pooled one
-// when its config matches. A pooled meter with a different config is discarded
-// (left for GC) and a fresh one is built.
+// when available and building a fresh one otherwise.
 func acquireMeter(sampleRate, channels int) *Meter {
-	if v := meterPool.Get(); v != nil {
+	if v := meterPoolFor(meterKey{sampleRate, channels}).Get(); v != nil {
 		m := v.(*Meter)
-		if m.sampleRate == sampleRate && m.channels == channels {
-			m.Reset()
-			return m
-		}
+		m.Reset()
+		return m
 	}
 	return NewMeter(sampleRate, channels)
 }
 
-func releaseMeter(m *Meter) { meterPool.Put(m) }
+// releaseMeter returns m to the pool for its config.
+func releaseMeter(m *Meter) {
+	meterPoolFor(meterKey{m.sampleRate, m.channels}).Put(m)
+}
 
 // Default normalization parameters. The target and ceiling are the EBU R 128
 // reference values (-23 LUFS programme loudness, -1 dBTP maximum true peak).
