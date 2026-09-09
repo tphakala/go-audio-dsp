@@ -186,6 +186,9 @@ func PlanGain(meas Measurement, opts Options) Result {
 	return res
 }
 
+// validateDims reports whether n interleaved samples at the given sample rate
+// and channel count form a valid buffer for the meter, returning a descriptive
+// error otherwise.
 func validateDims(sampleRate, channels, n int) error {
 	switch {
 	case sampleRate < minSampleRate:
@@ -198,6 +201,8 @@ func validateDims(sampleRate, channels, n int) error {
 	return nil
 }
 
+// validate checks the options against a buffer of n interleaved samples,
+// returning the first invalid field as a descriptive error.
 func (o Options) validate(n int) error {
 	if err := validateDims(o.SampleRate, o.Channels, n); err != nil {
 		return err

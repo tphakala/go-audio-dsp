@@ -39,6 +39,8 @@ func TestConfigDefaults(t *testing.T) {
 	}
 }
 
+// TestConfigInvalid checks that resolve rejects malformed Config and Params
+// values, including NaN and non-finite knobs, with ErrInvalidConfig.
 func TestConfigInvalid(t *testing.T) {
 	bad := []Config{
 		{},
@@ -85,5 +87,21 @@ func TestPresetsAreOrdered(t *testing.T) {
 	}
 	if Estimator(0) != MMSELSA {
 		t.Error("zero Estimator must be MMSELSA")
+	}
+}
+
+// TestMaxAttenuationInfAccepted documents that a +Inf MaxAttenuationDB is a
+// valid "bottomless" gain floor (full gating). Unlike a NaN MaxAttenuationDB or
+// a non-finite MinPriorSNRDB, which resolve rejects, +Inf here is intentional.
+func TestMaxAttenuationInfAccepted(t *testing.T) {
+	cfg := Config{SampleRate: 48000, Params: &Params{
+		MaxAttenuationDB: float32(math.Inf(1)),
+		OverSubtraction:  1,
+		SNRSmoothing:     0.9,
+		MinPriorSNRDB:    -18,
+		TrackWindowSec:   1,
+	}}
+	if _, _, err := cfg.resolve(); err != nil {
+		t.Fatalf("+Inf MaxAttenuationDB should be accepted, got %v", err)
 	}
 }

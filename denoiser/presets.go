@@ -97,7 +97,7 @@ type Params struct {
 // validate reports the first out-of-range field wrapped in ErrInvalidConfig.
 func (p Params) validate() error {
 	switch {
-	case !(p.MaxAttenuationDB >= 0): // rejects NaN as well as negatives
+	case !(p.MaxAttenuationDB >= 0): // rejects NaN and negatives; +Inf is allowed (a bottomless floor, i.e. full gating)
 		return fmt.Errorf("%w: MaxAttenuationDB must be >= 0, got %g", ErrInvalidConfig, p.MaxAttenuationDB)
 	case math.IsNaN(float64(p.MinPriorSNRDB)) || math.IsInf(float64(p.MinPriorSNRDB), 0):
 		return fmt.Errorf("%w: MinPriorSNRDB must be finite, got %g", ErrInvalidConfig, p.MinPriorSNRDB)

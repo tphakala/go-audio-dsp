@@ -2,6 +2,7 @@ package loudnorm
 
 import (
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -129,30 +130,14 @@ func TestMeasureRejectsTooLowSampleRate(t *testing.T) {
 	}
 }
 
+// TestNormalizeValidation checks that NormalizeFloat32 rejects invalid options
+// and buffer dimensions.
 func TestNormalizeValidation(t *testing.T) {
 	opts := DefaultOptions()
 	opts.SampleRate, opts.Channels = 48000, 2
 	cases := map[string]func() error{
 		"length not multiple of channels": func() error {
 			_, err := NormalizeFloat32([]float32{0, 0, 0}, opts)
-			return err
-		},
-		"non-positive channels": func() error {
-			o := opts
-			o.Channels = 0
-			_, err := NormalizeFloat32([]float32{0, 0}, o)
-			return err
-		},
-		"NaN target": func() error {
-			o := opts
-			o.TargetLUFS = math.NaN()
-			_, err := NormalizeFloat32([]float32{0, 0}, o)
-			return err
-		},
-		"non-finite true-peak ceiling": func() error {
-			o := opts
-			o.TruePeakDBTP = math.Inf(-1)
-			_, err := NormalizeFloat32([]float32{0, 0}, o)
 			return err
 		},
 		"zero sample rate": func() error {
@@ -195,6 +180,32 @@ func TestNormalizeValidation(t *testing.T) {
 	for name, fn := range cases {
 		if err := fn(); err == nil {
 			t.Errorf("%s: expected error, got nil", name)
+		}
+	}
+}
+
+// TestNormalizeValidationMessages pins each newly covered validation path to its
+// specific error. loudnorm exposes no sentinel errors, so it matches on the
+// message text; this guards against a future reorder routing an input to the
+// wrong branch.
+func TestNormalizeValidationMessages(t *testing.T) {
+	opts := DefaultOptions()
+	opts.SampleRate, opts.Channels = 48000, 2
+	cases := []struct {
+		name   string
+		mutate func(*Options)
+		want   string
+	}{
+		{"non-positive channels", func(o *Options) { o.Channels = 0 }, "channels must be positive"},
+		{"NaN target", func(o *Options) { o.TargetLUFS = math.NaN() }, "target loudness must be finite"},
+		{"non-finite true-peak", func(o *Options) { o.TruePeakDBTP = math.Inf(-1) }, "true-peak ceiling must be finite"},
+	}
+	for _, c := range cases {
+		o := opts
+		c.mutate(&o)
+		_, err := NormalizeFloat32([]float32{0, 0}, o)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want error containing %q", c.name, err, c.want)
 		}
 	}
 }
