@@ -191,14 +191,21 @@ func TestNormalizeValidation(t *testing.T) {
 func TestNormalizeValidationMessages(t *testing.T) {
 	opts := DefaultOptions()
 	opts.SampleRate, opts.Channels = 48000, 2
+	const (
+		tgtFinite = "target loudness must be finite"
+		tpFinite  = "true-peak ceiling must be finite"
+	)
 	cases := []struct {
 		name   string
 		mutate func(*Options)
 		want   string
 	}{
 		{"non-positive channels", func(o *Options) { o.Channels = 0 }, "channels must be positive"},
-		{"NaN target", func(o *Options) { o.TargetLUFS = math.NaN() }, "target loudness must be finite"},
-		{"non-finite true-peak", func(o *Options) { o.TruePeakDBTP = math.Inf(-1) }, "true-peak ceiling must be finite"},
+		{"NaN target", func(o *Options) { o.TargetLUFS = math.NaN() }, tgtFinite},
+		{"+Inf target", func(o *Options) { o.TargetLUFS = math.Inf(1) }, tgtFinite},
+		{"NaN true-peak", func(o *Options) { o.TruePeakDBTP = math.NaN() }, tpFinite},
+		{"-Inf true-peak", func(o *Options) { o.TruePeakDBTP = math.Inf(-1) }, tpFinite},
+		{"+Inf true-peak", func(o *Options) { o.TruePeakDBTP = math.Inf(1) }, tpFinite},
 	}
 	for _, c := range cases {
 		o := opts
