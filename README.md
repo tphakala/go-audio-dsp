@@ -12,9 +12,13 @@ via [`github.com/tphakala/simd`](https://github.com/tphakala/simd).
 | ------- | ------ | ------------ |
 | [`loudnorm`](loudnorm/) | stable | EBU R 128 / ITU-R BS.1770-4 loudness normalization of in-memory PCM (LUFS measurement, true-peak limiting, linear gain). |
 | [`denoiser`](denoiser/) | beta | Spectral audio denoiser (STFT, measured or adaptive noise profile, Wiener / MMSE-LSA gain, overlap-add reconstruction). Replaces ffmpeg `afftdn` on the BirdNET-Go clip path. |
+| [`equalizer`](equalizer/) | beta | RBJ biquad filter chain (low/high/all-pass, band-pass, notch, shelves, peaking) as a streaming block, with frequency-response output for a UI curve. |
+| [`gain`](gain/) | beta | Fixed decibel gain as a streaming block, with saturating int16 entry points. |
+| [`pcm`](pcm/) | stable | int16 <-> float32 conversion at the chain edges (the transport/processing boundary). |
 
-More processors may follow (high-pass, gain, and related building blocks) as the
-need arises.
+The root package defines the streaming `Processor` contract the streaming blocks
+(denoiser, equalizer, gain) share, so a consumer can chain them over reused
+buffers. More processors may follow as the need arises.
 
 ## Install
 
@@ -28,7 +32,7 @@ Import the package you need:
 import "github.com/tphakala/go-audio-dsp/loudnorm"
 ```
 
-See each package's README for usage: [`loudnorm`](loudnorm/README.md) and [`denoiser`](denoiser/README.md).
+See each package's README for usage: [`loudnorm`](loudnorm/README.md), [`denoiser`](denoiser/README.md), [`equalizer`](equalizer/README.md) and [`gain`](gain/README.md). A runnable end-to-end chain is in [`examples/streaming`](examples/streaming/).
 
 ## Design goals
 
