@@ -31,6 +31,7 @@ func TestZeroAllocConversions(t *testing.T) {
 		{"Float32ToInt16", func() { Float32ToInt16(i16, f) }},
 		{"BytesToFloat32", func() { _, _ = BytesToFloat32(f, b) }},
 		{"Float32ToBytes", func() { _, _ = Float32ToBytes(b, f) }},
+		{"ScaleInt16", func() { ScaleInt16(i16, 2.0) }},
 	}
 	for _, c := range checks {
 		if a := testing.AllocsPerRun(50, c.fn); a != 0 {
