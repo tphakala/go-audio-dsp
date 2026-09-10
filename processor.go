@@ -1,10 +1,10 @@
 package dsp
 
 // Processor is the streaming contract every audio block satisfies: a stateful
-// transform that consumes float32 PCM in arbitrary-size chunks and writes the
-// samples that have become final into a caller-owned output buffer, allocating
-// nothing in steady state. Output is aligned sample-for-sample with input and
-// lags it by Latency samples.
+// transform that consumes single-channel (mono) float32 PCM in arbitrary-size
+// chunks and writes the samples that have become final into a caller-owned
+// output buffer, allocating nothing in steady state. Output is aligned
+// sample-for-sample with input and lags it by Latency samples.
 //
 // A Processor serves one stream at a time and is not safe for concurrent use;
 // run one instance per route and reuse it for a new stream by calling Reset.

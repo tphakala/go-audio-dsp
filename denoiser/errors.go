@@ -9,8 +9,10 @@ import (
 // Sentinel errors. Wrapped errors can be tested with errors.Is.
 var (
 	// ErrInvalidConfig reports a Config that New cannot honour; the wrapped
-	// message names the offending field.
-	ErrInvalidConfig = errors.New("denoiser: invalid config")
+	// message names the offending field. It is the shared dsp.ErrInvalidConfig
+	// so a caller can test any block's construction failure with a single
+	// errors.Is.
+	ErrInvalidConfig = dsp.ErrInvalidConfig
 	// ErrBufferTooSmall reports an output slice shorter than the samples a
 	// ProcessInto or FlushInto call would emit; nothing is consumed. It is the
 	// shared dsp.ErrBufferTooSmall so a caller chaining blocks can test every

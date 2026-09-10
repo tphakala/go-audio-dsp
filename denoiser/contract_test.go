@@ -80,3 +80,16 @@ func TestErrBufferTooSmallIsShared(t *testing.T) {
 		t.Fatalf("ProcessInto err = %v, want denoiser.ErrBufferTooSmall", err)
 	}
 }
+
+// TestErrInvalidConfigIsShared checks the denoiser's construction error chains
+// to the shared dsp sentinel, so a consumer can test any block's config failure
+// uniformly.
+func TestErrInvalidConfigIsShared(t *testing.T) {
+	_, err := New(Config{SampleRate: 0}) // SampleRate must be > 0
+	if !errors.Is(err, dsp.ErrInvalidConfig) {
+		t.Fatalf("New(bad config) err = %v, want dsp.ErrInvalidConfig", err)
+	}
+	if !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("New(bad config) err = %v, want denoiser.ErrInvalidConfig", err)
+	}
+}
