@@ -164,6 +164,18 @@ func windowLevelDB(x []float32, s int) float64 {
 	return 10 * math.Log10(ms)
 }
 
+// assertFinite fails if x holds a NaN or Inf sample. A non-finite sample makes
+// spanRMSDB return NaN, and every ordered metric comparison against NaN is false,
+// so the A/B bars would pass on invalid audio; reject it before measuring.
+func assertFinite(t *testing.T, what string, x []float32) {
+	t.Helper()
+	for i, v := range x {
+		if f := float64(v); math.IsNaN(f) || math.IsInf(f, 0) {
+			t.Fatalf("%s has a non-finite sample at index %d (%v)", what, i, v)
+		}
+	}
+}
+
 func TestCorpusAgainstAfftdn(t *testing.T) {
 	bin := ffmpegPath(t) // skips when ffmpeg is absent
 	dir := corpusDir()
@@ -206,8 +218,10 @@ func TestCorpusAgainstAfftdn(t *testing.T) {
 				if len(ours) != len(in) {
 					t.Fatalf("denoised length %d, want %d (offline API must stay sample-aligned)", len(ours), len(in))
 				}
+				assertFinite(t, "denoised output", ours)
 				nrnf := afftdnPresets[preset]
 				ref := shifted(runAfftdn(t, in, corpusSampleRate, nrnf[0], nrnf[1]), lags[preset])
+				assertFinite(t, "afftdn reference", ref)
 
 				oursQuiet := spanRMSDB(ours, quiet)
 				redOurs := inQuiet - oursQuiet
