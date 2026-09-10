@@ -26,11 +26,11 @@ func TestConfigDefaults(t *testing.T) {
 	if rc.FrameSize != 1024 || rc.HopSize != 256 {
 		t.Fatalf("frame/hop = %d/%d, want 1024/256", rc.FrameSize, rc.HopSize)
 	}
-	if p != Medium.Params() {
+	if p != ParamsFor(Medium) {
 		t.Fatalf("params = %+v, want Medium", p)
 	}
 	custom := Params{MaxAttenuationDB: 3, OverSubtraction: 1, SNRSmoothing: 0.9, MinPriorSNRDB: -10, Estimator: Wiener, TrackWindowSec: 1}
-	_, p, err = Config{SampleRate: 16000, Preset: Heavy, Params: &custom}.resolve()
+	_, p, err = Config{SampleRate: 16000, Strength: Heavy, Params: &custom}.resolve()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestConfigInvalid(t *testing.T) {
 		{SampleRate: 48000, HopSize: 2048},
 		{SampleRate: 48000, HopSize: -1},
 		{SampleRate: 48000, FrameSize: 256, HopSize: 256}, // ovl==1: no overlap, periodic Hann cannot reconstruct
-		{SampleRate: 48000, Preset: Preset(99)},
+		{SampleRate: 48000, Strength: Strength(99)},
 		{SampleRate: 48000, Params: &Params{MaxAttenuationDB: -1, OverSubtraction: 1, SNRSmoothing: 0.9, TrackWindowSec: 1}},
 		{SampleRate: 48000, Params: &Params{MaxAttenuationDB: float32(math.NaN()), OverSubtraction: 1, SNRSmoothing: 0.9, TrackWindowSec: 1}}, // NaN slips past a bare < 0 check
 		{SampleRate: 48000, Params: &Params{OverSubtraction: 1, SNRSmoothing: 0.9, TrackWindowSec: 1, MinPriorSNRDB: float32(math.NaN())}},
@@ -69,21 +69,21 @@ func TestConfigInvalid(t *testing.T) {
 	}
 }
 
-func TestPresetsAreOrdered(t *testing.T) {
-	l, m, h := Light.Params(), Medium.Params(), Heavy.Params()
+func TestStrengthsAreOrdered(t *testing.T) {
+	l, m, h := ParamsFor(Light), ParamsFor(Medium), ParamsFor(Heavy)
 	if !(l.MaxAttenuationDB < m.MaxAttenuationDB && m.MaxAttenuationDB < h.MaxAttenuationDB) {
 		t.Errorf("MaxAttenuationDB not increasing: %g %g %g", l.MaxAttenuationDB, m.MaxAttenuationDB, h.MaxAttenuationDB)
 	}
-	for _, p := range []Preset{Light, Medium, Heavy} {
-		if err := p.Params().validate(); err != nil {
+	for _, p := range []Strength{Light, Medium, Heavy} {
+		if err := ParamsFor(p).validate(); err != nil {
 			t.Errorf("%v: %v", p, err)
 		}
 		if p.String() == "" {
 			t.Errorf("%d has empty String()", p)
 		}
 	}
-	if Preset(0) != Medium {
-		t.Error("zero Preset must be Medium")
+	if Strength(0) != Medium {
+		t.Error("zero Strength must be Medium")
 	}
 	if Estimator(0) != MMSELSA {
 		t.Error("zero Estimator must be MMSELSA")

@@ -1,6 +1,10 @@
 package loudnorm
 
-import "math"
+import (
+	"math"
+
+	dsp "github.com/tphakala/go-audio-dsp"
+)
 
 // biquad is a second-order IIR section in transposed-direct-form-II-ready
 // normalized coefficients. The difference equation is:
@@ -38,7 +42,7 @@ func kWeightingStages(sampleRate float64) (stage1, stage2 biquad) {
 // kHighShelf builds stage 1, the high-frequency shelving filter.
 func kHighShelf(fs float64) biquad {
 	K := math.Tan(math.Pi * kStage1F0 / fs)
-	Vh := math.Pow(10.0, kStage1GdB/20.0)
+	Vh := dsp.FactorFromDB(kStage1GdB)
 	Vb := math.Pow(Vh, kStage1VbEx)
 	K2 := K * K
 	a0 := 1.0 + K/kStage1Q + K2

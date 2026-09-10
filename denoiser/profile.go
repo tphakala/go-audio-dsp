@@ -146,6 +146,19 @@ func (d *Denoiser) SetNoiseProfile(p *NoiseProfile) error {
 	return nil
 }
 
+// LearnNoise measures a noise profile from a noise-only excerpt and makes it the
+// active noise model, the two-step NoiseProfileFromSamples then SetNoiseProfile
+// path in one call. It satisfies the NoiseLearner capability interface, so a
+// consumer holding a dsp.Processor can learn noise without depending on the
+// concrete type. samples must be at least FrameSize long.
+func (d *Denoiser) LearnNoise(samples []float32) error {
+	p, err := d.NoiseProfileFromSamples(samples)
+	if err != nil {
+		return err
+	}
+	return d.SetNoiseProfile(p)
+}
+
 // NoiseProfile returns the profile set with SetNoiseProfile, or nil when the
 // estimate is adaptive.
 func (d *Denoiser) NoiseProfile() *NoiseProfile { return d.profile }

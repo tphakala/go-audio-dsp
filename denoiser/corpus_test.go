@@ -18,7 +18,7 @@ import (
 // TestCorpusAgainstAfftdn is the real-corpus A/B comparison behind the Taskfile
 // `ab` target. It runs every recording in the corpus through the Go denoiser and
 // through ffmpeg's afftdn (the BirdNET-Go baseline this library replaces) at each
-// preset, and compares two reference-free metrics per clip per preset:
+// strength, and compares two reference-free metrics per clip per strength:
 //
 //   - noise reduction: the level drop in the clip's quietest windows (its noise
 //     floor). Higher is better; ours should match or beat afftdn.
@@ -64,7 +64,7 @@ const (
 	corpusMaxLag = 4096
 	// silenceFloorDB treats a pooled level at or below this as silence: spanRMSDB
 	// returns a -200 dBFS sentinel for an all-zero span, and this sits above it
-	// with margin. A preset floors attenuation at MaxAttenuationDB (<= 20 dB), so
+	// with margin. A strength floors attenuation at MaxAttenuationDB (<= 20 dB), so
 	// real output never lands between here and the sentinel.
 	silenceFloorDB = -190.0
 	// abToleranceDB is how far ours may trail afftdn on either metric before the
@@ -119,21 +119,41 @@ func windowMS(x []float32, s int) float64 {
 // every window at least corpusSignalMarginDB above the pooled noise floor. ok is
 // false when the floor is silent or no window rises above the signal threshold
 // (nothing to measure).
+//
+// Exact digital-silence windows (recorder pre-roll, a dropout: a run of exact
+// zeros) are excluded from the noise-floor candidates. Without that a long run
+// of zeros fills the quietest set and pegs the estimated floor to the -200 dB
+// silence sentinel, skipping an otherwise usable clip.
 func classifyWindows(x []float32) (quiet, signal [][2]int, ok bool) {
 	nWin := len(x) / corpusWin
 	if nWin < 1 {
 		return nil, nil, false
 	}
-	starts := make([]int, nWin)
-	for w := range starts {
-		starts[w] = w * corpusWin
+	// Per-window mean-square, computed once and reused for both the quiet-set
+	// sort and the signal-threshold pass. Recomputing it inside the sort
+	// comparator (and again per window below) made classification do O(n log n)
+	// passes over the audio.
+	ms := make([]float64, nWin)
+	for w := range ms {
+		ms[w] = windowMS(x, w*corpusWin)
 	}
-	slices.SortStableFunc(starts, func(a, b int) int {
-		return cmp.Compare(windowMS(x, a), windowMS(x, b))
+	// Noise-floor candidates are the non-silent windows, ordered quietest first.
+	order := make([]int, 0, nWin)
+	for w := range ms {
+		if ms[w] > 0 {
+			order = append(order, w)
+		}
+	}
+	if len(order) == 0 {
+		return nil, nil, false // clip is entirely digital silence
+	}
+	slices.SortStableFunc(order, func(a, b int) int {
+		return cmp.Compare(ms[a], ms[b])
 	})
-	nq := max(1, int(float64(nWin)*corpusQuietFrac))
-	for i := range nq {
-		quiet = append(quiet, [2]int{starts[i], starts[i] + corpusWin})
+	nq := max(1, int(float64(len(order))*corpusQuietFrac))
+	for _, w := range order[:nq] {
+		s := w * corpusWin
+		quiet = append(quiet, [2]int{s, s + corpusWin})
 	}
 	floor := spanRMSDB(x, quiet)
 	if floor <= silenceFloorDB { // silent clip: at/below the -200 sentinel, nothing to reduce
@@ -141,8 +161,8 @@ func classifyWindows(x []float32) (quiet, signal [][2]int, ok bool) {
 	}
 	threshold := floor + corpusSignalMarginDB
 	for w := range nWin {
-		s := w * corpusWin
-		if windowLevelDB(x, s) > threshold {
+		if windowLevelFromMS(ms[w]) > threshold {
+			s := w * corpusWin
 			signal = append(signal, [2]int{s, s + corpusWin})
 		}
 	}
@@ -152,12 +172,11 @@ func classifyWindows(x []float32) (quiet, signal [][2]int, ok bool) {
 	return quiet, signal, true
 }
 
-// windowLevelDB is the window's level in the same dB scale spanRMSDB uses
-// (10*log10 of the mean square). A fully silent window returns the -200 sentinel,
-// which sits below any real floor+margin, so it is correctly excluded from the
-// signal set.
-func windowLevelDB(x []float32, s int) float64 {
-	ms := windowMS(x, s)
+// windowLevelFromMS is a window's level in the same dB scale spanRMSDB uses
+// (10*log10 of the mean square), from its precomputed mean-square. A fully
+// silent window (ms 0) returns the -200 sentinel, which sits below any real
+// floor+margin, so it is correctly excluded from the signal set.
+func windowLevelFromMS(ms float64) float64 {
 	if ms == 0 {
 		return -200
 	}
@@ -186,7 +205,7 @@ func TestCorpusAgainstAfftdn(t *testing.T) {
 	if len(clips) == 0 {
 		t.Skipf("no *.wav in %s; supply a real-clip corpus there (or set DENOISER_CORPUS_DIR) to run the A/B", dir)
 	}
-	lags := afftdnLags(t) // afftdn's fixed FFT delay per preset, measured once
+	lags := afftdnLags(t) // afftdn's fixed FFT delay per strength, measured once
 
 	measured := 0
 	for _, clip := range clips {
@@ -209,9 +228,9 @@ func TestCorpusAgainstAfftdn(t *testing.T) {
 		measured++
 		inQuiet := spanRMSDB(in, quiet)
 		inSignal := spanRMSDB(in, signal)
-		for _, preset := range []Preset{Light, Medium, Heavy} {
-			t.Run(fmt.Sprintf("%s/%v", name, preset), func(t *testing.T) {
-				ours, err := Denoise(in, Config{SampleRate: corpusSampleRate, Preset: preset})
+		for _, strength := range []Strength{Light, Medium, Heavy} {
+			t.Run(fmt.Sprintf("%s/%v", name, strength), func(t *testing.T) {
+				ours, err := Denoise(in, Config{SampleRate: corpusSampleRate, Strength: strength})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -219,8 +238,8 @@ func TestCorpusAgainstAfftdn(t *testing.T) {
 					t.Fatalf("denoised length %d, want %d (offline API must stay sample-aligned)", len(ours), len(in))
 				}
 				assertFinite(t, "denoised output", ours)
-				nrnf := afftdnPresets[preset]
-				ref := shifted(runAfftdn(t, in, corpusSampleRate, nrnf[0], nrnf[1]), lags[preset])
+				nrnf := afftdnByStrength[strength]
+				ref := shifted(runAfftdn(t, in, corpusSampleRate, nrnf[0], nrnf[1]), lags[strength])
 				assertFinite(t, "afftdn reference", ref)
 
 				oursQuiet := spanRMSDB(ours, quiet)
@@ -229,7 +248,7 @@ func TestCorpusAgainstAfftdn(t *testing.T) {
 				dropOurs := inSignal - spanRMSDB(ours, signal)
 				dropRef := inSignal - spanRMSDB(ref, signal)
 				t.Logf("noise reduction ours %.1f / afftdn %.1f dB; signal-level drop ours %.1f / afftdn %.1f dB (afftdn lag %d)",
-					redOurs, redRef, dropOurs, dropRef, lags[preset])
+					redOurs, redRef, dropOurs, dropRef, lags[strength])
 
 				// Hard, ffmpeg-independent invariants (a real bug, never oracle
 				// drift). The denoiser applies per-bin gain <= 1, so it cannot
@@ -264,24 +283,24 @@ func TestCorpusAgainstAfftdn(t *testing.T) {
 	}
 }
 
-// afftdnLags measures afftdn's alignment delay per preset once, on an
+// afftdnLags measures afftdn's alignment delay per strength once, on an
 // unambiguous synthetic chirp, and reuses it for every real clip. This rests on a
 // property of STFT overlap-add filters, not on afftdn's internals: their group
 // delay is set by the window and hop in samples, not by the signal, so a delay
 // measured at corpusSampleRate transfers to any clip decoded at that rate. It is
 // reasoned from how such filters work, not measured against afftdn's source;
-// measuring per preset costs nothing and covers any preset-dependent latency.
+// measuring per strength costs nothing and covers any strength-dependent latency.
 // Cross-correlating a real clip's loudest region directly would risk cycle-
 // slipping on a tonal call (a periodic waveform correlates at any whole period);
 // the 2-6 kHz chirp of makeSynthClip peaks sharply instead.
-func afftdnLags(t *testing.T) map[Preset]int {
+func afftdnLags(t *testing.T) map[Strength]int {
 	t.Helper()
 	clip := makeSynthClip(corpusSampleRate, -40, -20, false, 11)
-	lags := make(map[Preset]int, 3)
-	for _, preset := range []Preset{Light, Medium, Heavy} {
-		nrnf := afftdnPresets[preset]
+	lags := make(map[Strength]int, 3)
+	for _, strength := range []Strength{Light, Medium, Heavy} {
+		nrnf := afftdnByStrength[strength]
 		ref := runAfftdn(t, clip.mix, clip.sr, nrnf[0], nrnf[1])
-		lags[preset] = bestLag(clip.mix, ref, clip.signalSpans[1][0], clip.signalSpans[1][1], corpusMaxLag)
+		lags[strength] = bestLag(clip.mix, ref, clip.signalSpans[1][0], clip.signalSpans[1][1], corpusMaxLag)
 	}
 	return lags
 }
