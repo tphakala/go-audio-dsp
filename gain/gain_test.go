@@ -39,6 +39,10 @@ func TestNewRejectsNonFinite(t *testing.T) {
 			t.Errorf("New(%g) err = %v, want dsp.ErrInvalidConfig", dB, err)
 		}
 	}
+	// A finite gain whose linear factor overflows float32 is rejected too.
+	if _, err := New(800); !errors.Is(err, dsp.ErrInvalidConfig) {
+		t.Errorf("New(800) err = %v, want dsp.ErrInvalidConfig (factor overflows float32)", err)
+	}
 	g, err := New(6)
 	if err != nil {
 		t.Fatalf("New(6): %v", err)

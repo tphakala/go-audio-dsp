@@ -10,7 +10,8 @@ import (
 // magnitude in dB and the phase in radians. GainDB is negative infinity only
 // when the magnitude evaluates to exactly zero; a deep notch normally reports a
 // large finite attenuation (a few hundred dB down), not -Inf. PhaseRad is the
-// principal value in (-pi, pi] and is unspecified where the magnitude is zero.
+// argument of the response in [-pi, pi] (the cmplx.Phase convention) and is
+// unspecified where the magnitude is zero.
 type ResponsePoint struct {
 	Hz       float64
 	GainDB   float64

@@ -22,6 +22,9 @@ const sampleRate = 48000
 // denoiser is drained with FlushInto at the end, and the equalizer and gain are
 // zero-latency.
 func RunChain(input []byte, chunkSamples int) ([]byte, error) {
+	if chunkSamples <= 0 {
+		return nil, fmt.Errorf("chunkSamples must be > 0, got %d", chunkSamples)
+	}
 	d, err := denoiser.New(denoiser.Config{SampleRate: sampleRate})
 	if err != nil {
 		return nil, err

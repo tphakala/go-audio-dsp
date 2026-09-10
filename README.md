@@ -14,7 +14,7 @@ via [`github.com/tphakala/simd`](https://github.com/tphakala/simd).
 | [`denoiser`](denoiser/) | beta | Spectral audio denoiser (STFT, measured or adaptive noise profile, Wiener / MMSE-LSA gain, overlap-add reconstruction). Replaces ffmpeg `afftdn` on the BirdNET-Go clip path. |
 | [`equalizer`](equalizer/) | beta | RBJ biquad filter chain (low/high/all-pass, band-pass, notch, shelves, peaking) as a streaming block, with frequency-response output for a UI curve. |
 | [`gain`](gain/) | beta | Fixed decibel gain as a streaming block, with saturating int16 entry points. |
-| [`pcm`](pcm/) | stable | int16 <-> float32 conversion at the chain edges (the transport/processing boundary). |
+| [`pcm`](pcm/) | stable | int16 <-> float32 conversion at the chain edges (the transport/processing boundary), plus an in-place saturating int16 gain (`ScaleInt16`). |
 
 The root package defines the streaming `Processor` contract the streaming blocks
 (denoiser, equalizer, gain) share, so a consumer can chain them over reused

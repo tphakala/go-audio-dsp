@@ -16,4 +16,8 @@
 // lossless round-trip for every int16 value; the reverse direction rounds to
 // nearest (ties to even) and saturates so a full-scale sample never wraps. This
 // matches the measurement convention in the loudnorm package.
+//
+// ScaleInt16 applies a gain to int16 samples in place with that same
+// round-to-even, saturating convention, for callers that scale on the int16
+// transport side without converting to float32.
 package pcm

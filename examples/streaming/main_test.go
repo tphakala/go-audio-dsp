@@ -17,3 +17,14 @@ func TestRunChainPreservesLength(t *testing.T) {
 		}
 	}
 }
+
+// TestRunChainRejectsNonPositiveChunk checks the chunk-size guard: a zero or
+// negative chunk returns an error rather than hanging or panicking.
+func TestRunChainRejectsNonPositiveChunk(t *testing.T) {
+	in := synthClip()
+	for _, chunk := range []int{0, -1} {
+		if _, err := RunChain(in, chunk); err == nil {
+			t.Errorf("RunChain(chunk=%d) returned nil error, want a rejection", chunk)
+		}
+	}
+}
