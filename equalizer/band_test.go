@@ -59,6 +59,7 @@ func TestConfigInvalid(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := New(c.cfg)
 			if !errors.Is(err, dsp.ErrInvalidConfig) {
 				t.Fatalf("New(%s) err = %v, want dsp.ErrInvalidConfig", c.name, err)

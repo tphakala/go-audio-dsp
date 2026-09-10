@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"math"
 	"sync"
+
+	dsp "github.com/tphakala/go-audio-dsp"
 )
 
 // meterKey identifies a pooled Meter by the config it was built for.
@@ -139,7 +141,7 @@ func NormalizeFloat32(pcm []float32, opts Options) (Result, error) {
 	m.AddFloat32(pcm)
 	res := PlanGain(result(m), opts)
 	if res.GainDB != 0 {
-		applyGainFloat32(pcm, math.Pow(10, res.GainDB/20))
+		applyGainFloat32(pcm, dsp.FactorFromDB(res.GainDB))
 	}
 	return res, nil
 }
@@ -156,7 +158,7 @@ func NormalizeInt16(pcm []int16, opts Options) (Result, error) {
 	m.AddInt16(pcm)
 	res := PlanGain(result(m), opts)
 	if res.GainDB != 0 {
-		applyGainInt16(pcm, math.Pow(10, res.GainDB/20))
+		applyGainInt16(pcm, dsp.FactorFromDB(res.GainDB))
 	}
 	return res, nil
 }

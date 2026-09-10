@@ -208,9 +208,9 @@ func TestScalarFloatToInt16MatchesSIMD(t *testing.T) {
 	}
 }
 
-// TestDecodeLEBytesMatchesFastPath verifies the scalar byte-swap decode matches
-// the little-endian reinterpret fast path for arbitrary bytes.
-func TestDecodeLEBytesMatchesFastPath(t *testing.T) {
+// TestBytesToFloat32LEMatchesFastPath verifies the scalar byte-swap decode
+// matches the little-endian reinterpret fast path for arbitrary bytes.
+func TestBytesToFloat32LEMatchesFastPath(t *testing.T) {
 	src := make([]byte, 512)
 	for i := range src {
 		src[i] = byte(i*37 + 11)
@@ -218,16 +218,16 @@ func TestDecodeLEBytesMatchesFastPath(t *testing.T) {
 	fast := make([]float32, len(src)/2)
 	Int16ToFloat32(fast, bytesAsInt16(src))
 	scalar := make([]float32, len(src)/2)
-	decodeLEBytes(scalar, src)
+	bytesToFloat32LE(scalar, src)
 	for i := range fast {
 		if fast[i] != scalar[i] {
 			t.Fatalf("sample %d: fast %v != scalar %v", i, fast[i], scalar[i])
 		}
 	}
-	// And encodeLEBytes is the inverse of decodeLEBytes for exactly-represented
-	// values (whole int16 round-trip through the byte forms).
+	// And float32ToBytesLE is the inverse of bytesToFloat32LE for
+	// exactly-represented values (whole int16 round-trip through the byte forms).
 	back := make([]byte, len(src))
-	encodeLEBytes(back, scalar)
+	float32ToBytesLE(back, scalar)
 	for i := range src {
 		if back[i] != src[i] {
 			t.Fatalf("byte %d: encode(decode) %#x != %#x", i, back[i], src[i])

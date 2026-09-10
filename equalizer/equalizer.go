@@ -20,12 +20,12 @@ func New(cfg Config) (*Equalizer, error) {
 	if cfg.SampleRate <= 0 {
 		return nil, fmt.Errorf("%w: SampleRate must be > 0, got %d", ErrInvalidConfig, cfg.SampleRate)
 	}
-	type plan struct {
-		c      coeffs
-		passes int
-	}
-	plans := make([]plan, 0, len(cfg.Bands))
-	total := 0
+	// One section per pass. Pre-size to the band count, which is the exact total
+	// for the common single-pass-per-band case, and let append grow it for a band
+	// that cascades more passes. newCoeffs validates Passes (into [0, maxPasses])
+	// before the inner loop, so the cascade is built in a single validation pass
+	// with no intermediate plan slice.
+	sections := make([]section, 0, len(cfg.Bands))
 	for i := range cfg.Bands {
 		b := cfg.Bands[i]
 		c, err := newCoeffs(b, cfg.SampleRate)
@@ -36,13 +36,8 @@ func New(cfg Config) (*Equalizer, error) {
 		if passes == 0 {
 			passes = 1
 		}
-		plans = append(plans, plan{c: c, passes: passes})
-		total += passes
-	}
-	sections := make([]section, 0, total)
-	for _, p := range plans {
-		for range p.passes {
-			sections = append(sections, section{c: p.c})
+		for range passes {
+			sections = append(sections, section{c: c})
 		}
 	}
 	return &Equalizer{sampleRate: cfg.SampleRate, sections: sections}, nil

@@ -1,6 +1,7 @@
 package pcm
 
 import (
+	"encoding/binary"
 	"errors"
 	"math"
 	"unsafe"
@@ -64,7 +65,7 @@ func BytesToFloat32(dst []float32, src []byte) (int, error) {
 	if nativeLittleEndian {
 		return Int16ToFloat32(dst, bytesAsInt16(src)), nil
 	}
-	return decodeLEBytes(dst, src), nil
+	return bytesToFloat32LE(dst, src), nil
 }
 
 // Float32ToBytes encodes float32 PCM (nominal [-1, 1]) from src into dst as
@@ -80,7 +81,7 @@ func Float32ToBytes(dst []byte, src []float32) (int, error) {
 	if nativeLittleEndian {
 		return Float32ToInt16(bytesAsInt16(dst), src), nil
 	}
-	return encodeLEBytes(dst, src), nil
+	return float32ToBytesLE(dst, src), nil
 }
 
 // InPlaceInt16 exposes b, interleaved little-endian int16 PCM, to apply as an
@@ -124,49 +125,43 @@ func bytesAsInt16(b []byte) []int16 {
 	return unsafe.Slice((*int16)(unsafe.Pointer(&b[0])), n)
 }
 
-// decodeLEBytes converts little-endian int16 bytes to scaled float32 by
-// explicit byte arithmetic, so it is correct on any host. It is the byte-swap
-// path taken on big-endian hosts and the reference the fast path is tested
-// against. It decodes min(len(dst), len(src)/2) samples and returns that count;
-// len(src) must be even.
-func decodeLEBytes(dst []float32, src []byte) int {
+// bytesToFloat32LE converts little-endian int16 bytes to scaled float32, correct
+// on any host. It is the byte-swap path taken on big-endian hosts and the
+// reference the fast path is tested against. It decodes min(len(dst), len(src)/2)
+// samples and returns that count; len(src) must be even.
+func bytesToFloat32LE(dst []float32, src []byte) int {
 	n := min(len(dst), len(src)/2)
 	for i := range n {
-		v := int16(uint16(src[2*i]) | uint16(src[2*i+1])<<8)
+		v := int16(binary.LittleEndian.Uint16(src[2*i:]))
 		dst[i] = float32(v) * int16ToFloatScale
 	}
 	return n
 }
 
-// encodeLEBytes converts scaled float32 to little-endian int16 bytes by explicit
-// byte arithmetic, correct on any host. It encodes min(len(dst)/2, len(src))
-// samples and returns that count; len(dst) must be even.
-func encodeLEBytes(dst []byte, src []float32) int {
+// float32ToBytesLE converts scaled float32 to little-endian int16 bytes, correct
+// on any host. It encodes min(len(dst)/2, len(src)) samples and returns that
+// count; len(dst) must be even.
+func float32ToBytesLE(dst []byte, src []float32) int {
 	n := min(len(dst)/2, len(src))
 	for i := range n {
-		u := uint16(scalarFloatToInt16(src[i]))
-		dst[2*i] = byte(u)
-		dst[2*i+1] = byte(u >> 8)
+		binary.LittleEndian.PutUint16(dst[2*i:], uint16(scalarFloatToInt16(src[i])))
 	}
 	return n
 }
 
-// bytesToInt16LE decodes little-endian int16 bytes into dst by explicit byte
-// arithmetic, correct on any host. len(src) must be even and len(dst) >=
-// len(src)/2.
+// bytesToInt16LE decodes little-endian int16 bytes into dst, correct on any
+// host. len(src) must be even and len(dst) >= len(src)/2.
 func bytesToInt16LE(dst []int16, src []byte) {
 	for i := range len(src) / 2 {
-		dst[i] = int16(uint16(src[2*i]) | uint16(src[2*i+1])<<8)
+		dst[i] = int16(binary.LittleEndian.Uint16(src[2*i:]))
 	}
 }
 
-// int16ToBytesLE encodes int16 samples into dst as little-endian bytes by
-// explicit byte arithmetic, correct on any host. len(dst) must be >= 2*len(src).
+// int16ToBytesLE encodes int16 samples into dst as little-endian bytes, correct
+// on any host. len(dst) must be >= 2*len(src).
 func int16ToBytesLE(dst []byte, src []int16) {
 	for i, v := range src {
-		u := uint16(v)
-		dst[2*i] = byte(u)
-		dst[2*i+1] = byte(u >> 8)
+		binary.LittleEndian.PutUint16(dst[2*i:], uint16(v))
 	}
 }
 

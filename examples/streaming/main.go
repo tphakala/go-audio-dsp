@@ -53,12 +53,12 @@ func RunChain(input []byte, chunkSamples int) ([]byte, error) {
 	encoded := make([]byte, len(work)*2)
 	out := make([]byte, 0, len(input))
 
-	// step runs one block of decoded samples through denoiser -> eq -> gain and
-	// appends the encoded result.
-	step := func(samples []float32) error {
-		m, err := d.ProcessInto(samples, work)
-		if err != nil {
-			return err
+	// emit runs the m samples in work[:m] through eq -> gain, encodes them to
+	// little-endian int16 bytes and appends them to out. m may be 0 (a no-op), so
+	// the per-chunk and flush paths share one encode-and-append routine.
+	emit := func(m int) error {
+		if m == 0 {
+			return nil
 		}
 		seg := work[:m]
 		if _, err := eq.ProcessInto(seg, seg); err != nil { // in place
@@ -73,6 +73,15 @@ func RunChain(input []byte, chunkSamples int) ([]byte, error) {
 		}
 		out = append(out, encoded[:nb*2]...) // nb is samples; two bytes each
 		return nil
+	}
+
+	// step runs one block of decoded samples through the denoiser, then emits.
+	step := func(samples []float32) error {
+		m, err := d.ProcessInto(samples, work)
+		if err != nil {
+			return err
+		}
+		return emit(m)
 	}
 
 	chunkBytes := chunkSamples * 2
@@ -92,19 +101,8 @@ func RunChain(input []byte, chunkSamples int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if m > 0 {
-		seg := work[:m]
-		if _, err := eq.ProcessInto(seg, seg); err != nil {
-			return nil, err
-		}
-		if _, err := g.ProcessInto(seg, seg); err != nil {
-			return nil, err
-		}
-		nb, err := pcm.Float32ToBytes(encoded[:m*2], seg)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, encoded[:nb*2]...) // nb is samples; two bytes each
+	if err := emit(m); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
