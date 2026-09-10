@@ -1,6 +1,7 @@
 package loudnorm
 
 import (
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -184,10 +185,9 @@ func TestNormalizeValidation(t *testing.T) {
 	}
 }
 
-// TestNormalizeValidationMessages pins each newly covered validation path to its
-// specific error. loudnorm exposes no sentinel errors, so it matches on the
-// message text; this guards against a future reorder routing an input to the
-// wrong branch.
+// TestNormalizeValidationMessages pins each covered validation path to its
+// specific sentinel error and to the descriptive detail, guarding against a
+// future reorder routing an input to the wrong branch.
 func TestNormalizeValidationMessages(t *testing.T) {
 	opts := DefaultOptions()
 	opts.SampleRate, opts.Channels = 48000, 2
@@ -196,21 +196,25 @@ func TestNormalizeValidationMessages(t *testing.T) {
 		tpFinite  = "true-peak ceiling must be finite"
 	)
 	cases := []struct {
-		name   string
-		mutate func(*Options)
-		want   string
+		name     string
+		mutate   func(*Options)
+		sentinel error
+		want     string
 	}{
-		{"non-positive channels", func(o *Options) { o.Channels = 0 }, "channels must be positive"},
-		{"NaN target", func(o *Options) { o.TargetLUFS = math.NaN() }, tgtFinite},
-		{"+Inf target", func(o *Options) { o.TargetLUFS = math.Inf(1) }, tgtFinite},
-		{"NaN true-peak", func(o *Options) { o.TruePeakDBTP = math.NaN() }, tpFinite},
-		{"-Inf true-peak", func(o *Options) { o.TruePeakDBTP = math.Inf(-1) }, tpFinite},
-		{"+Inf true-peak", func(o *Options) { o.TruePeakDBTP = math.Inf(1) }, tpFinite},
+		{"non-positive channels", func(o *Options) { o.Channels = 0 }, ErrInvalidChannels, "channels must be positive"},
+		{"NaN target", func(o *Options) { o.TargetLUFS = math.NaN() }, ErrTargetOutOfRange, tgtFinite},
+		{"+Inf target", func(o *Options) { o.TargetLUFS = math.Inf(1) }, ErrTargetOutOfRange, tgtFinite},
+		{"NaN true-peak", func(o *Options) { o.TruePeakDBTP = math.NaN() }, ErrCeilingInvalid, tpFinite},
+		{"-Inf true-peak", func(o *Options) { o.TruePeakDBTP = math.Inf(-1) }, ErrCeilingInvalid, tpFinite},
+		{"+Inf true-peak", func(o *Options) { o.TruePeakDBTP = math.Inf(1) }, ErrCeilingInvalid, tpFinite},
 	}
 	for _, c := range cases {
 		o := opts
 		c.mutate(&o)
 		_, err := NormalizeFloat32([]float32{0, 0}, o)
+		if !errors.Is(err, c.sentinel) {
+			t.Errorf("%s: got %v, want errors.Is %v", c.name, err, c.sentinel)
+		}
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: got %v, want error containing %q", c.name, err, c.want)
 		}

@@ -208,11 +208,11 @@ func PlanGain(meas Measurement, opts Options) Result {
 func validateDims(sampleRate, channels, n int) error {
 	switch {
 	case sampleRate < minSampleRate:
-		return fmt.Errorf("loudnorm: sample rate %d Hz too low; minimum is %d Hz (K-weighting is undefined below it)", sampleRate, minSampleRate)
+		return fmt.Errorf("%w: %d Hz, minimum is %d Hz (K-weighting is undefined below it)", ErrSampleRateTooLow, sampleRate, minSampleRate)
 	case channels <= 0:
-		return fmt.Errorf("loudnorm: channels must be positive, got %d", channels)
+		return fmt.Errorf("%w: channels must be positive, got %d", ErrInvalidChannels, channels)
 	case n%channels != 0:
-		return fmt.Errorf("loudnorm: sample count %d is not a multiple of channels %d", n, channels)
+		return fmt.Errorf("%w: sample count %d is not a multiple of channels %d", ErrLengthNotMultiple, n, channels)
 	}
 	return nil
 }
@@ -225,13 +225,13 @@ func (o Options) validate(n int) error {
 	}
 	switch {
 	case math.IsNaN(o.TargetLUFS) || math.IsInf(o.TargetLUFS, 0):
-		return fmt.Errorf("loudnorm: target loudness must be finite, got %v", o.TargetLUFS)
+		return fmt.Errorf("%w: target loudness must be finite, got %v", ErrTargetOutOfRange, o.TargetLUFS)
 	case o.TargetLUFS >= 0 || o.TargetLUFS <= absoluteGateLUFS:
-		return fmt.Errorf("loudnorm: target loudness %.2f LUFS out of range (%.0f, 0)", o.TargetLUFS, absoluteGateLUFS)
+		return fmt.Errorf("%w: %.2f LUFS not in (%.0f, 0)", ErrTargetOutOfRange, o.TargetLUFS, absoluteGateLUFS)
 	case math.IsNaN(o.TruePeakDBTP) || math.IsInf(o.TruePeakDBTP, 0):
-		return fmt.Errorf("loudnorm: true-peak ceiling must be finite, got %v", o.TruePeakDBTP)
+		return fmt.Errorf("%w: true-peak ceiling must be finite, got %v", ErrCeilingInvalid, o.TruePeakDBTP)
 	case o.TruePeakDBTP > 0:
-		return fmt.Errorf("loudnorm: true-peak ceiling %.2f dBTP must be <= 0", o.TruePeakDBTP)
+		return fmt.Errorf("%w: %.2f dBTP must be <= 0", ErrCeilingInvalid, o.TruePeakDBTP)
 	}
 	return nil
 }

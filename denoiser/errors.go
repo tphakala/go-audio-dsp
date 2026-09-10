@@ -1,6 +1,10 @@
 package denoiser
 
-import "errors"
+import (
+	"errors"
+
+	dsp "github.com/tphakala/go-audio-dsp"
+)
 
 // Sentinel errors. Wrapped errors can be tested with errors.Is.
 var (
@@ -8,8 +12,10 @@ var (
 	// message names the offending field.
 	ErrInvalidConfig = errors.New("denoiser: invalid config")
 	// ErrBufferTooSmall reports an output slice shorter than the samples a
-	// ProcessInto or FlushInto call would emit; nothing is consumed.
-	ErrBufferTooSmall = errors.New("denoiser: output buffer too small")
+	// ProcessInto or FlushInto call would emit; nothing is consumed. It is the
+	// shared dsp.ErrBufferTooSmall so a caller chaining blocks can test every
+	// block's undersize error with a single errors.Is.
+	ErrBufferTooSmall = dsp.ErrBufferTooSmall
 	// ErrNoQuietRegion reports that EstimateNoiseProfile found no window
 	// distinctly quieter than the rest of the clip.
 	ErrNoQuietRegion = errors.New("denoiser: no distinct quiet region found")
