@@ -4,19 +4,11 @@ import (
 	"fmt"
 	"math"
 
+	dsp "github.com/tphakala/go-audio-dsp"
 	"github.com/tphakala/go-audio-dsp/pcm"
 
 	simdf32 "github.com/tphakala/simd/f32"
 )
-
-// FactorFromDB converts a decibel gain to the linear amplitude multiplier a Gain
-// applies: 10^(gainDB/20). A gain of 0 dB returns exactly 1.
-func FactorFromDB(gainDB float64) float64 {
-	if gainDB == 0 {
-		return 1
-	}
-	return math.Pow(10, gainDB/20)
-}
 
 // Gain is a memoryless streaming dsp.Processor that scales every sample by a
 // fixed linear factor derived from a decibel gain. It has zero latency and no
@@ -38,7 +30,7 @@ func New(gainDB float64) (*Gain, error) {
 	if math.IsNaN(gainDB) || math.IsInf(gainDB, 0) {
 		return nil, fmt.Errorf("%w: gainDB must be finite, got %g", ErrInvalidConfig, gainDB)
 	}
-	factor := float32(FactorFromDB(gainDB))
+	factor := float32(dsp.FactorFromDB(gainDB))
 	if math.IsInf(float64(factor), 0) {
 		return nil, fmt.Errorf("%w: gainDB %g is too large (linear factor overflows float32)", ErrInvalidConfig, gainDB)
 	}

@@ -1,6 +1,10 @@
 package loudnorm
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/tphakala/go-audio-dsp/pcm"
+)
 
 // Sentinel errors reported by the package. Returned validation errors wrap one
 // of these with a descriptive detail and can be tested with errors.Is.
@@ -20,6 +24,8 @@ var (
 	// above 0 dBTP.
 	ErrCeilingInvalid = errors.New("loudnorm: invalid true-peak ceiling")
 	// ErrOddByteLength reports a byte buffer whose length is not a multiple of
-	// two, so it cannot hold whole little-endian int16 samples.
-	ErrOddByteLength = errors.New("loudnorm: byte slice length is not a multiple of 2")
+	// two, so it cannot hold whole little-endian int16 samples. It is the shared
+	// pcm.ErrOddByteLength so a caller chaining blocks can test every block's
+	// odd-length error uniformly with errors.Is.
+	ErrOddByteLength = pcm.ErrOddByteLength
 )

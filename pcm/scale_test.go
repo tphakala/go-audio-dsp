@@ -21,6 +21,7 @@ func TestScaleInt16ScalesRoundsSaturates(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			got := slices.Clone(c.in)
 			ScaleInt16(got, c.factor)
 			if !slices.Equal(got, c.want) {

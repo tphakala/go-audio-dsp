@@ -4,6 +4,8 @@ import (
 	"errors"
 	"slices"
 	"testing"
+
+	"github.com/tphakala/go-audio-dsp/pcm"
 )
 
 // bytesLE encodes int16 samples as interleaved little-endian bytes.
@@ -81,6 +83,18 @@ func TestBytesOddLength(t *testing.T) {
 	}
 	if _, err := NormalizeBytes(make([]byte, 5), DefaultOptions()); !errors.Is(err, ErrOddByteLength) {
 		t.Errorf("NormalizeBytes odd: err = %v, want ErrOddByteLength", err)
+	}
+}
+
+// TestErrOddByteLengthIsShared pins that loudnorm's odd-length error is the
+// shared pcm.ErrOddByteLength, so a caller can match it uniformly across blocks.
+func TestErrOddByteLengthIsShared(t *testing.T) {
+	_, err := NormalizeBytes(make([]byte, 3), DefaultOptions())
+	if !errors.Is(err, pcm.ErrOddByteLength) {
+		t.Fatalf("err = %v, want pcm.ErrOddByteLength", err)
+	}
+	if !errors.Is(err, ErrOddByteLength) {
+		t.Fatalf("err = %v, want loudnorm.ErrOddByteLength", err)
 	}
 }
 
