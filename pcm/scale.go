@@ -3,8 +3,20 @@ package pcm
 import simdf32 "github.com/tphakala/simd/f32"
 
 // scaleChunk bounds the stack scratch buffer used by ScaleInt16 so its memory
-// stays O(1) regardless of input length.
-const scaleChunk = 8192
+// stays O(1) regardless of input length. It is a constant so the scratch is a
+// fixed-size stack array with no heap allocation.
+//
+// 1024 float32 is a 4 KiB scratch. The size trades loop and kernel amortization
+// (larger is better) against two costs that grow with it and are paid on every
+// call that does work: Go zeroes the stack scratch where ScaleInt16 declares it,
+// and a scratch that overflows L1 evicts the samples being scaled. A 32 KiB
+// scratch makes a short streaming frame pay a 32 KiB clear per call and spills
+// L1; 4 KiB does neither. 1024 was picked from a one-off sweep of this constant
+// benchmarked across both target architectures (amd64 and arm64): it roughly
+// halves small-frame latency against a 32 KiB scratch and is at worst within a
+// couple of percent on large buffers. BenchmarkScaleInt16 tracks the shipped
+// value's per-size cost; re-run the sweep (edit this constant) to retune.
+const scaleChunk = 1024
 
 // ScaleInt16 multiplies every sample in s by factor in place, rounding each
 // scaled value to the nearest integer (ties to even) and saturating to the

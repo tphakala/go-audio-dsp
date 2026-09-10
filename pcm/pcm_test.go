@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"testing"
+	"unsafe"
 
 	simdf32 "github.com/tphakala/simd/f32"
 )
@@ -280,5 +281,60 @@ func TestBigEndianFallbackPaths(t *testing.T) {
 	bytesToInt16LE(got, b)
 	if got[0] != 11 || got[1] != -19 || got[2] != 31 {
 		t.Fatalf("BE InPlaceInt16 write-back = %v, want [11 -19 31]", got)
+	}
+}
+
+// oddStartBuf returns an n-byte slice whose backing data starts at an odd
+// address, so bytesAsInt16's unsafe int16 reinterpret is exercised on an
+// unaligned pointer. It over-allocates by one byte and picks the start offset
+// (0 or 1) that lands on an odd address regardless of how the allocator aligned
+// the backing array, which is more reliable than assuming make([]byte, n)[1:] is
+// odd (small allocations can come from the tiny allocator at any parity).
+func oddStartBuf(t *testing.T, n int) []byte {
+	t.Helper()
+	raw := make([]byte, n+1)
+	off := 0
+	if uintptr(unsafe.Pointer(&raw[0]))%2 == 0 {
+		off = 1
+	}
+	b := raw[off : off+n]
+	if uintptr(unsafe.Pointer(&b[0]))%2 == 0 {
+		t.Fatalf("oddStartBuf: start address %p is aligned, want odd", &b[0])
+	}
+	return b
+}
+
+// TestInPlaceInt16MisalignedStart exercises the zero-copy fast path on a byte
+// slice whose data begins at an odd address, the case bytesAsInt16's SAFETY
+// comment turns on: unsafe.Slice reinterprets an unaligned *int16. The samples
+// read and written through the aliased view must match the portable
+// little-endian path exactly. Existing coverage only hits an odd trailing byte
+// (odd length), never an odd start address. Running under -race also asserts the
+// unaligned reinterpret is checkptr-clean.
+func TestInPlaceInt16MisalignedStart(t *testing.T) {
+	// Values chosen so doubling stays in int16 range (no wrap ambiguity), while
+	// still covering both signs.
+	orig := []int16{100, -200, 300, 4000, -5000}
+	b := oddStartBuf(t, len(orig)*2)
+	int16ToBytesLE(b, orig)
+
+	InPlaceInt16(b, func(s []int16) {
+		if len(s) != len(orig) {
+			t.Fatalf("saw %d samples, want %d", len(s), len(orig))
+		}
+		for i := range s {
+			if s[i] != orig[i] {
+				t.Errorf("unaligned read sample %d = %d, want %d", i, s[i], orig[i])
+			}
+			s[i] *= 2
+		}
+	})
+
+	got := make([]int16, len(orig))
+	bytesToInt16LE(got, b)
+	for i := range orig {
+		if want := orig[i] * 2; got[i] != want {
+			t.Errorf("unaligned write-back sample %d = %d, want %d", i, got[i], want)
+		}
 	}
 }

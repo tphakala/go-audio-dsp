@@ -1,6 +1,7 @@
 package pcm
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 )
@@ -66,4 +67,36 @@ func TestScaleInt16UnityAndEmpty(t *testing.T) {
 	}
 	ScaleInt16(nil, 2.0)      // must not panic
 	ScaleInt16([]int16{}, 2.0) // must not panic
+}
+
+// benchScaleInput returns n int16 samples filled with varied values. Their exact
+// magnitudes do not affect timing (the scaling kernels are branch-free and
+// data-independent); the ramp just avoids an all-zero or constant buffer.
+func benchScaleInput(n int) []int16 {
+	s := make([]int16, n)
+	for i := range s {
+		s[i] = int16(i)
+	}
+	return s
+}
+
+// BenchmarkScaleInt16 measures the shipped ScaleInt16 across representative
+// buffer sizes: a 10 ms streaming frame (480 samples at 48 kHz), a one-second
+// block, and a large batch. The small-frame case is what exposes the per-call
+// cost of the [scaleChunk]float32 stack scratch, which Go zeroes on function
+// entry, so it guards against a scaleChunk too large for streaming-sized calls.
+// The factor is non-unity so the early return never fires; values saturate
+// within a few iterations, which does not bias the timing because the kernels
+// are branch-free and data-independent. B/op must stay 0.
+func BenchmarkScaleInt16(b *testing.B) {
+	for _, n := range []int{480, 48000, 1 << 20} {
+		s := benchScaleInput(n)
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			b.SetBytes(int64(n * 2))
+			b.ReportAllocs()
+			for b.Loop() {
+				ScaleInt16(s, 2.0)
+			}
+		})
+	}
 }
