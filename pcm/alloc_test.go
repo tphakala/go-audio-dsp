@@ -46,3 +46,30 @@ func TestZeroAllocConversions(t *testing.T) {
 		}
 	}
 }
+
+// misalignSink is written by the zero-alloc probe below so the compiler cannot
+// drop the InPlaceInt16 call (and the bytesAsInt16 reinterpret it makes) as dead
+// code, which would make the allocation count trivially zero.
+var misalignSink int16
+
+// TestInPlaceInt16MisalignedZeroAlloc confirms the zero-copy fast path stays
+// allocation-free even when the byte slice starts at an odd address (the
+// unaligned int16 reinterpret). It complements the aligned case in
+// TestZeroAllocConversions. Only meaningful on little-endian hosts, where
+// InPlaceInt16 takes the bytesAsInt16 path; a big-endian host uses a scratch
+// buffer and is expected to allocate.
+func TestInPlaceInt16MisalignedZeroAlloc(t *testing.T) {
+	if !nativeLittleEndian {
+		t.Skip("InPlaceInt16 only avoids allocation on little-endian hosts")
+	}
+	b := oddStartBuf(t, 2048)
+	if a := testing.AllocsPerRun(50, func() {
+		InPlaceInt16(b, func(s []int16) {
+			if len(s) > 0 {
+				misalignSink = s[0]
+			}
+		})
+	}); a != 0 {
+		t.Errorf("InPlaceInt16 on a misaligned buffer allocated %v times, want 0", a)
+	}
+}
