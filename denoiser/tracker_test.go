@@ -143,7 +143,7 @@ func TestMCRAResetAndWindowFrames(t *testing.T) {
 
 func TestAdaptiveStreamReducesStationaryNoise(t *testing.T) {
 	const sr, sigma = 48000, 0.01
-	d, _ := New(Config{SampleRate: sr, Preset: Medium}) // no profile: adaptive
+	d, _ := New(Config{SampleRate: sr, Strength: Medium}) // no profile: adaptive
 	x := whiteNoise(6*sr, sigma, 30)
 	y := runStream(t, d, x, []int{4096})
 	// After the tracker has converged (the last 2 s), Medium reduces by at

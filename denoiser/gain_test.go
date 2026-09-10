@@ -63,7 +63,7 @@ func TestGainStateFloorAndUnity(t *testing.T) {
 	}
 	// Negligible noise: every estimator passes the signal through.
 	for _, e := range []Estimator{MMSELSA, Wiener, Subtraction} {
-		p := Medium.Params()
+		p := ParamsFor(Medium)
 		p.Estimator = e
 		g := newGainState(bins, p)
 		g.compute(gain, power, noise)
@@ -78,7 +78,7 @@ func TestGainStateFloorAndUnity(t *testing.T) {
 	// the floor, so the gain is 1 (per the spec: G = min(G,1) then max(G,Gfloor)).
 	// The DD state is still 0 because it is gain^2 * power. The gain value here
 	// is functionally moot: output and DD state multiply by zero power either way.
-	g := newGainState(bins, Medium.Params())
+	g := newGainState(bins, ParamsFor(Medium))
 	clear(power)
 	for k := range noise {
 		noise[k] = 1
@@ -90,7 +90,7 @@ func TestGainStateFloorAndUnity(t *testing.T) {
 		}
 	}
 	// MaxAttenuationDB = 0 is a hard unity gain even when power << noise.
-	p := Medium.Params()
+	p := ParamsFor(Medium)
 	p.MaxAttenuationDB = 0
 	g = newGainState(bins, p)
 	for k := range power {
@@ -110,8 +110,8 @@ func TestGainStateBoundsAndNaN(t *testing.T) {
 	power := make([]float32, bins)
 	noise := make([]float32, bins)
 	gain := make([]float32, bins)
-	for _, preset := range []Preset{Light, Medium, Heavy} {
-		p := preset.Params()
+	for _, strength := range []Strength{Light, Medium, Heavy} {
+		p := ParamsFor(strength)
 		g := newGainState(bins, p)
 		floor := float32(math.Pow(10, -float64(p.MaxAttenuationDB)/20))
 		for frame := range 50 {
@@ -122,7 +122,7 @@ func TestGainStateBoundsAndNaN(t *testing.T) {
 			g.compute(gain, power, noise)
 			for k, v := range gain {
 				if !(v >= floor-1e-6 && v <= 1) {
-					t.Fatalf("%v frame %d: gain[%d] = %g outside [%g, 1]", preset, frame, k, v, floor)
+					t.Fatalf("%v frame %d: gain[%d] = %g outside [%g, 1]", strength, frame, k, v, floor)
 				}
 			}
 		}
@@ -130,12 +130,12 @@ func TestGainStateBoundsAndNaN(t *testing.T) {
 		power[3] = float32(math.NaN())
 		g.compute(gain, power, noise)
 		if g.prevAmp2[3] != 0 {
-			t.Errorf("%v: prevAmp2 after NaN = %g, want 0", preset, g.prevAmp2[3])
+			t.Errorf("%v: prevAmp2 after NaN = %g, want 0", strength, g.prevAmp2[3])
 		}
 		power[3] = 1e-3
 		g.compute(gain, power, noise)
 		if math.IsNaN(float64(gain[3])) {
-			t.Errorf("%v: NaN leaked into the following frame", preset)
+			t.Errorf("%v: NaN leaked into the following frame", strength)
 		}
 		g.reset()
 		for k := range g.prevAmp2 {

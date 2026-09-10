@@ -38,36 +38,9 @@ func (e Estimator) String() string {
 
 func (e Estimator) valid() bool { return e >= MMSELSA && e <= Subtraction }
 
-// Preset names a tuned Params set. The zero value is Medium.
-type Preset int
-
-const (
-	// Medium is the default: up to 12 dB of reduction.
-	Medium Preset = iota
-	// Light reduces noise by at most 6 dB and preserves the most detail.
-	Light
-	// Heavy reduces noise by up to 20 dB with aggressive over-subtraction; the
-	// most reduction, best on steady broadband noise.
-	Heavy
-)
-
-// String returns the preset name.
-func (p Preset) String() string {
-	switch p {
-	case Medium:
-		return "medium"
-	case Light:
-		return "light"
-	case Heavy:
-		return "heavy"
-	}
-	return fmt.Sprintf("Preset(%d)", int(p))
-}
-
-func (p Preset) valid() bool { return p >= Medium && p <= Heavy }
-
-// Params holds every denoiser knob. Presets are named Params values; set
-// Config.Params to override a preset entirely.
+// Params holds every knob of the spectral denoise method. A Strength selects a
+// tuned Params set (see ParamsFor); set Config.Params to override those knobs
+// entirely.
 type Params struct {
 	// MaxAttenuationDB is the residual gain floor in dB: no bin is ever
 	// attenuated by more than this, so nothing gates to silence. It is the
@@ -115,18 +88,21 @@ func (p Params) validate() error {
 	return nil
 }
 
-// presetParams are tuned against the synthetic quality harness (see
-// quality_test.go); refinement against a real bird-clip corpus is future work.
-var presetParams = [...]Params{
+// strengthParams are the spectral method's tuned knob sets per Strength, tuned
+// against the synthetic quality harness (see quality_test.go); refinement
+// against a real bird-clip corpus is future work.
+var strengthParams = [...]Params{
 	Medium: {MaxAttenuationDB: 12, OverSubtraction: 1.2, SNRSmoothing: 0.96, MinPriorSNRDB: -18, FreqSmoothBins: 0, Estimator: MMSELSA, TrackWindowSec: 2},
 	Light:  {MaxAttenuationDB: 6, OverSubtraction: 1.0, SNRSmoothing: 0.95, MinPriorSNRDB: -15, FreqSmoothBins: 0, Estimator: MMSELSA, TrackWindowSec: 2},
 	Heavy:  {MaxAttenuationDB: 20, OverSubtraction: 2.0, SNRSmoothing: 0.97, MinPriorSNRDB: -22, FreqSmoothBins: 0, Estimator: MMSELSA, TrackWindowSec: 2},
 }
 
-// Params returns the preset's knob values (Medium's for an unknown preset).
-func (p Preset) Params() Params {
-	if !p.valid() {
-		return presetParams[Medium]
+// ParamsFor returns the spectral method's tuned Params for a Strength (Medium's
+// for an unknown value). Start from it to override individual knobs through
+// Config.Params.
+func ParamsFor(s Strength) Params {
+	if !s.valid() {
+		return strengthParams[Medium]
 	}
-	return presetParams[p]
+	return strengthParams[s]
 }

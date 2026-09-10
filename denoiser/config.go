@@ -18,9 +18,9 @@ type Config struct {
 	// needs overlap to reconstruct without gaps). 0 selects FrameSize/4 (75%
 	// overlap).
 	HopSize int
-	// Preset selects the tuned knob set; the zero value is Medium.
-	Preset Preset
-	// Params, when non-nil, replaces the preset's knobs entirely.
+	// Strength selects the tuned knob set; the zero value is Medium.
+	Strength Strength
+	// Params, when non-nil, replaces the strength's knobs entirely.
 	Params *Params
 }
 
@@ -59,10 +59,10 @@ func (c Config) resolve() (Config, Params, error) {
 	if c.Params != nil {
 		p = *c.Params
 	} else {
-		if !c.Preset.valid() {
-			return c, Params{}, fmt.Errorf("%w: unknown Preset %d", ErrInvalidConfig, int(c.Preset))
+		if !c.Strength.valid() {
+			return c, Params{}, fmt.Errorf("%w: unknown Strength %d", ErrInvalidConfig, int(c.Strength))
 		}
-		p = c.Preset.Params()
+		p = ParamsFor(c.Strength)
 	}
 	if err := p.validate(); err != nil {
 		return c, Params{}, err

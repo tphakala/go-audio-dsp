@@ -5,6 +5,8 @@ import (
 	"math"
 	"math/rand/v2"
 	"testing"
+
+	dsp "github.com/tphakala/go-audio-dsp"
 )
 
 // whiteNoise returns n samples of Gaussian white noise with the given RMS.
@@ -87,7 +89,7 @@ func TestNoiseProfileErrorsAndSet(t *testing.T) {
 
 func TestFixedProfileReducesWhiteNoise(t *testing.T) {
 	const sr, sigma = 48000, 0.01
-	d, _ := New(Config{SampleRate: sr, Preset: Medium})
+	d, _ := New(Config{SampleRate: sr, Strength: Medium})
 	p, _ := d.NoiseProfileFromSamples(whiteNoise(sr, sigma, 9))
 	if err := d.SetNoiseProfile(p); err != nil {
 		t.Fatal(err)
@@ -97,6 +99,65 @@ func TestFixedProfileReducesWhiteNoise(t *testing.T) {
 	in, out := rmsDB(x[sr:]), rmsDB(y[sr:])
 	if red := in - out; red < 9 {
 		t.Errorf("Medium reduced stationary white noise by %.1f dB, want >= 9", red)
+	}
+}
+
+// TestLearnNoiseMatchesTwoStep checks the NoiseLearner capability: the one-call
+// LearnNoise sets up the same noise model as the manual NoiseProfileFromSamples
+// + SetNoiseProfile pair it collapses, so both denoisers, fed the same clip,
+// produce identical output. Gutting LearnNoise (dropping the SetNoiseProfile
+// call, or swapping the excerpt) leaves the learned denoiser on the adaptive
+// path and diverges the output. It also exercises capability discovery through
+// a dsp.Processor value.
+func TestLearnNoiseMatchesTwoStep(t *testing.T) {
+	const sr, sigma = 48000, 0.02
+	noise := whiteNoise(sr, sigma, 30)
+
+	ref, _ := New(Config{SampleRate: sr, Strength: Medium})
+	p, err := ref.NoiseProfileFromSamples(noise)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ref.SetNoiseProfile(p); err != nil {
+		t.Fatal(err)
+	}
+
+	learned, _ := New(Config{SampleRate: sr, Strength: Medium})
+	// Discover the capability the way a consumer does: from a dsp.Processor.
+	var proc dsp.Processor = learned
+	nl, ok := proc.(NoiseLearner)
+	if !ok {
+		t.Fatal("*Denoiser must satisfy NoiseLearner")
+	}
+	if err := nl.LearnNoise(noise); err != nil {
+		t.Fatalf("LearnNoise: %v", err)
+	}
+	if learned.NoiseProfile() == nil {
+		t.Fatal("LearnNoise did not activate a profile")
+	}
+
+	x := whiteNoise(3*sr, sigma, 31)
+	want := runStream(t, ref, x, []int{4096})
+	got := runStream(t, learned, x, []int{4096})
+	if len(got) != len(want) {
+		t.Fatalf("LearnNoise output length %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("LearnNoise output diverges from two-step at sample %d: %g vs %g", i, got[i], want[i])
+		}
+	}
+}
+
+// TestLearnNoiseRejectsShortExcerpt checks LearnNoise propagates the
+// too-short-excerpt error rather than swallowing it, and leaves no profile set.
+func TestLearnNoiseRejectsShortExcerpt(t *testing.T) {
+	d, _ := New(Config{SampleRate: 48000})
+	if err := d.LearnNoise(make([]float32, d.FrameSize()-1)); !errors.Is(err, ErrProfileTooShort) {
+		t.Fatalf("LearnNoise(short) err = %v, want ErrProfileTooShort", err)
+	}
+	if d.NoiseProfile() != nil {
+		t.Fatal("a rejected LearnNoise must not activate a profile")
 	}
 }
 

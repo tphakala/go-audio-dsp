@@ -17,16 +17,16 @@ import (
 // These tests use ffmpeg's afftdn as the reference the library must match or
 // beat (the BirdNET-Go presets it replaces). They skip when ffmpeg is absent.
 
-// afftdnPresets are the BirdNET-Go afftdn parameters (nr, nf) per preset: the
+// afftdnByStrength are the BirdNET-Go afftdn parameters (nr, nf) per strength: the
 // exact reduction and noise-floor values production uses, so this measures the
-// baseline we replace, not a re-tuned afftdn. A preset whose nf sits well below
+// baseline we replace, not a re-tuned afftdn. A strength whose nf sits well below
 // the synthetic clip's noise level (Heavy at nf=-50 against -40 dBFS noise)
 // leaves afftdn barely engaged, so BOTH bars are easy to clear for it: afftdn
 // reduces little (so our reduction trivially matches) and distorts the signal
 // little (so its LSD is trivially low and our LSD comparison is lenient too).
 // The definitive apples-to-apples comparison runs on a real bird-clip corpus,
 // where noise floors match production.
-var afftdnPresets = map[Preset][2]int{Light: {6, -30}, Medium: {12, -40}, Heavy: {20, -50}}
+var afftdnByStrength = map[Strength][2]int{Light: {6, -30}, Medium: {12, -40}, Heavy: {20, -50}}
 
 func ffmpegPath(t *testing.T) string {
 	t.Helper()
@@ -90,13 +90,13 @@ func TestAsGoodAsAfftdnSynthetic(t *testing.T) {
 	ffmpegPath(t)
 	for _, pink := range []bool{false, true} {
 		clip := makeSynthClip(48000, -40, -20, pink, 11)
-		for _, preset := range []Preset{Light, Medium, Heavy} {
-			t.Run(fmt.Sprintf("%v/pink=%v", preset, pink), func(t *testing.T) {
-				ours, err := Denoise(clip.mix, Config{SampleRate: clip.sr, Preset: preset})
+		for _, strength := range []Strength{Light, Medium, Heavy} {
+			t.Run(fmt.Sprintf("%v/pink=%v", strength, pink), func(t *testing.T) {
+				ours, err := Denoise(clip.mix, Config{SampleRate: clip.sr, Strength: strength})
 				if err != nil {
 					t.Fatal(err)
 				}
-				nrnf := afftdnPresets[preset]
+				nrnf := afftdnByStrength[strength]
 				ref := runAfftdn(t, clip.mix, clip.sr, nrnf[0], nrnf[1])
 				// Align on the second burst (a 2-6 kHz chirp): its cross
 				// correlation peaks sharply, so afftdn's FFT delay is measured
@@ -113,11 +113,11 @@ func TestAsGoodAsAfftdnSynthetic(t *testing.T) {
 					redOurs, redRef, lsdOurs, lsdRef, lag)
 				// The spec's bar is "within 1 dB of afftdn", but the host
 				// ffmpeg/afftdn build is unpinned and the margin on the weak
-				// presets is sub-dB, so a miss records the numbers and defers to
+				// strengths is sub-dB, so a miss records the numbers and defers to
 				// the real-corpus comparison (the authoritative one) instead
 				// of turning shared CI red on an oracle-side version drift. Our own
 				// reduction is guarded live and ffmpeg-independently by
-				// TestPresetsOnSyntheticClips.
+				// TestStrengthsOnSyntheticClips.
 				switch {
 				case redOurs < redRef-1:
 					t.Skipf("afftdn oracle pending (real corpus): reduction %.1f dB is %.1f below afftdn's %.1f (1 dB bar; host ffmpeg unpinned)", redOurs, redRef-redOurs, redRef)

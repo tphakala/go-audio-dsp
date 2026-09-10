@@ -18,7 +18,7 @@ func testTone(n int) []float32 {
 }
 
 func unityConfig(sr, frame, hop int) Config {
-	p := Medium.Params()
+	p := ParamsFor(Medium)
 	p.MaxAttenuationDB = 0 // unity gain: the stream is a pure analysis/synthesis round trip
 	return Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Params: &p}
 }
@@ -241,7 +241,7 @@ func TestDenoiseMatchesManualSequence(t *testing.T) {
 	const sr = 48000
 	x := whiteNoise(6*sr, 0.01, 40)
 	toneAt(x, sr, 2*sr, 3*sr, 2000, 0.2)
-	cfg := Config{SampleRate: sr, Preset: Heavy}
+	cfg := Config{SampleRate: sr, Strength: Heavy}
 	got, err := Denoise(x, cfg)
 	if err != nil {
 		t.Fatal(err)

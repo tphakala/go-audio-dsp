@@ -57,7 +57,7 @@ func Example() {
 // output is aligned sample-for-sample with the input and lags by Latency()
 // during the stream; Flush returns the tail so total output equals total input.
 func Example_streaming() {
-	d, err := denoiser.New(denoiser.Config{SampleRate: 48000, Preset: denoiser.Light})
+	d, err := denoiser.New(denoiser.Config{SampleRate: 48000, Strength: denoiser.Light})
 	if err != nil {
 		panic(err)
 	}

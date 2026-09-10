@@ -1,6 +1,10 @@
 package denoiser
 
-import "math"
+import (
+	"math"
+
+	dsp "github.com/tphakala/go-audio-dsp"
+)
 
 // epsPower floors every noise power estimate so SNR ratios stay finite.
 // Inputs are normalized float32 audio, so real bin powers sit far above it.
@@ -29,7 +33,7 @@ func newGainState(bins int, p Params) *gainState {
 		alpha:    p.SNRSmoothing,
 		beta:     p.OverSubtraction,
 		xiMin:    float32(math.Pow(10, float64(p.MinPriorSNRDB)/10)),
-		gFloor:   float32(math.Pow(10, -float64(p.MaxAttenuationDB)/20)),
+		gFloor:   float32(dsp.FactorFromDB(-float64(p.MaxAttenuationDB))),
 		est:      p.Estimator,
 		prevAmp2: make([]float32, bins),
 		tmp:      make([]float32, bins),

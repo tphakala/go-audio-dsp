@@ -3,10 +3,13 @@ package denoiser
 import dsp "github.com/tphakala/go-audio-dsp"
 
 // A Denoiser is a streaming dsp.Processor with a tail, so it also satisfies
-// dsp.Flusher. These assertions fail to compile if the contract drifts.
+// dsp.Flusher, and the spectral method can learn its noise estimate from a
+// noise-only excerpt, so it satisfies the NoiseLearner capability. These
+// assertions fail to compile if the contract drifts.
 var (
 	_ dsp.Processor = (*Denoiser)(nil)
 	_ dsp.Flusher   = (*Denoiser)(nil)
+	_ NoiseLearner  = (*Denoiser)(nil)
 )
 
 // FrameSize is the resolved FFT length in samples (the Config.FrameSize in
