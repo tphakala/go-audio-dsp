@@ -5,6 +5,8 @@ import (
 	"math"
 	"math/rand/v2"
 	"testing"
+
+	dsp "github.com/tphakala/go-audio-dsp"
 )
 
 // whiteNoise returns n samples of Gaussian white noise with the given RMS.
@@ -121,7 +123,9 @@ func TestLearnNoiseMatchesTwoStep(t *testing.T) {
 	}
 
 	learned, _ := New(Config{SampleRate: sr, Strength: Medium})
-	nl, ok := any(learned).(NoiseLearner)
+	// Discover the capability the way a consumer does: from a dsp.Processor.
+	var proc dsp.Processor = learned
+	nl, ok := proc.(NoiseLearner)
 	if !ok {
 		t.Fatal("*Denoiser must satisfy NoiseLearner")
 	}
