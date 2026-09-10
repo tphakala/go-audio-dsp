@@ -123,7 +123,7 @@ func (d *Denoiser) Process(in []float32) ([]float32, error) {
 // ProcessInto is Process without allocation: it writes the output samples that
 // become final into out and returns their count. The count is known before
 // any work is done; if len(out) is smaller, ErrBufferTooSmall is returned and
-// nothing is consumed. len(out) >= len(in)+HopSize always suffices.
+// nothing is consumed. len(out) >= MaxOutputLen(len(in)) always suffices.
 func (d *Denoiser) ProcessInto(in, out []float32) (int, error) {
 	need := d.pendingOutput(len(in))
 	if len(out) < need {
@@ -147,7 +147,7 @@ func (d *Denoiser) Flush() ([]float32, error) {
 
 // FlushInto is Flush without allocation. It returns ErrBufferTooSmall (and
 // does nothing) if len(out) is smaller than the remaining output;
-// len(out) >= FrameSize always suffices.
+// len(out) >= FrameSize() always suffices.
 func (d *Denoiser) FlushInto(out []float32) (int, error) {
 	need := int(d.totalIn - d.totalOut)
 	if len(out) < need {
