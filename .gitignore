@@ -24,8 +24,10 @@ go.work.sum
 # Private planning docs (specs, plans, research); tracked separately, never published
 docs/
 
-# Real-clip corpus for A/B tuning against ffmpeg afftdn: supplied locally, never committed
-testdata/corpus/
+# Real-clip corpus for A/B tuning against ffmpeg afftdn: supplied locally, never committed.
+# Depth-independent so it matches the corpus at denoiser/testdata/corpus/ (the test's cwd is
+# the package dir), not only a repo-root testdata/corpus/.
+**/testdata/corpus/
 
 # Build artifacts
 /bin/
