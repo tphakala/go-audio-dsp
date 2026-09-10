@@ -89,9 +89,9 @@ func newCoeffs(b Band, sampleRate int) (coeffs, error) {
 		a0 = (a + 1) - (a-1)*cw + beta*sw
 		a1 = 2 * ((a - 1) - (a+1)*cw)
 		a2 = (a + 1) - (a-1)*cw - beta*sw
-	default:
-		return coeffs{}, fmt.Errorf("%w: unknown FilterType %d", ErrInvalidConfig, int(b.Type))
 	}
+	// No default: b.Type was checked with valid() above, and the switch lists
+	// every FilterType, so the exhaustive linter guards against an unhandled one.
 
 	c := coeffs{b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0}
 	if err := c.check(b); err != nil {

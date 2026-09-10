@@ -29,7 +29,11 @@ func TestZeroAlloc(t *testing.T) {
 		name string
 		fn   func()
 	}{
-		{"ProcessInto", func() { _, _ = g.ProcessInto(in, out) }},
+		{"ProcessInto", func() {
+			if _, err := g.ProcessInto(in, out); err != nil {
+				t.Fatal(err)
+			}
+		}},
 		{"ApplyInt16", func() { g.ApplyInt16(i16) }},
 	}
 	for _, c := range checks {

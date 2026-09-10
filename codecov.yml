@@ -1,0 +1,6 @@
+# Example programs under examples/ are illustrative: a main package with a
+# main() entry point and defensive error branches that the tests exercise for
+# behavior but do not drive to full line coverage. They are not library code, so
+# they are excluded from coverage measurement and targets.
+ignore:
+  - "examples/"

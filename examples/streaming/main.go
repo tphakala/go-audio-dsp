@@ -25,6 +25,9 @@ func RunChain(input []byte, chunkSamples int) ([]byte, error) {
 	if chunkSamples <= 0 {
 		return nil, fmt.Errorf("chunkSamples must be > 0, got %d", chunkSamples)
 	}
+	if len(input)%2 != 0 {
+		return nil, pcm.ErrOddByteLength // whole int16 samples only
+	}
 	d, err := denoiser.New(denoiser.Config{SampleRate: sampleRate})
 	if err != nil {
 		return nil, err

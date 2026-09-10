@@ -84,6 +84,18 @@ func TestResponseKnownPoints(t *testing.T) {
 	}
 }
 
+// TestResponseNonFiniteFrequency pins the documented behavior that a non-finite
+// frequency yields a NaN GainDB (rather than -Inf, which means an exact null).
+func TestResponseNonFiniteFrequency(t *testing.T) {
+	e, err := New(band(HighPass, 1000, 0.7071, 0, 0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := e.Response([]float64{math.NaN()})[0].GainDB; !math.IsNaN(g) {
+		t.Errorf("Response(NaN) GainDB = %v, want NaN", g)
+	}
+}
+
 func rms(x []float32) float64 {
 	var sum float64
 	for _, v := range x {
@@ -116,6 +128,9 @@ func TestResponseAgainstSweptSine(t *testing.T) {
 		}
 		half := n / 2 // discard the transient
 		measured := 20 * math.Log10(rms(out[half:])/rms(in[half:]))
+		if math.IsNaN(measured) || math.IsInf(measured, 0) {
+			t.Fatalf("f=%g Hz: measured gain is non-finite (%g)", f, measured)
+		}
 		predicted := e.Response([]float64{f})[0].GainDB
 		if math.Abs(measured-predicted) > 0.3 {
 			t.Errorf("f=%g Hz: measured %.3f dB, Response predicts %.3f dB", f, measured, predicted)

@@ -9,9 +9,10 @@ import (
 // ResponsePoint is the equalizer's steady-state response at one frequency: the
 // magnitude in dB and the phase in radians. GainDB is negative infinity only
 // when the magnitude evaluates to exactly zero; a deep notch normally reports a
-// large finite attenuation (a few hundred dB down), not -Inf. PhaseRad is the
-// argument of the response in [-pi, pi] (the cmplx.Phase convention) and is
-// unspecified where the magnitude is zero.
+// large finite attenuation (a few hundred dB down), not -Inf; a non-finite
+// frequency yields a NaN GainDB. PhaseRad is the argument of the response in
+// [-pi, pi] (the cmplx.Phase convention) and is unspecified where the magnitude
+// is zero.
 type ResponsePoint struct {
 	Hz       float64
 	GainDB   float64
@@ -44,8 +45,11 @@ func (e *Equalizer) Response(freqs []float64) []ResponsePoint {
 			h *= e.sections[j].c.at(w)
 		}
 		mag := cmplx.Abs(h)
-		gainDB := math.Inf(-1)
-		if mag > 0 {
+		gainDB := math.Inf(-1) // an exact zero (a perfect null) stays -Inf
+		switch {
+		case math.IsNaN(mag):
+			gainDB = math.NaN() // a non-finite frequency propagates as NaN
+		case mag > 0:
 			gainDB = 20 * math.Log10(mag)
 		}
 		pts[i] = ResponsePoint{Hz: f, GainDB: gainDB, PhaseRad: cmplx.Phase(h)}

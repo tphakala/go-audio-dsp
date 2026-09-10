@@ -28,3 +28,11 @@ func TestRunChainRejectsNonPositiveChunk(t *testing.T) {
 		}
 	}
 }
+
+// TestRunChainRejectsOddLength checks that input that is not whole int16 samples
+// is rejected rather than silently dropping the trailing byte.
+func TestRunChainRejectsOddLength(t *testing.T) {
+	if _, err := RunChain([]byte{1, 2, 3}, 4800); err == nil {
+		t.Error("RunChain(odd-length input) returned nil error, want a rejection")
+	}
+}
