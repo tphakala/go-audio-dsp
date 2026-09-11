@@ -100,6 +100,27 @@ func TestFilterChainAddNilRejected(t *testing.T) {
 	}
 }
 
+// TestFilterChainRejectsMixedSampleRate pins that AddFilter accepts filters at
+// the chain's rate (the first added) and rejects one built at a different rate,
+// which would cascade incompatible coefficients into a wrong response.
+func TestFilterChainRejectsMixedSampleRate(t *testing.T) {
+	c := NewFilterChain()
+	if err := c.AddFilter(mustFilter(t, Band{Type: HighPass, Frequency: 100, Q: 0.7071}, 48000)); err != nil {
+		t.Fatal(err)
+	}
+	// A different rate is rejected and not appended.
+	if err := c.AddFilter(mustFilter(t, Band{Type: HighPass, Frequency: 100, Q: 0.7071}, 44100)); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("AddFilter at a different rate: err = %v, want ErrInvalidConfig", err)
+	}
+	if c.Len() != 1 {
+		t.Errorf("Len = %d after a rejected mixed-rate add, want 1", c.Len())
+	}
+	// The chain's own rate is still accepted.
+	if err := c.AddFilter(mustFilter(t, Band{Type: LowPass, Frequency: 8000, Q: 0.7071}, 48000)); err != nil {
+		t.Errorf("AddFilter at the chain's rate: %v", err)
+	}
+}
+
 // TestFilterChainChunkInvariance pins that chunked processing equals one-shot
 // processing, so the chain carries every filter's state correctly across calls.
 func TestFilterChainChunkInvariance(t *testing.T) {

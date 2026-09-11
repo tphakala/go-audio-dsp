@@ -16,27 +16,36 @@ var _ dsp.Processor = (*FilterChain)(nil)
 // assemble it incrementally (for example from per-source settings) and rebuild
 // it per sample rate with independent state. Running the same bands as one
 // Filter each through a FilterChain is bit-identical to an Equalizer of those
-// bands. Every Filter added to one chain must be built at the same sample rate;
-// the chain does not verify this, so mixing rates yields an incorrect combined
-// response. A FilterChain is not safe for concurrent use; run one instance per
-// stream (for example one per channel).
+// bands. Every Filter in one chain must be built at the same sample rate, since
+// mixing rates would yield an incorrect combined response; AddFilter enforces
+// this by rejecting a filter whose rate differs from the chain's first. A
+// FilterChain is not safe for concurrent use; run one instance per stream (for
+// example one per channel).
 type FilterChain struct {
-	filters []*Filter
+	sampleRate int // the rate of the first filter added; every later filter must match
+	filters    []*Filter
 }
 
 // NewFilterChain returns an empty FilterChain. An empty chain is a valid
 // identity block: it copies input to output unchanged.
 func NewFilterChain() *FilterChain { return &FilterChain{} }
 
-// AddFilter appends f to the chain, in application order. A nil f is rejected
-// with an error wrapping ErrInvalidConfig rather than deferred to a nil panic in
-// ProcessInto. The filter is not copied; do not mutate it, reuse it in another
-// chain, or add the same *Filter more than once (to this or any chain), since its
-// state is shared through the pointer: sharing one filter's state across two
-// positions corrupts the output.
+// AddFilter appends f to the chain, in application order. It returns an error
+// wrapping ErrInvalidConfig for a nil filter (rather than deferring to a nil
+// panic in ProcessInto) or for a filter built at a different sample rate than
+// the chain's first, which would cascade incompatible coefficients. The filter
+// is not copied; do not mutate it, reuse it in another chain, or add the same
+// *Filter more than once (to this or any chain), since its state is shared
+// through the pointer: sharing one filter's state across two positions corrupts
+// the output.
 func (c *FilterChain) AddFilter(f *Filter) error {
 	if f == nil {
 		return fmt.Errorf("%w: nil filter", ErrInvalidConfig)
+	}
+	if len(c.filters) == 0 {
+		c.sampleRate = f.sampleRate
+	} else if f.sampleRate != c.sampleRate {
+		return fmt.Errorf("%w: filter sample rate %d differs from the chain's %d", ErrInvalidConfig, f.sampleRate, c.sampleRate)
 	}
 	c.filters = append(c.filters, f)
 	return nil

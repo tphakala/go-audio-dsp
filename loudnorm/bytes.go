@@ -70,7 +70,7 @@ func NormalizeBytes(b []byte, opts Options) (Result, error) {
 // clampedGainDB, so those two projections no longer describe the output. Silent
 // or sub-400 ms input yields clampedGainDB == 0, leaving a
 // quiet clip unchanged rather than boosting its noise floor. len(b) must be
-// even; an odd length returns ErrOddByteLength with every other value its zero.
+// even; an odd length returns ErrOddByteLength and zeroes every other return value.
 //
 // Only the sample rate and channel count are validated (by MeasureBytes). Like
 // PlanGain, opts.TargetLUFS and opts.TruePeakDBTP are not range-checked here, so

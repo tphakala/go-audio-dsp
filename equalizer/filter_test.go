@@ -159,6 +159,24 @@ func TestFilterAliasedInPlace(t *testing.T) {
 	}
 }
 
+// TestFilterContract pins the zero-latency Processor accessors and the
+// empty-input path: MaxOutputLen is the identity, Latency is 0, and an empty
+// input consumes and writes nothing.
+func TestFilterContract(t *testing.T) {
+	f := mustFilter(t, Band{Type: Peaking, Frequency: 1000, WidthHz: 400, GainDB: 6}, 48000)
+	for _, n := range []int{0, 1, 100, 4096} {
+		if got := f.MaxOutputLen(n); got != n {
+			t.Errorf("MaxOutputLen(%d) = %d, want %d", n, got, n)
+		}
+	}
+	if f.Latency() != 0 {
+		t.Errorf("Latency() = %d, want 0", f.Latency())
+	}
+	if n, err := f.ProcessInto(nil, nil); n != 0 || err != nil {
+		t.Errorf("ProcessInto(nil, nil) = %d, %v; want 0, nil", n, err)
+	}
+}
+
 // TestNewFilterInvalid pins that NewFilter rejects a bad sample rate and a bad
 // band, wrapping ErrInvalidConfig.
 func TestNewFilterInvalid(t *testing.T) {

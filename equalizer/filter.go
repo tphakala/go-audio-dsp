@@ -22,7 +22,8 @@ var _ dsp.Processor = (*Filter)(nil)
 // reusable stage a caller composes into a FilterChain. A Filter is not safe for
 // concurrent use; run one instance per stream (for example one per channel).
 type Filter struct {
-	sections []section
+	sampleRate int // the rate the coefficients were computed for; a FilterChain enforces one rate across its filters
+	sections   []section
 }
 
 // NewFilter builds a Filter for one band at sampleRate. It validates sampleRate
@@ -45,7 +46,7 @@ func NewFilter(b Band, sampleRate int) (*Filter, error) {
 	for i := range sections {
 		sections[i].c = c
 	}
-	return &Filter{sections: sections}, nil
+	return &Filter{sampleRate: sampleRate, sections: sections}, nil
 }
 
 // ProcessInto writes in filtered through this band's cascade into out and
