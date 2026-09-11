@@ -51,3 +51,38 @@ func NormalizeBytes(b []byte, opts Options) (Result, error) {
 	})
 	return res, err
 }
+
+// PlanClampedGainBytes runs the measure, plan, clamp sequence for a caller that
+// applies the gain itself (for example while encoding, to avoid a second buffer
+// pass). It measures the integrated loudness and true peak of interleaved
+// little-endian int16 PCM bytes with MeasureBytes (which reads them in place
+// without mutating b), plans the single gain that brings the clip to
+// opts.TargetLUFS without its true peak exceeding opts.TruePeakDBTP with
+// PlanGain, then clamps that gain to [-|maxAbsGainDB|, +|maxAbsGainDB|] with
+// ClampGainDB.
+//
+// clampedGainDB is the gain to apply. res is PlanGain's untouched planning
+// Result: res.Input is the pass-one measurement, res.GainDB is the pre-clamp
+// planned gain (equal to clampedGainDB when the clamp did not fire), and
+// res.PeakLimited reports true-peak limiting; limited reports whether the clamp
+// took effect. res.OutputLUFS and res.TargetGainDB are PlanGain's projections for
+// the pre-clamp gain (res.GainDB); once limited is true the applied gain is
+// clampedGainDB, so those two projections no longer describe the output. Silent
+// or sub-400 ms input yields clampedGainDB == 0, leaving a
+// quiet clip unchanged rather than boosting its noise floor. len(b) must be
+// even; an odd length returns ErrOddByteLength and zeroes every other return value.
+//
+// Only the sample rate and channel count are validated (by MeasureBytes). Like
+// PlanGain, opts.TargetLUFS and opts.TruePeakDBTP are not range-checked here, so
+// a caller that bypasses Normalize* must pass a target in (-70, 0) and a ceiling
+// <= 0. A NaN target makes PlanGain produce a NaN gain, which ClampGainDB then
+// clamps to 0 (no change) rather than letting it corrupt the signal.
+func PlanClampedGainBytes(b []byte, opts Options, maxAbsGainDB float64) (clampedGainDB float64, res Result, limited bool, err error) {
+	meas, err := MeasureBytes(b, opts.SampleRate, opts.Channels)
+	if err != nil {
+		return 0, Result{}, false, err
+	}
+	res = PlanGain(meas, opts)
+	clampedGainDB, limited = ClampGainDB(res.GainDB, maxAbsGainDB)
+	return clampedGainDB, res, limited, nil
+}

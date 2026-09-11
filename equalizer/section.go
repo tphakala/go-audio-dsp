@@ -28,3 +28,21 @@ func (s *section) run(buf []float32) {
 	}
 	s.x1, s.x2, s.y1, s.y2 = x1, x2, y1, y2
 }
+
+// run64 filters buf in place through this section in full float64. Unlike run,
+// input and output stay float64 across the whole buffer, so a cascade of run64
+// calls keeps float64 precision between sections instead of truncating to
+// float32 at each stage. This is a numerically different filter from run (it
+// carries more precision through the recurrence); the two share the same float64
+// state, so a stream should use one or the other and reset between them.
+func (s *section) run64(buf []float64) {
+	c := s.c
+	x1, x2, y1, y2 := s.x1, s.x2, s.y1, s.y2
+	for i, x := range buf {
+		y := c.b0*x + c.b1*x1 + c.b2*x2 - c.a1*y1 - c.a2*y2
+		x2, x1 = x1, x
+		y2, y1 = y1, y
+		buf[i] = y
+	}
+	s.x1, s.x2, s.y1, s.y2 = x1, x2, y1, y2
+}
