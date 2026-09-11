@@ -1,8 +1,7 @@
 package denoiser
 
 import (
-	"fmt"
-
+	"github.com/tphakala/go-audio-dsp/stft"
 	"github.com/tphakala/simd/f32"
 )
 
@@ -18,9 +17,11 @@ type Denoiser struct {
 	ovl        int // n/hop: frames overlapping any sample
 	bins       int // n/2+1
 
-	plan    *f32.STFTPlan
-	window  []float32 // periodic Hann, analysis and synthesis
-	invNorm []float32 // len hop: 1 / WOLA normalization per position in a block
+	plan     *stft.Plan     // whole-clip transform, for noise-profile measurement
+	an       *stft.Analyzer // streaming analysis: framing, window, RFFT, |X|^2
+	window   []float32      // periodic Hann, analysis and synthesis (the analyzer's)
+	invNorm  []float32      // len hop: 1 / WOLA normalization per position in a block
+	prezeros []float32      // len n-hop: the leading-zero preroll fed on Reset
 
 	gains    *gainState
 	noise    []float32 // active noise power: noiseBuf (fixed profile) or tracker.noise
@@ -29,11 +30,7 @@ type Denoiser struct {
 	tracker  *mcra
 
 	// stream state
-	inBuf             []float32 // analysis buffer, len n; the next frame once inFill == n
-	inFill            int
-	spec              []complex64
-	power             []float32
-	gain              []float32
+	gain              []float32 // per-bin real gain, reused each frame
 	synth             []float32 // inverse frame, len n
 	ola               []float32 // overlap-add accumulator, len n
 	zeros             []float32 // len hop, fed by Flush
@@ -49,9 +46,22 @@ func New(cfg Config) (*Denoiser, error) {
 	if err != nil {
 		return nil, err
 	}
-	plan, err := f32.NewSTFTPlan(rc.FrameSize)
+	// One shared analysis Config drives two independent stft objects: a whole-clip
+	// Plan for noise-profile measurement and a streaming Analyzer for the
+	// frame-by-frame denoise path. Each owns its own simd plan, a deliberate
+	// setup-time cost that keeps their transform scratch independent (the two are
+	// never used concurrently). Both resolve the same periodic Hann window, so the
+	// profile power and the stream power are measured on the identical window. The
+	// two constructors already wrap any failure in ErrInvalidConfig, and the
+	// denoiser's own Config.resolve validates a tighter range, so they never fail here.
+	stftCfg := stft.Config{FrameSize: rc.FrameSize, HopSize: rc.HopSize, Window: stft.Hann}
+	plan, err := stft.New(stftCfg)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+		return nil, err
+	}
+	an, err := stft.NewAnalyzer(stftCfg)
+	if err != nil {
+		return nil, err
 	}
 	d := &Denoiser{
 		cfg:        rc,
@@ -62,16 +72,15 @@ func New(cfg Config) (*Denoiser, error) {
 		ovl:        rc.FrameSize / rc.HopSize,
 		bins:       plan.NumBins(),
 		plan:       plan,
+		an:         an,
 	}
-	d.window = hannPeriodic(d.n)
-	norm := wolaNorm(d.window, d.window, d.hop)
+	d.window = an.Window()
+	norm := stft.WOLANorm(d.window, d.window, d.hop)
 	d.invNorm = make([]float32, d.hop)
 	f32.Reciprocal(d.invNorm, norm) // full-precision division, not approximate rcp
+	d.prezeros = make([]float32, d.n-d.hop)
 	d.gains = newGainState(d.bins, p)
 	d.noiseBuf = make([]float32, d.bins)
-	d.inBuf = make([]float32, d.n)
-	d.spec = make([]complex64, d.bins)
-	d.power = make([]float32, d.bins)
 	d.gain = make([]float32, d.bins)
 	d.synth = make([]float32, d.n)
 	d.ola = make([]float32, d.n)
@@ -100,8 +109,11 @@ func (d *Denoiser) Latency() int { return d.n - d.hop }
 // decision-directed and tracker state, sample counters) so the next Process
 // starts a new stream. The configuration and any set noise profile are kept.
 func (d *Denoiser) Reset() {
-	clear(d.inBuf)
-	d.inFill = d.n - d.hop // the stream is preceded by n-hop zeros
+	// The stream is modelled as n-hop leading zeros ++ input. Prime the analyzer
+	// with that preroll so the first output sample aligns with the first input
+	// sample; n-hop < n, so no frame completes and noEmit is never called.
+	d.an.Reset()
+	d.an.Feed(d.prezeros, noEmit)
 	clear(d.ola)
 	d.frames = 0
 	d.totalIn, d.totalOut = 0, 0

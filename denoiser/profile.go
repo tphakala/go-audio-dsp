@@ -5,6 +5,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/tphakala/go-audio-dsp/stft"
 	"github.com/tphakala/simd/f32"
 )
 
@@ -86,7 +87,7 @@ const profileBatchFrames = 64
 // the number of frames averaged (0 when x is shorter than one frame). It
 // allocates scratch; it is a setup-time helper, not part of the stream path.
 func (d *Denoiser) meanPower(dst, x []float32) int {
-	frames := d.plan.NumFrames(len(x), d.hop, f32.NoPad)
+	frames := d.plan.NumFrames(len(x), stft.NoPad)
 	if frames == 0 {
 		return 0
 	}
@@ -96,7 +97,7 @@ func (d *Denoiser) meanPower(dst, x []float32) int {
 		nf := min(profileBatchFrames, frames-f0)
 		start := f0 * d.hop
 		end := min(len(x), start+(nf-1)*d.hop+d.n)
-		got := d.plan.STFTPowerInto(flat[:nf*d.bins], x[start:end], d.window, d.hop, f32.NoPad)
+		got := d.plan.PowerInto(flat[:nf*d.bins], x[start:end], stft.NoPad)
 		for f := range got {
 			row := flat[f*d.bins : (f+1)*d.bins]
 			for k, v := range row {
