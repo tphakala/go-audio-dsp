@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/tphakala/go-audio-dsp/stft"
 	"github.com/tphakala/simd/f32"
 )
 
@@ -28,7 +29,7 @@ func spanRMSDB(x []float32, spans [][2]int) float64 {
 // Hann power spectra (n-point, hop-spaced, no padding).
 func lsdDB(a, b []float32, spans [][2]int, n, hop int) float64 {
 	plan, _ := f32.NewSTFTPlan(n)
-	win := hannPeriodic(n)
+	win := stft.GenerateWindow(stft.Hann, n)
 	bins := plan.NumBins()
 	var total float64
 	var frames int
