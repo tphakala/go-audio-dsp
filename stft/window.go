@@ -43,10 +43,11 @@ func (w Window) String() string {
 }
 
 // GenerateWindow returns the built-in window w of length n as float32 samples,
-// computed in float64 and cast down. n must be positive; n <= 1 returns a single
-// unit sample (a length below 2 carries no meaningful taper). An unrecognized
-// Window value returns the default (Hann) window. The Hann formula is load-bearing:
-// changing it moves the denoiser's output bits (pinned by TestGenerateWindowHannFormula).
+// computed in float64 and cast down. n <= 0 returns an empty slice and n == 1 a
+// single unit sample (a length below 2 carries no meaningful taper). An
+// unrecognized Window value returns the default (Hann) window. The Hann formula is
+// load-bearing: changing it moves the denoiser's output bits (pinned by
+// TestGenerateWindowHannFormula).
 func GenerateWindow(w Window, n int) []float32 {
 	if n <= 0 {
 		return []float32{}
