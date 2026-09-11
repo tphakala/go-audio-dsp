@@ -70,6 +70,14 @@ const (
 	defaultChannels     = 1
 )
 
+// DefaultMaxGainDB is a sane default ceiling for a loudness-correction gain, in
+// dB: a clip is amplified or attenuated toward its target loudness by no more
+// than this magnitude. It stops a near-silent clip from being lifted into loud
+// broadband static and a very hot clip from being driven toward digital
+// silence. Callers pass it (or their own ceiling) to ClampGainDB and
+// PlanClampedGainBytes.
+const DefaultMaxGainDB = 30.0
+
 // Options configures normalization. Use DefaultOptions and override as needed.
 type Options struct {
 	SampleRate int // samples per second, must be >= 8000
@@ -202,6 +210,36 @@ func PlanGain(meas Measurement, opts Options) Result {
 	res.GainDB = gain
 	res.OutputLUFS = meas.IntegratedLUFS + gain
 	return res
+}
+
+// ClampGainDB constrains a planned gain (dB) to the symmetric range
+// [-|maxAbsDB|, +|maxAbsDB|] and reports whether the clamp took effect. maxAbsDB
+// is treated as a magnitude, so a stray negative ceiling still yields a sane
+// symmetric range rather than clamping every gain to a negative bound. Callers
+// typically pass PlanGain's GainDB and DefaultMaxGainDB (or their own ceiling);
+// the returned bool lets one caller log the limiting while another applies the
+// clamped gain silently.
+func ClampGainDB(gainDB, maxAbsDB float64) (clamped float64, limited bool) {
+	// A NaN gainDB (from an ill-specified target that made PlanGain produce a NaN
+	// gain) has no valid bounded value and would slip past the comparisons below
+	// (every comparison with NaN is false), passing through as the applied gain
+	// and corrupting the signal. A NaN maxAbsDB is the same hazard from the ceiling
+	// side: math.Abs(NaN) is NaN, so neither comparison fires and any gain would
+	// slip through unclamped. Treat either as out of range and clamp to 0 (no
+	// change). An infinite gainDB is handled by the comparisons, which clamp it
+	// to the ceiling.
+	if math.IsNaN(gainDB) || math.IsNaN(maxAbsDB) {
+		return 0, true
+	}
+	absLimit := math.Abs(maxAbsDB)
+	switch {
+	case gainDB > absLimit:
+		return absLimit, true
+	case gainDB < -absLimit:
+		return -absLimit, true
+	default:
+		return gainDB, false
+	}
 }
 
 // validateDims reports whether n interleaved samples at the given sample rate
