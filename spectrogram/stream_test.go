@@ -1,6 +1,9 @@
 package spectrogram
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // feedChunked feeds sig to s in irregular chunk sizes and returns each emitted
 // column (copied, since the callback slice is reused) and its center sample.
@@ -98,6 +101,43 @@ func TestStreamResetAndShortFeed(t *testing.T) {
 	})
 	if firstCenter != int64(n/2) {
 		t.Fatalf("after Reset firstCenter = %d, want %d", firstCenter, n/2)
+	}
+
+	// The checks above feed only zeros, so they cannot reveal a Reset that leaves
+	// samples buffered in the analyzer: stale zeros do not perturb a later frame.
+	// Dirty the buffer with a non-zero signal, Reset, then feed a fresh non-zero
+	// frame. The emitted column must match a brand-new source fed the identical
+	// input bit for bit (Power is deterministic), which is only true if no stale
+	// samples survived Reset.
+	dirty := sine(2*n, sr, 300, 0.9)
+	s.Feed(dirty, func(col []float32, center int64) {}) // fill the buffer; ignore output
+	s.Reset()
+
+	frame := sine(n, sr, 900, 0.6)
+	var afterReset []float32
+	s.Feed(frame, func(col []float32, center int64) {
+		if afterReset == nil {
+			afterReset = slices.Clone(col)
+		}
+	})
+
+	fresh, err := NewColumnSource(Config{SampleRate: sr, FrameSize: n, HopSize: hop, Scale: Power})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []float32
+	fresh.Feed(frame, func(col []float32, center int64) {
+		if want == nil {
+			want = slices.Clone(col)
+		}
+	})
+	if afterReset == nil || want == nil {
+		t.Fatalf("want one column from each source, got reset=%t fresh=%t", afterReset != nil, want != nil)
+	}
+	for b := range want {
+		if afterReset[b] != want[b] {
+			t.Fatalf("after Reset bin %d = %v, fresh source %v: stale samples survived Reset", b, afterReset[b], want[b])
+		}
 	}
 }
 

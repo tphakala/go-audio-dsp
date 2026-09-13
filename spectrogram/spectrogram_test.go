@@ -220,6 +220,15 @@ func TestSubRangeBins(t *testing.T) {
 	if got := full.Bins(); got != n/2+1 {
 		t.Errorf("full Bins() = %d, want %d", got, n/2+1)
 	}
+	// A positive MaxHz above Nyquist is accepted and clamped to Nyquist, so it
+	// selects the full range too.
+	above, err := New(Config{SampleRate: sr, FrameSize: n, HopSize: hop, MaxHz: 1e9})
+	if err != nil {
+		t.Fatalf("MaxHz above Nyquist: New err = %v, want nil", err)
+	}
+	if got := above.Bins(); got != n/2+1 {
+		t.Errorf("MaxHz above Nyquist Bins() = %d, want %d", got, n/2+1)
+	}
 }
 
 func TestComputeIntoBufferTooSmall(t *testing.T) {
@@ -297,6 +306,7 @@ func TestConfigValidation(t *testing.T) {
 		{"dynamic range nan", Config{SampleRate: 16000, FrameSize: 256, Scale: DB, DynamicRangeDB: math.NaN()}},
 		{"min hz nan", Config{SampleRate: 16000, FrameSize: 256, MinHz: math.NaN()}},
 		{"max hz nan", Config{SampleRate: 16000, FrameSize: 256, MaxHz: math.NaN()}},
+		{"max hz negative", Config{SampleRate: 16000, FrameSize: 256, MaxHz: -1}},
 		{"min ge max", Config{SampleRate: 16000, FrameSize: 256, MinHz: 5000, MaxHz: 4000}},
 		// binHz = 62.5; [7010, 7040] falls between bin centers 7000 and 7062.5, so
 		// it selects no bin.

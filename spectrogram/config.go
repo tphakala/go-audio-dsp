@@ -49,7 +49,8 @@ func (s Scale) String() string {
 // dbFloorPower is the floor applied to window-normalized power before the log in
 // the DB scale, so an empty or near-silent bin maps to a finite ~-200 dB
 // (10*log10(1e-20)) rather than negative infinity. It is far below any
-// DynamicRangeDB a caller would set, so it never overrides the configured clamp.
+// practical DynamicRangeDB (well under 200 dB), so in practice it does not
+// override the configured clamp.
 const dbFloorPower = 1e-20
 
 // Config configures a Spectrogram or ColumnSource: the short-time transform
@@ -77,8 +78,8 @@ type Config struct {
 	DynamicRangeDB float64
 	// MinHz and MaxHz select the output frequency sub-range: rows cover the bins
 	// whose center frequency lies in [MinHz, MaxHz]. MinHz 0 starts at DC. MaxHz
-	// 0, or any value above Nyquist, is treated as Nyquist. MinHz must be < the
-	// effective MaxHz.
+	// 0, or any positive value at or above Nyquist, is treated as Nyquist; a
+	// negative MaxHz is rejected. MinHz must be < the effective MaxHz.
 	MinHz, MaxHz float64
 }
 
@@ -106,8 +107,8 @@ func (c Config) validate() error {
 	if math.IsNaN(c.MinHz) || math.IsInf(c.MinHz, 0) || c.MinHz < 0 {
 		return fmt.Errorf("%w: MinHz must be a finite value >= 0, got %g", ErrInvalidConfig, c.MinHz)
 	}
-	if math.IsNaN(c.MaxHz) {
-		return fmt.Errorf("%w: MaxHz must not be NaN", ErrInvalidConfig)
+	if math.IsNaN(c.MaxHz) || c.MaxHz < 0 {
+		return fmt.Errorf("%w: MaxHz must be >= 0 (0 means Nyquist), got %g", ErrInvalidConfig, c.MaxHz)
 	}
 	return nil
 }

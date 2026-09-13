@@ -19,7 +19,11 @@ func TestZeroAlloc(t *testing.T) {
 	}
 	m := Matrix{Data: make([]float32, s.Bins()*s.NumFrames(len(sig)))}
 	compute := func() { _, _ = s.ComputeInto(&m, sig) }
-	compute() // warm up
+	// Checked warm-up: a regression that writes no columns must fail here rather
+	// than sneak through AllocsPerRun, which ignores the result.
+	if got, err := s.ComputeInto(&m, sig); err != nil || got != s.NumFrames(len(sig)) {
+		t.Fatalf("ComputeInto warm-up = (%d, %v), want (%d, nil)", got, err, s.NumFrames(len(sig)))
+	}
 	if got := testing.AllocsPerRun(20, compute); got != 0 {
 		t.Errorf("ComputeInto allocated %v times, want 0", got)
 	}
@@ -36,7 +40,15 @@ func TestZeroAlloc(t *testing.T) {
 		})
 		cs.Reset()
 	}
-	feed() // warm up
+	// Checked warm-up: cs shares FrameSize/HopSize with s, so it must emit one
+	// column per frame. A regression that emits nothing must fail here rather
+	// than sneak through AllocsPerRun, which ignores emissions.
+	emitted := 0
+	cs.Feed(sig, func(col []float32, center int64) { emitted++ })
+	cs.Reset()
+	if want := s.NumFrames(len(sig)); emitted != want {
+		t.Fatalf("Feed warm-up emitted %d columns, want %d", emitted, want)
+	}
 	if got := testing.AllocsPerRun(20, feed); got != 0 {
 		t.Errorf("Feed allocated %v times, want 0", got)
 	}

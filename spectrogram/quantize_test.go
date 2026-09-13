@@ -1,6 +1,9 @@
 package spectrogram
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestQuantizeColumn(t *testing.T) {
 	// Range [-100, 0] dB mapped to [0, 255]. Values are chosen away from exact
@@ -37,5 +40,20 @@ func TestQuantizeColumnEdgeCases(t *testing.T) {
 	}
 	if got := QuantizeColumn(dst, nil, 0, 10); got != 0 {
 		t.Errorf("empty column wrote %d, want 0", got)
+	}
+	// A NaN bound writes nothing (neither lo nor hi may be NaN).
+	if got := QuantizeColumn(dst, []float32{1, 2, 3}, math.NaN(), 10); got != 0 {
+		t.Errorf("NaN lo wrote %d, want 0", got)
+	}
+	if got := QuantizeColumn(dst, []float32{1, 2, 3}, 0, math.NaN()); got != 0 {
+		t.Errorf("NaN hi wrote %d, want 0", got)
+	}
+	// A NaN element maps to 0 while its finite neighbours quantize normally.
+	nanDst := make([]uint8, 3)
+	if got := QuantizeColumn(nanDst, []float32{float32(math.NaN()), 0, 10}, 0, 10); got != 3 {
+		t.Fatalf("NaN element run wrote %d, want 3", got)
+	}
+	if nanDst[0] != 0 || nanDst[1] != 0 || nanDst[2] != 255 {
+		t.Errorf("NaN element mapping = %v, want [0 0 255]", nanDst)
 	}
 }

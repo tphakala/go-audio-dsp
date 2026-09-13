@@ -11,6 +11,11 @@ func benchClip(b *testing.B, cfg Config, clipSamples int) {
 	}
 	sig := sine(clipSamples, cfg.SampleRate, 1000, 0.6)
 	m := Matrix{Data: make([]float32, s.Bins()*s.NumFrames(len(sig)))}
+	// One-time checked call: the measured loop discards its result, so guard here
+	// that ComputeInto actually writes columns.
+	if got, err := s.ComputeInto(&m, sig); err != nil || got == 0 {
+		b.Fatalf("ComputeInto = (%d, %v)", got, err)
+	}
 	b.ReportAllocs()
 	for b.Loop() {
 		_, _ = s.ComputeInto(&m, sig)
@@ -36,6 +41,14 @@ func BenchmarkStreamFeed(b *testing.B) {
 		b.Fatal(err)
 	}
 	sig := sine(48000, 48000, 1000, 0.6)
+	// One-time emission check: the measured loop discards emissions, so guard
+	// here that the stream actually emits columns.
+	emitted := 0
+	cs.Feed(sig, func(col []float32, center int64) { emitted++ })
+	cs.Reset()
+	if emitted == 0 {
+		b.Fatalf("stream emitted %d columns, want > 0", emitted)
+	}
 	var sink float64
 	b.ReportAllocs()
 	for b.Loop() {
