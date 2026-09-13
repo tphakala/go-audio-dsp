@@ -48,6 +48,14 @@ func TestQuantizeColumnEdgeCases(t *testing.T) {
 	if got := QuantizeColumn(dst, []float32{1, 2, 3}, 0, math.NaN()); got != 0 {
 		t.Errorf("NaN hi wrote %d, want 0", got)
 	}
+	// An infinite bound is rejected too: it collapses the scale to 0 and would
+	// otherwise quantize every finite value to the same index.
+	if got := QuantizeColumn(dst, []float32{1, 2, 3}, math.Inf(-1), 10); got != 0 {
+		t.Errorf("-Inf lo wrote %d, want 0", got)
+	}
+	if got := QuantizeColumn(dst, []float32{1, 2, 3}, 0, math.Inf(1)); got != 0 {
+		t.Errorf("+Inf hi wrote %d, want 0", got)
+	}
 	// A NaN element maps to 0 while its finite neighbours quantize normally.
 	nanDst := make([]uint8, 3)
 	if got := QuantizeColumn(nanDst, []float32{float32(math.NaN()), 0, 10}, 0, 10); got != 3 {

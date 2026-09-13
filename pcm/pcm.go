@@ -119,12 +119,14 @@ func InPlaceInt16(b []byte, apply func(samples []int16)) {
 // (align 2) is stricter than the alignment cases unsafe.Pointer's documented
 // rules spell out, so this relies on a property of the host rather than a
 // portable guarantee: the zero-copy path is selected at runtime by
-// nativeLittleEndian and runs only on little-endian hosts, each of which
-// permits the unaligned 16-bit access in hardware at no correctness cost.
-// amd64, arm64 and 386 are the SIMD-accelerated targets, but every
-// little-endian host allows the unaligned access, not just those; big-endian
-// hosts never reach this path, as their callers take the byte-by-byte fallback
-// (bytesToInt16LE/int16ToBytesLE) instead. The unaligned view is exercised by
+// nativeLittleEndian and runs only on little-endian hosts. It is safe on the
+// architectures this library targets (amd64, arm64, 386), which permit unaligned
+// 16-bit loads and stores in hardware at no correctness cost. A little-endian
+// architecture that faults on unaligned access (the MIPS little-endian family)
+// is outside that set and would need a byte-wise fallback; it is not a target of
+// the accelerated path. Big-endian hosts never reach this path, as their callers
+// take the byte-by-byte fallback (bytesToInt16LE/int16ToBytesLE) instead. The
+// unaligned view is exercised by
 // TestInPlaceInt16MisalignedStart, which passes under the race detector's
 // pointer checks at both -d=checkptr=1 and -d=checkptr=2. A defensive alignment
 // guard was considered and rejected: it would force the zero-copy callers (gain
