@@ -112,11 +112,27 @@ func InPlaceInt16(b []byte, apply func(samples []int16)) {
 // SAFETY: &b[0] is taken only when n > 0, so an empty slice never indexes out of
 // range. The result length is exactly len(b)/2, so no read reaches past b. The
 // returned slice's data pointer keeps b's backing array alive for its lifetime,
-// and int16 holds no pointers so it adds no GC scan cost. The int16 view can be
-// unaligned when b starts at an odd address (a []byte carries no alignment
-// guarantee); unaligned int16 access is defined and safe on the little-endian
-// SIMD targets this path runs on (amd64, arm64, 386) and does not fault under
-// the race detector's checkptr.
+// and int16 holds no pointers so it adds no GC scan cost.
+//
+// ALIGNMENT: the int16 view can be unaligned when b starts at an odd address (a
+// []byte carries no alignment guarantee). Converting a *byte (align 1) to *int16
+// (align 2) is stricter than the alignment cases unsafe.Pointer's documented
+// rules spell out, so this relies on a property of the host rather than a
+// portable guarantee: the zero-copy path is selected at runtime by
+// nativeLittleEndian and runs only on little-endian hosts. It is safe on the
+// architectures this library targets (amd64, arm64, 386), which permit unaligned
+// 16-bit loads and stores in hardware at no correctness cost. A little-endian
+// architecture that faults on unaligned access (the MIPS little-endian family)
+// is outside that set and would need a byte-wise fallback; it is not a target of
+// the accelerated path. Big-endian hosts never reach this path, as their callers
+// take the byte-by-byte fallback (bytesToInt16LE/int16ToBytesLE) instead. The
+// unaligned view is exercised by
+// TestInPlaceInt16MisalignedStart, which passes under the race detector's
+// pointer checks at both -d=checkptr=1 and -d=checkptr=2. A defensive alignment
+// guard was considered and rejected: it would force the zero-copy callers (gain
+// and loudnorm, via InPlaceInt16) to allocate on a misaligned input, trading a
+// documented, depended-on guarantee for conformance against a hazard that does
+// not arise on any supported target.
 func bytesAsInt16(b []byte) []int16 {
 	n := len(b) / 2
 	if n == 0 {

@@ -84,6 +84,17 @@ type Band struct {
 	Passes    int     // cascaded identical sections, 0 means 1, at most maxPasses
 }
 
+// effectivePasses returns the number of cascaded biquad sections this band
+// expands to: Passes, with the documented default that 0 means one section.
+// NewFilter and Equalizer.New share it so the default lives in one place; the
+// upper bound (maxPasses) is validated separately in newCoeffs.
+func (b Band) effectivePasses() int {
+	if b.Passes == 0 {
+		return 1
+	}
+	return b.Passes
+}
+
 // Config configures an Equalizer. SampleRate is required; Bands may be empty, in
 // which case the Equalizer is an identity (it copies input to output unchanged).
 type Config struct {

@@ -32,11 +32,7 @@ func New(cfg Config) (*Equalizer, error) {
 		if err != nil {
 			return nil, fmt.Errorf("band %d: %w", i, err)
 		}
-		passes := b.Passes
-		if passes == 0 {
-			passes = 1
-		}
-		for range passes {
+		for range b.effectivePasses() {
 			sections = append(sections, section{c: c})
 		}
 	}
