@@ -38,11 +38,7 @@ func NewFilter(b Band, sampleRate int) (*Filter, error) {
 	if err != nil {
 		return nil, err
 	}
-	passes := b.Passes
-	if passes == 0 {
-		passes = 1
-	}
-	sections := make([]section, passes)
+	sections := make([]section, b.effectivePasses())
 	for i := range sections {
 		sections[i].c = c
 	}

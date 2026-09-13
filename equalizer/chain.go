@@ -108,7 +108,7 @@ func (c *FilterChain) Reset() {
 func (c *FilterChain) NumSections() int {
 	n := 0
 	for _, f := range c.filters {
-		n += len(f.sections)
+		n += f.NumSections()
 	}
 	return n
 }
