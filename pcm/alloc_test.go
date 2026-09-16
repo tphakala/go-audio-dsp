@@ -38,8 +38,8 @@ func TestZeroAllocConversions(t *testing.T) {
 			t.Errorf("%s allocated %v times, want 0", c.name, a)
 		}
 	}
-	// InPlaceInt16 allocates nothing on little-endian hosts.
-	if nativeLittleEndian {
+	// InPlaceInt16 allocates nothing when the zero-copy reinterpret is active.
+	if canReinterpretInt16 {
 		a := testing.AllocsPerRun(50, func() { InPlaceInt16(b, func([]int16) {}) })
 		if a != 0 {
 			t.Errorf("InPlaceInt16 allocated %v times, want 0", a)
@@ -55,12 +55,12 @@ var misalignSink int16
 // TestInPlaceInt16MisalignedZeroAlloc confirms the zero-copy fast path stays
 // allocation-free even when the byte slice starts at an odd address (the
 // unaligned int16 reinterpret). It complements the aligned case in
-// TestZeroAllocConversions. Only meaningful on little-endian hosts, where
-// InPlaceInt16 takes the bytesAsInt16 path; a big-endian host uses a scratch
-// buffer and is expected to allocate.
+// TestZeroAllocConversions. Only meaningful where canReinterpretInt16 holds (a
+// little-endian host that permits unaligned access), where InPlaceInt16 takes the
+// bytesAsInt16 path; other hosts use a scratch buffer and are expected to allocate.
 func TestInPlaceInt16MisalignedZeroAlloc(t *testing.T) {
-	if !nativeLittleEndian {
-		t.Skip("InPlaceInt16 only avoids allocation on little-endian hosts")
+	if !canReinterpretInt16 {
+		t.Skip("InPlaceInt16 only avoids allocation when the zero-copy reinterpret is active")
 	}
 	b := oddStartBuf(t, 2048)
 	if a := testing.AllocsPerRun(50, func() {
