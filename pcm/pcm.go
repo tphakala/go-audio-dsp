@@ -31,6 +31,14 @@ var nativeLittleEndian = func() bool {
 	return *(*byte)(unsafe.Pointer(&x)) == 1
 }()
 
+// canReinterpretInt16 reports whether a []byte of little-endian int16 PCM can be
+// reinterpreted as []int16 with no copy. It needs two properties at once: a
+// little-endian host, so the byte layout already matches native int16, and an
+// architecture that permits unaligned 16-bit access, so an odd-address sample
+// cannot trap. It is false on big-endian hosts and on the little-endian MIPS
+// family; both take the byte-wise little-endian path, which is correct anywhere.
+var canReinterpretInt16 = nativeLittleEndian && unalignedAccessOK
+
 // Int16ToFloat32 converts int16 PCM to float32 in [-1, 1), scaling by 1/32768,
 // and writes into dst. It converts min(len(dst), len(src)) samples and returns
 // that count; a shorter dst yields a partial conversion, not an error. The
@@ -62,7 +70,7 @@ func BytesToFloat32(dst []float32, src []byte) (int, error) {
 	if len(src)%2 != 0 {
 		return 0, ErrOddByteLength
 	}
-	if nativeLittleEndian {
+	if canReinterpretInt16 {
 		return Int16ToFloat32(dst, bytesAsInt16(src)), nil
 	}
 	return bytesToFloat32LE(dst, src), nil
@@ -78,7 +86,7 @@ func Float32ToBytes(dst []byte, src []float32) (int, error) {
 	if len(dst)%2 != 0 {
 		return 0, ErrOddByteLength
 	}
-	if nativeLittleEndian {
+	if canReinterpretInt16 {
 		return Float32ToInt16(bytesAsInt16(dst), src), nil
 	}
 	return float32ToBytesLE(dst, src), nil
@@ -95,7 +103,7 @@ func InPlaceInt16(b []byte, apply func(samples []int16)) {
 	if n == 0 {
 		return
 	}
-	if nativeLittleEndian {
+	if canReinterpretInt16 {
 		apply(bytesAsInt16(b))
 		return
 	}
@@ -118,21 +126,20 @@ func InPlaceInt16(b []byte, apply func(samples []int16)) {
 // []byte carries no alignment guarantee). Converting a *byte (align 1) to *int16
 // (align 2) is stricter than the alignment cases unsafe.Pointer's documented
 // rules spell out, so this relies on a property of the host rather than a
-// portable guarantee: the zero-copy path is selected at runtime by
-// nativeLittleEndian and runs only on little-endian hosts. It is safe on the
-// architectures this library targets (amd64, arm64, 386), which permit unaligned
-// 16-bit loads and stores in hardware at no correctness cost. A little-endian
-// architecture that faults on unaligned access (the MIPS little-endian family)
-// is outside that set and would need a byte-wise fallback; it is not a target of
-// the accelerated path. Big-endian hosts never reach this path, as their callers
-// take the byte-by-byte fallback (bytesToInt16LE/int16ToBytesLE) instead. The
-// unaligned view is exercised by
-// TestInPlaceInt16MisalignedStart, which passes under the race detector's
-// pointer checks at both -d=checkptr=1 and -d=checkptr=2. A defensive alignment
-// guard was considered and rejected: it would force the zero-copy callers (gain
-// and loudnorm, via InPlaceInt16) to allocate on a misaligned input, trading a
-// documented, depended-on guarantee for conformance against a hazard that does
-// not arise on any supported target.
+// portable guarantee: the zero-copy path is selected by canReinterpretInt16,
+// which requires both a little-endian host (so the byte layout already matches)
+// and an architecture that permits unaligned access. That holds on the
+// architectures this library targets (amd64, arm64, 386), which perform unaligned
+// 16-bit loads and stores in hardware at no correctness cost. The little-endian
+// MIPS family (mipsle, mips64le) can trap on an odd-address load, so
+// unalignedAccessOK is false there and its callers fall back to the byte-wise
+// little-endian path (bytesToInt16LE/int16ToBytesLE), as big-endian hosts already
+// do. The unaligned view is exercised by TestInPlaceInt16MisalignedStart, which
+// passes under the race detector's pointer checks at both -d=checkptr=1 and
+// -d=checkptr=2. On a supported target a blanket alignment guard is still avoided:
+// it would force the zero-copy callers (gain and loudnorm, via InPlaceInt16) to
+// allocate on a misaligned input, trading a documented, depended-on guarantee for
+// a hazard the build-tagged fallback handles for the MIPS arches (see align_ok.go).
 func bytesAsInt16(b []byte) []int16 {
 	n := len(b) / 2
 	if n == 0 {

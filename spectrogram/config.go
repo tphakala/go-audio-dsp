@@ -118,14 +118,18 @@ func (c Config) validate() error {
 // configured scale. It is shared by the whole-clip and streaming engines, so
 // both produce identical columns.
 type scaler struct {
-	scale   Scale
-	lo, hi  int     // output covers power[lo:hi]; hi-lo == bins
-	binHz   float64 // frequency spacing of one bin, SampleRate/FrameSize
-	norm    float32 // window-energy normalization, 1/sum(w^2)
-	gainDB  float32
-	clamp   bool
-	clampLo float32
-	clampHi float32
+	scale  Scale
+	lo, hi int     // output covers power[lo:hi]; hi-lo == bins
+	binHz  float64 // frequency spacing of one bin, SampleRate/FrameSize
+	norm   float32 // window-energy normalization, 1/sum(w^2)
+	// DB-scale precompute (see newScaler and apply): the window norm folds into
+	// the dB stage as one additive constant plus a pre-divided power floor. A
+	// zero-energy window (norm == 0) folds with norm treated as 1.
+	dbAddConst float32 // GainDB + 10*log10(norm), norm treated as 1 when norm <= 0
+	dbFloor    float32 // dbFloorPower / norm, norm treated as 1 when norm <= 0
+	clamp      bool
+	clampLo    float32
+	clampHi    float32
 }
 
 // bins returns the number of output rows (frequency bins) per column.
@@ -168,17 +172,35 @@ func newScaler(cfg Config, a *stft.Analyzer) (scaler, error) {
 	}
 
 	sc := scaler{
-		scale:  cfg.Scale,
-		lo:     lo,
-		hi:     hi,
-		binHz:  binHz,
-		norm:   float32(norm),
-		gainDB: float32(cfg.GainDB),
+		scale: cfg.Scale,
+		lo:    lo,
+		hi:    hi,
+		binHz: binHz,
+		norm:  float32(norm),
 	}
-	if cfg.Scale == DB && cfg.DynamicRangeDB > 0 {
-		sc.clamp = true
-		sc.clampHi = float32(cfg.GainDB)
-		sc.clampLo = float32(cfg.GainDB - cfg.DynamicRangeDB)
+	if cfg.Scale == DB {
+		// Fold the window-energy normalization into the dB stage so apply runs one
+		// fewer full-array pass: the per-bin Scale-by-norm becomes a single
+		// additive constant, from the identity
+		//   10*log10(power*norm) + GainDB == 10*log10(power) + (GainDB + 10*log10(norm)).
+		// The finite floor moves with it: flooring the raw power at dbFloorPower/norm
+		// yields the same post-log value as flooring power*norm at dbFloorPower.
+		//
+		// A degenerate zero-energy window (sum(w^2) == 0, so norm == 0; reachable via
+		// HannSymmetric at FrameSize 2) makes the transform identically zero, so fold
+		// with nf = 1 (no normalization) there: every bin then floors to the same
+		// finite value the pre-fold Scale-then-floor path gave, not 10*log10(0) = -Inf.
+		nf := norm
+		if nf <= 0 {
+			nf = 1
+		}
+		sc.dbAddConst = float32(cfg.GainDB + 10*math.Log10(nf))
+		sc.dbFloor = float32(dbFloorPower / nf)
+		if cfg.DynamicRangeDB > 0 {
+			sc.clamp = true
+			sc.clampHi = float32(cfg.GainDB)
+			sc.clampLo = float32(cfg.GainDB - cfg.DynamicRangeDB)
+		}
 	}
 	return sc, nil
 }
@@ -214,11 +236,14 @@ func (sc *scaler) apply(dst, power []float32) {
 		simdf32.Scale(dst, src, sc.norm)
 		simdf32.Sqrt(dst, dst)
 	case DB:
-		simdf32.Scale(dst, src, sc.norm)                       // |X|^2 * norm
-		simdf32.Clamp(dst, dst, dbFloorPower, math.MaxFloat32) // floor so log10 is finite
-		simdf32.Log10(dst, dst)                                // log10(power)
-		simdf32.Scale(dst, dst, 10)                            // 10*log10(power)
-		simdf32.AddScalar(dst, dst, sc.gainDB)                 // + GainDB
+		// norm is folded into dbFloor and dbAddConst (see newScaler): the raw power
+		// reads straight into the floor Clamp, dropping the old leading Scale-by-norm
+		// pass. Five mandatory passes become four (six become five with the display
+		// clamp).
+		simdf32.Clamp(dst, src, sc.dbFloor, math.MaxFloat32) // floor so log10 is finite
+		simdf32.Log10(dst, dst)                              // log10(power)
+		simdf32.Scale(dst, dst, 10)                          // 10*log10(power)
+		simdf32.AddScalar(dst, dst, sc.dbAddConst)           // + GainDB + 10*log10(norm)
 		if sc.clamp {
 			simdf32.Clamp(dst, dst, sc.clampLo, sc.clampHi)
 		}

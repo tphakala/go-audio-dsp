@@ -197,6 +197,28 @@ func TestDBFloorAndClamp(t *testing.T) {
 	}
 }
 
+// TestDBZeroEnergyWindowFinite guards the DB fold against a degenerate zero-energy
+// analysis window. HannSymmetric at FrameSize 2 is all zeros, so sum(w^2) == 0 and
+// the window-energy norm is 0; the fold must degenerate to no normalization and
+// still floor every bin to a finite value, not 10*log10(0) = -Inf.
+func TestDBZeroEnergyWindowFinite(t *testing.T) {
+	const sr, n = 16000, 2
+	s, err := New(Config{SampleRate: sr, FrameSize: n, HopSize: n, Scale: DB, GainDB: 3, Window: stft.HannSymmetric})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := s.Compute(make([]float32, 32*n))
+	wantFloor := 10*math.Log10(dbFloorPower) + 3
+	for i, v := range m.Data {
+		if math.IsInf(float64(v), 0) || math.IsNaN(float64(v)) {
+			t.Fatalf("bin %d = %v, want finite floor %g", i, v, wantFloor)
+		}
+		if math.Abs(float64(v)-wantFloor) > 1e-3 {
+			t.Fatalf("bin %d = %g, want floor %g", i, v, wantFloor)
+		}
+	}
+}
+
 func TestSubRangeBins(t *testing.T) {
 	const sr, n, hop = 48000, 1024, 256
 	// binHz = 48000/1024 = 46.875. [1000, 5000] Hz -> bins ceil(1000/46.875)=22

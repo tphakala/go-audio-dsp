@@ -236,14 +236,15 @@ func TestBytesToFloat32LEMatchesFastPath(t *testing.T) {
 	}
 }
 
-// TestBigEndianFallbackPaths forces the scalar big-endian branches on a
-// little-endian host so the composed fallback (which no CI architecture runs)
-// is exercised end to end, not just its helpers in isolation. The helpers do
+// TestBigEndianFallbackPaths forces the byte-wise fallback (the path big-endian
+// and trap-on-unaligned little-endian arches take) on this host by turning the
+// zero-copy gate off, so the composed fallback (which no CI test arch runs) is
+// exercised end to end, not just its helpers in isolation. The helpers do
 // explicit little-endian byte math, so results must match the fast path.
 func TestBigEndianFallbackPaths(t *testing.T) {
-	saved := nativeLittleEndian
-	nativeLittleEndian = false
-	defer func() { nativeLittleEndian = saved }()
+	saved := canReinterpretInt16
+	canReinterpretInt16 = false
+	defer func() { canReinterpretInt16 = saved }()
 
 	// LE bytes: {0x01,0x00}=1, {0x00,0x80}=-32768, {0xff,0x7f}=32767.
 	src := []byte{0x00, 0x00, 0x01, 0x00, 0x00, 0x80, 0xff, 0x7f}
@@ -335,6 +336,54 @@ func TestInPlaceInt16MisalignedStart(t *testing.T) {
 	for i := range orig {
 		if want := orig[i] * 2; got[i] != want {
 			t.Errorf("unaligned write-back sample %d = %d, want %d", i, got[i], want)
+		}
+	}
+}
+
+// TestReinterpretGateSafety pins the invariant that guards the zero-copy
+// []byte<->[]int16 reinterpret: it is selected only on a little-endian host that
+// also permits unaligned access. A big-endian host or a trap-on-unaligned arch
+// (mipsle, mips64le) must never take it and instead uses the byte-wise
+// little-endian path.
+func TestReinterpretGateSafety(t *testing.T) {
+	// Byte-order safety: never selected on a big-endian host, where the LE byte
+	// layout would be read as the wrong native int16.
+	if canReinterpretInt16 && !nativeLittleEndian {
+		t.Fatal("canReinterpretInt16 is true on a big-endian host: the zero-copy reinterpret would read the wrong byte order")
+	}
+	// Alignment safety: never selected on an arch that does not permit unaligned
+	// access, where an odd-address int16 load can trap. This has teeth on the
+	// little-endian MIPS build, where dropping the unalignedAccessOK half of the
+	// gate would otherwise let the reinterpret back in.
+	if canReinterpretInt16 && !unalignedAccessOK {
+		t.Fatal("canReinterpretInt16 is true on a trap-on-unaligned arch: the zero-copy reinterpret could fault")
+	}
+}
+
+// TestByteWiseInt16MatchesReinterpret checks that the byte-wise little-endian
+// int16 path (the fallback taken on big-endian and trap-on-unaligned hosts)
+// decodes the same values the zero-copy reinterpret yields, so a mipsle build
+// stays bit-for-bit correct.
+func TestByteWiseInt16MatchesReinterpret(t *testing.T) {
+	orig := []int16{0, 1, -1, 32767, -32768, 12345, -12345, 256, -256}
+	b := make([]byte, len(orig)*2)
+	int16ToBytesLE(b, orig)
+
+	got := make([]int16, len(orig))
+	bytesToInt16LE(got, b)
+	for i := range orig {
+		if got[i] != orig[i] {
+			t.Fatalf("bytesToInt16LE sample %d = %d, want %d", i, got[i], orig[i])
+		}
+	}
+	if canReinterpretInt16 {
+		// On this host the fast path is live; confirm it agrees with the byte-wise
+		// decode that the trap-on-unaligned arches use.
+		fast := bytesAsInt16(b)
+		for i := range orig {
+			if fast[i] != got[i] {
+				t.Fatalf("reinterpret sample %d = %d, byte-wise = %d", i, fast[i], got[i])
+			}
 		}
 	}
 }

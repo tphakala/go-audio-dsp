@@ -114,6 +114,10 @@ jobs:
         include:
           - {goos: linux, goarch: amd64}
           - {goos: linux, goarch: arm64}
+          # Little-endian MIPS traps on unaligned access; build it so the pcm
+          # byte-wise fallback (align_trap.go) stays compiling.
+          - {goos: linux, goarch: mipsle}
+          - {goos: linux, goarch: mips64le}
           - {goos: darwin, goarch: amd64}
           - {goos: darwin, goarch: arm64}
           - {goos: windows, goarch: amd64}
