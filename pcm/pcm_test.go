@@ -346,8 +346,17 @@ func TestInPlaceInt16MisalignedStart(t *testing.T) {
 // (mipsle, mips64le) must never take it and instead uses the byte-wise
 // little-endian path.
 func TestReinterpretGateSafety(t *testing.T) {
+	// Byte-order safety: never selected on a big-endian host, where the LE byte
+	// layout would be read as the wrong native int16.
 	if canReinterpretInt16 && !nativeLittleEndian {
 		t.Fatal("canReinterpretInt16 is true on a big-endian host: the zero-copy reinterpret would read the wrong byte order")
+	}
+	// Alignment safety: never selected on an arch that does not permit unaligned
+	// access, where an odd-address int16 load can trap. This has teeth on the
+	// little-endian MIPS build, where dropping the unalignedAccessOK half of the
+	// gate would otherwise let the reinterpret back in.
+	if canReinterpretInt16 && !unalignedAccessOK {
+		t.Fatal("canReinterpretInt16 is true on a trap-on-unaligned arch: the zero-copy reinterpret could fault")
 	}
 }
 

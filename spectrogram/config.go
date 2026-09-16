@@ -123,9 +123,10 @@ type scaler struct {
 	binHz  float64 // frequency spacing of one bin, SampleRate/FrameSize
 	norm   float32 // window-energy normalization, 1/sum(w^2)
 	// DB-scale precompute (see newScaler and apply): the window norm folds into
-	// the dB stage as one additive constant plus a pre-divided power floor.
-	dbAddConst float32 // GainDB + 10*log10(norm)
-	dbFloor    float32 // dbFloorPower / norm
+	// the dB stage as one additive constant plus a pre-divided power floor. A
+	// zero-energy window (norm == 0) folds with norm treated as 1.
+	dbAddConst float32 // GainDB + 10*log10(norm), norm treated as 1 when norm <= 0
+	dbFloor    float32 // dbFloorPower / norm, norm treated as 1 when norm <= 0
 	clamp      bool
 	clampLo    float32
 	clampHi    float32
