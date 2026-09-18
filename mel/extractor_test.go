@@ -126,8 +126,8 @@ func melTestConfigs(t *testing.T) map[string]Config {
 			HopSize: 256, NumMels: 40, MinHz: 0, MaxHz: 0, Input: InputPower, Log: Log10, LogOffset: 1e-6,
 		},
 		// The BSG-BAT shape has most rows narrower than dotProductMinWidth, so the
-		// projector routes them through the scalar fused loop rather than f32.DotProduct;
-		// this drives that path against the float64 reference.
+		// projector routes them through the scalar multiply-accumulate loop rather than
+		// f32.DotProduct; this drives that path against the float64 reference.
 		"bsgbat-narrow": {
 			SampleRate: 384000, FrameSize: 1024, HopSize: 256, NumMels: 128,
 			MinHz: 9000, MaxHz: 150000, Input: InputPower, Log: Log10, LogOffset: 1e-6,

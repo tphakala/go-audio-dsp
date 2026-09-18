@@ -209,7 +209,7 @@ func (c Config) validate() error {
 
 // dotProductMinWidth is the nonzero-weight count at or above which apply projects
 // a row with the SIMD f32.DotProduct kernel; narrower rows use a scalar
-// fused-multiply-add loop, because for a few terms the DotProduct call and
+// multiply-accumulate loop, because for a few terms the DotProduct call and
 // dispatch overhead dominates the multiply-add work. 16 is where the two paths
 // cross on amd64 (measured on an i7: scalar wins through width 14, DotProduct from
 // 16 up); on arm64 the crossover is wider (scalar wins past 24), so 16 is safe
@@ -249,9 +249,9 @@ func (p *projector) apply(dst, power []float32) {
 	}
 	// Sparse per-row projection: each row multiplies only its contiguous nonzero
 	// weights against the matching bins. A row narrower than dotProductMinWidth uses
-	// a scalar fused loop because the DotProduct call overhead would dominate its few
-	// terms; wider rows stay on the SIMD kernel. An empty row (n == 0) reads empty
-	// spans and yields 0.
+	// a scalar multiply-accumulate loop because the DotProduct call overhead would
+	// dominate its few terms; wider rows stay on the SIMD kernel. An empty row
+	// (n == 0) reads empty spans and yields 0.
 	for m, r := range p.fb.rows {
 		w := p.fb.weights[r.off : r.off+r.n]
 		s := src[r.start : r.start+r.n]

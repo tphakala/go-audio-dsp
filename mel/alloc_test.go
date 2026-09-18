@@ -70,8 +70,8 @@ func TestZeroAlloc(t *testing.T) {
 
 // TestZeroAllocScalarAndMagnitude proves the projection branches added for the
 // sparse-projection tuning stay allocation-free per frame: the narrow BSG-BAT
-// shape drives the scalar fused loop, and its magnitude variant drives the
-// sub-band sqrt path.
+// shape drives the scalar multiply-accumulate loop, and its magnitude variant
+// drives the sub-band sqrt path.
 func TestZeroAllocScalarAndMagnitude(t *testing.T) {
 	configs := map[string]Config{
 		"narrow-power": {
