@@ -432,6 +432,10 @@ func TestExtractorConfigValidation(t *testing.T) {
 		{"log without offset or floor", mut(func(c *Config) { c.Log = Log10 })},
 		{"log offset negative", mut(func(c *Config) { c.Log = Log10; c.LogOffset = -1 })},
 		{"log floor nan", mut(func(c *Config) { c.Log = Log10; c.LogFloor = math.NaN() })},
+		{"log offset underflows float32", mut(func(c *Config) { c.Log = Log10; c.LogOffset = 1e-50 })},
+		{"log floor underflows float32", mut(func(c *Config) { c.Log = Log10; c.LogFloor = 1e-50 })},
+		{"log offset overflows float32", mut(func(c *Config) { c.Log = Log10; c.LogOffset = 1e40 })},
+		{"log floor overflows float32", mut(func(c *Config) { c.Log = Log10; c.LogFloor = 1e40 })},
 		{"custom bank bins mismatch", mut(func(c *Config) { c.Filterbank = fbBad })},
 		{"window length too big", mut(func(c *Config) { c.WindowLength = 9999 })},
 	}

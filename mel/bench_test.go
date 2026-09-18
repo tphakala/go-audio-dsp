@@ -27,8 +27,10 @@ func BenchmarkComputeBatClip(b *testing.B) {
 	}
 }
 
-// BenchmarkStreamFeedVAD measures 1 s of 16 kHz audio through the TEN VAD-shaped
-// streaming path (768-sample window centered in a 1024 FFT).
+// BenchmarkStreamFeedVAD measures 1 s of 16 kHz audio through a VAD-like streaming
+// shape (a 768-sample window centered in a 1024 FFT). The exact TEN VAD front-end
+// parameters are not yet pinned (see issue #32); this is a representative
+// small-window streaming configuration, not a claim about that model.
 func BenchmarkStreamFeedVAD(b *testing.B) {
 	cfg := Config{
 		SampleRate: 16000, FrameSize: 1024, WindowLength: 768, WindowAlign: stft.AlignCenter,

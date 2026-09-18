@@ -189,8 +189,20 @@ func (c Config) validate() error {
 	if math.IsNaN(c.LogFloor) || math.IsInf(c.LogFloor, 0) || c.LogFloor < 0 {
 		return fmt.Errorf("%w: LogFloor must be a finite value >= 0, got %g", ErrInvalidConfig, c.LogFloor)
 	}
-	if c.Log != LogNone && c.LogOffset <= 0 && c.LogFloor <= 0 {
-		return fmt.Errorf("%w: Log requires LogOffset > 0 or LogFloor > 0 so silence never yields -Inf", ErrInvalidConfig)
+	// The projector applies the offset and floor as float32 (buildEngine casts them
+	// once). A finite positive float64 that overflows to +Inf or underflows to 0 in
+	// float32 would defeat the guard and let apply emit a non-finite column, so
+	// validate the converted values the projector actually uses, not just the float64
+	// inputs.
+	offset32, floor32 := float32(c.LogOffset), float32(c.LogFloor)
+	if math.IsInf(float64(offset32), 0) {
+		return fmt.Errorf("%w: LogOffset %g overflows to non-finite in float32", ErrInvalidConfig, c.LogOffset)
+	}
+	if math.IsInf(float64(floor32), 0) {
+		return fmt.Errorf("%w: LogFloor %g overflows to non-finite in float32", ErrInvalidConfig, c.LogFloor)
+	}
+	if c.Log != LogNone && offset32 <= 0 && floor32 <= 0 {
+		return fmt.Errorf("%w: Log requires LogOffset or LogFloor to stay > 0 in float32 so silence never yields -Inf, got LogOffset %g, LogFloor %g", ErrInvalidConfig, c.LogOffset, c.LogFloor)
 	}
 	return nil
 }
