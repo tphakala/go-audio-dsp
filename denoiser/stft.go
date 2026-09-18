@@ -44,10 +44,14 @@ func (d *Denoiser) feed(in, out []float32, flushing bool) int {
 	d.an.Feed(in, func(spec []complex64, power []float32) {
 		d.updateNoise(power, flushing)
 		d.gains.compute(d.gain, power, d.noise)
-		c64.MulReal(spec, spec, d.gain) // per-bin real gain; alias-safe (dst == a), scalar in simd v1.10.0
+		c64.MulReal(spec, spec, d.gain) // per-bin real gain; alias-safe (dst == a), scalar in simd (no SIMD kernel yet, simd #259)
 		d.an.Inverse(d.synth, spec)
-		f32.Mul(d.synth, d.synth, d.window)
-		f32.Add(d.ola, d.ola, d.synth)
+		// Fuse the synthesis window and overlap-add into one pass:
+		// d.ola += d.synth * d.window (was f32.Mul into d.synth, then f32.Add into
+		// d.ola). d.synth is only the IRFFT output buffer and is not read after this.
+		// MulAdd uses a hardware FMA where available, so like the IRFFT above it is
+		// tolerance-stable across CPU tiers, not bit-identical.
+		f32.MulAdd(d.ola, d.synth, d.window)
 		if d.frames >= int64(d.ovl-1) {
 			m := min(d.hop, len(out)-written)
 			d.finishBlock(out[written : written+m])
