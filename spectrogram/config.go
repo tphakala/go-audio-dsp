@@ -238,12 +238,16 @@ func (sc *scaler) apply(dst, power []float32) {
 	case DB:
 		// norm is folded into dbFloor and dbAddConst (see newScaler): the raw power
 		// reads straight into the floor Clamp, dropping the old leading Scale-by-norm
-		// pass. Five mandatory passes become four (six become five with the display
-		// clamp).
+		// pass (#41), and the 10*x and +const tail fold into one Affine pass (#42).
+		// Three mandatory passes remain (Clamp, Log10, Affine); four with the display
+		// clamp.
 		simdf32.Clamp(dst, src, sc.dbFloor, math.MaxFloat32) // floor so log10 is finite
 		simdf32.Log10(dst, dst)                              // log10(power)
-		simdf32.Scale(dst, dst, 10)                          // 10*log10(power)
-		simdf32.AddScalar(dst, dst, sc.dbAddConst)           // + GainDB + 10*log10(norm)
+		// 10*log10(power) + (GainDB + 10*log10(norm)) in one pass. Affine rounds the
+		// multiply and the add separately, so it is bit-identical to the old
+		// Scale-then-AddScalar pair on every dispatch tier and keeps batch (ComputeInto)
+		// and streaming (ColumnSource) output identical.
+		simdf32.Affine(dst, dst, 10, sc.dbAddConst)
 		if sc.clamp {
 			simdf32.Clamp(dst, dst, sc.clampLo, sc.clampHi)
 		}
