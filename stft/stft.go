@@ -99,3 +99,41 @@ func (p *Plan) Spectrum(dst [][]complex64, signal []float32, pad PadMode) int {
 func (p *Plan) PowerInto(dst, signal []float32, pad PadMode) int {
 	return p.p.STFTPowerInto(dst, signal, p.window, p.hop, pad.simd())
 }
+
+// meanPowerBatchFrames bounds the scratch MeanPowerInto uses per STFT batch.
+const meanPowerBatchFrames = 64
+
+// MeanPowerInto writes into dst (len >= NumBins) the mean power spectrum |X|^2
+// averaged over every full NoPad frame of signal, and returns the number of
+// frames averaged (0 when signal is shorter than one frame, leaving dst
+// unchanged). It accumulates in float64 for stability across long clips and
+// allocates scratch, so it is a setup-time statistic, not part of a hot loop.
+// Unlike PowerInto it applies no floor: empty or non-finite bins are left as the
+// raw average, so the caller decides how to treat them (a noise-profile caller
+// floors at its own epsilon). It is the generic STFT statistic the denoiser's
+// noise-profile measurement is built on.
+func (p *Plan) MeanPowerInto(dst, signal []float32) int {
+	frames := p.NumFrames(len(signal), NoPad)
+	if frames == 0 {
+		return 0
+	}
+	bins := p.NumBins()
+	acc := make([]float64, bins)
+	flat := make([]float32, meanPowerBatchFrames*bins)
+	for f0 := 0; f0 < frames; f0 += meanPowerBatchFrames {
+		nf := min(meanPowerBatchFrames, frames-f0)
+		start := f0 * p.hop
+		end := min(len(signal), start+(nf-1)*p.hop+p.n)
+		got := p.PowerInto(flat[:nf*bins], signal[start:end], NoPad)
+		for f := range got {
+			row := flat[f*bins : (f+1)*bins]
+			for k, v := range row {
+				acc[k] += float64(v)
+			}
+		}
+	}
+	for k := range bins {
+		dst[k] = float32(acc[k] / float64(frames))
+	}
+	return frames
+}

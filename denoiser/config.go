@@ -59,7 +59,7 @@ func (c Config) resolve() (Config, Params, error) {
 	if c.Params != nil {
 		p = *c.Params
 	} else {
-		if !c.Strength.valid() {
+		if !c.Strength.Valid() {
 			return c, Params{}, fmt.Errorf("%w: unknown Strength %d", ErrInvalidConfig, int(c.Strength))
 		}
 		p = ParamsFor(c.Strength)
