@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"math/cmplx"
+	"strings"
 	"testing"
 
 	dsp "github.com/tphakala/go-audio-dsp"
@@ -175,22 +176,37 @@ func TestConfigValidation(t *testing.T) {
 	cases := []struct {
 		name string
 		cfg  Config
+		// substr, when set, must appear in the error message. It pins which rule
+		// fired: ErrInvalidConfig is a shared sentinel, so errors.Is alone would let
+		// a case silently regress to tripping a different validation branch.
+		substr string
 	}{
-		{"frame not pow2", Config{FrameSize: 100}},
-		{"frame too small", Config{FrameSize: 1}},
-		{"hop too large", Config{FrameSize: 256, HopSize: 257}},
-		{"hop negative", Config{FrameSize: 256, HopSize: -1}},
-		{"bad window", Config{FrameSize: 256, Window: Window(99)}},
-		{"custom window wrong len", Config{FrameSize: 256, CustomWindow: make([]float32, 100)}},
+		{"frame not pow2", Config{FrameSize: 100}, ""},
+		{"frame too small", Config{FrameSize: 1}, ""},
+		{"hop too large", Config{FrameSize: 256, HopSize: 257}, ""},
+		{"hop negative", Config{FrameSize: 256, HopSize: -1}, ""},
+		{"bad window", Config{FrameSize: 256, Window: Window(99)}, ""},
+		{"custom window wrong len", Config{FrameSize: 256, CustomWindow: make([]float32, 100)}, "CustomWindow length"},
+		{"window length too large", Config{FrameSize: 256, WindowLength: 257}, "WindowLength"},
+		{"window length negative", Config{FrameSize: 256, WindowLength: -1}, "WindowLength"},
+		{"bad window align", Config{FrameSize: 256, WindowAlign: WindowAlign(99)}, "WindowAlign"},
+		{"custom window not window length", Config{FrameSize: 256, WindowLength: 128, CustomWindow: make([]float32, 100)}, "CustomWindow length"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if _, err := New(c.cfg); !errors.Is(err, dsp.ErrInvalidConfig) {
-				t.Errorf("New(%s) err = %v, want ErrInvalidConfig", c.name, err)
+			check := func(ctor string, err error) {
+				if !errors.Is(err, dsp.ErrInvalidConfig) {
+					t.Errorf("%s(%s) err = %v, want ErrInvalidConfig", ctor, c.name, err)
+					return
+				}
+				if c.substr != "" && !strings.Contains(err.Error(), c.substr) {
+					t.Errorf("%s(%s) err = %q, want to contain %q", ctor, c.name, err, c.substr)
+				}
 			}
-			if _, err := NewAnalyzer(c.cfg); !errors.Is(err, dsp.ErrInvalidConfig) {
-				t.Errorf("NewAnalyzer(%s) err = %v, want ErrInvalidConfig", c.name, err)
-			}
+			_, err := New(c.cfg)
+			check("New", err)
+			_, err = NewAnalyzer(c.cfg)
+			check("NewAnalyzer", err)
 		})
 	}
 }

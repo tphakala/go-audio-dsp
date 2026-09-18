@@ -16,6 +16,12 @@
 //     Streaming is always NoPad; feed leading zeros for a centered or delayed
 //     start.
 //
+// The analysis window may be shorter than the transform: Config.WindowLength in
+// [1, FrameSize] with Config.WindowAlign selects a window zero-padded into the
+// FrameSize frame (librosa win_length < n_fft), while the transform size, NumBins
+// and framing grid stay FrameSize. The default (WindowLength 0) is a full-frame
+// window, so existing configs are unchanged.
+//
 // GenerateWindow and WOLANorm are exposed for consumers that build their own
 // windows or need the overlap-add normalization for resynthesis.
 //
