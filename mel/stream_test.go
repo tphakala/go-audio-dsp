@@ -123,6 +123,9 @@ func TestStreamAccessors(t *testing.T) {
 	if cs.FrameSize() != 1024 || cs.HopSize() != 256 || cs.NumMels() != 40 {
 		t.Errorf("accessors = %d/%d/%d, want 1024/256/40", cs.FrameSize(), cs.HopSize(), cs.NumMels())
 	}
+	if cs.NumBins() != 1024/2+1 {
+		t.Errorf("NumBins = %d, want %d", cs.NumBins(), 1024/2+1)
+	}
 	if cs.Filterbank() == nil || cs.Filterbank().NumMels() != 40 {
 		t.Errorf("Filterbank() = %v, want 40-row bank", cs.Filterbank())
 	}

@@ -71,16 +71,7 @@ func (e *Extractor) Filterbank() *Filterbank { return e.pr.fb }
 // than a frame); the centered modes are 1 + signalLen/HopSize (0 when signalLen
 // is 0).
 func (e *Extractor) NumFrames(signalLen int, pad stft.PadMode) int {
-	if signalLen <= 0 {
-		return 0
-	}
-	if !centered(pad) {
-		if signalLen < e.n {
-			return 0
-		}
-		return 1 + (signalLen-e.n)/e.hop
-	}
-	return 1 + signalLen/e.hop
+	return e.an.NumFrames(signalLen, pad)
 }
 
 // Compute returns a freshly allocated Matrix for signal under pad. It is the

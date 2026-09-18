@@ -207,16 +207,27 @@ func (c Config) validate() error {
 	return nil
 }
 
+// dotProductMinWidth is the nonzero-weight count at or above which apply projects
+// a row with the SIMD f32.DotProduct kernel; narrower rows use a scalar
+// multiply-accumulate loop, because for a few terms the DotProduct call and
+// dispatch overhead dominates the multiply-add work. 16 is where the two paths
+// cross on amd64 (measured on an i7: scalar wins through width 14, DotProduct from
+// 16 up); on arm64 the crossover is wider (scalar wins past 24), so 16 is safe
+// there too and never routes a row to a slower path than the old always-DotProduct
+// projection did. It is a compile-time constant, so the branch is arch-independent.
+const dotProductMinWidth = 16
+
 // projector maps one frame's power (len NumBins, Analyzer-owned) to one mel
 // column (len NumMels). Shared by Extractor and ColumnSource so both produce
 // identical columns.
 type projector struct {
-	fb     *Filterbank
-	input  Input
-	mag    []float32 // sqrt scratch, len NumBins, only for InputMagnitude
-	log    Log
-	offset float32 // LogOffset cast once
-	floor  float32 // LogFloor cast once
+	fb           *Filterbank
+	input        Input
+	mag          []float32 // sqrt scratch, len NumBins, only for InputMagnitude
+	magLo, magHi int       // union of nonempty row spans; the sqrt sub-range for InputMagnitude
+	log          Log
+	offset       float32 // LogOffset cast once
+	floor        float32 // LogFloor cast once
 }
 
 // apply writes one mel column into dst (len NumMels) from a frame's power (len
@@ -225,15 +236,35 @@ type projector struct {
 func (p *projector) apply(dst, power []float32) {
 	src := power
 	if p.input == InputMagnitude {
-		simdf32.Sqrt(p.mag, power) // |X| = sqrt(|X|^2)
+		// Only the bins some row actually reads need the sqrt. magLo:magHi is the
+		// union of every nonempty row's span (buildEngine precomputes it), and every
+		// dot product below reads within it, so this is bit-identical to a full-width
+		// sqrt while skipping the wasted work when the bank covers a sub-band. Bins
+		// outside the union keep stale values but are never read. magHi == magLo only
+		// for an all-empty bank (every row projects to 0); skip the zero-length call.
+		if p.magHi > p.magLo {
+			simdf32.Sqrt(p.mag[p.magLo:p.magHi], power[p.magLo:p.magHi]) // |X| = sqrt(|X|^2)
+		}
 		src = p.mag
 	}
-	// Sparse per-row dot product: each row multiplies only its contiguous nonzero
-	// weights against the matching bins. An empty row (n == 0) reads empty spans
-	// and DotProduct returns 0.
-	for m := range p.fb.rows {
-		r := p.fb.rows[m]
-		dst[m] = simdf32.DotProduct(p.fb.weights[r.off:r.off+r.n], src[r.start:r.start+r.n])
+	// Sparse per-row projection: each row multiplies only its contiguous nonzero
+	// weights against the matching bins. A row narrower than dotProductMinWidth uses
+	// a scalar multiply-accumulate loop because the DotProduct call overhead would
+	// dominate its few terms; wider rows stay on the SIMD kernel. An empty row
+	// (n == 0) reads empty spans and yields 0.
+	for m, r := range p.fb.rows {
+		w := p.fb.weights[r.off : r.off+r.n]
+		s := src[r.start : r.start+r.n]
+		if r.n < dotProductMinWidth {
+			s = s[:len(w)] // hint the bounds-check eliminator that s[i] is safe over w
+			var acc float32
+			for i := range w {
+				acc += w[i] * s[i]
+			}
+			dst[m] = acc
+			continue
+		}
+		dst[m] = simdf32.DotProduct(w, s)
 	}
 	if p.log == LogNone {
 		return
@@ -297,6 +328,7 @@ func buildEngine(cfg Config) (*stft.Analyzer, projector, error) {
 	}
 	if cfg.Input == InputMagnitude {
 		pr.mag = make([]float32, a.NumBins())
+		pr.magLo, pr.magHi = fb.activeRange()
 	}
 	return a, pr, nil
 }

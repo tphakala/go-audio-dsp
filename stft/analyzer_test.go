@@ -144,6 +144,29 @@ func TestAnalyzerAccessors(t *testing.T) {
 	}
 }
 
+// TestAnalyzerNumFramesMatchesPlan pins Analyzer.NumFrames to Plan.NumFrames (the
+// single simd-owned frame-count formula the mel and spectrogram producers share)
+// across every pad mode and a range of lengths, including empty and
+// shorter-than-frame.
+func TestAnalyzerNumFramesMatchesPlan(t *testing.T) {
+	cfg := Config{FrameSize: 256, HopSize: 64}
+	a, err := NewAnalyzer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pad := range []PadMode{NoPad, PadZero, PadReflect} {
+		for _, n := range []int{0, 1, 100, 255, 256, 257, 1000, 4096} {
+			if got, want := a.NumFrames(n, pad), p.NumFrames(n, pad); got != want {
+				t.Errorf("Analyzer.NumFrames(%d, %d) = %d, want %d (Plan)", n, pad, got, want)
+			}
+		}
+	}
+}
+
 // TestAnalyzerResetClearsBuffer pins that Reset zeroes the analysis buffer (not
 // just the fill counter): feed non-zero data short of a frame, Reset, and the
 // backing buffer must be all zero. Removing clear(a.buf) from Reset turns this red.

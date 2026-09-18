@@ -1,8 +1,10 @@
 package mel
 
 import (
+	"encoding/json"
 	"errors"
 	"math"
+	"os"
 	"testing"
 )
 
@@ -291,6 +293,111 @@ func TestFilterbankFromRowsInvalid(t *testing.T) {
 	}
 }
 
+func TestFilterbankActiveRange(t *testing.T) {
+	// Hand-built bank with known spans, including leading and trailing empty rows,
+	// pins the union [lo, hi) the projector uses to bound the InputMagnitude sqrt.
+	fb, err := FilterbankFromRows([][]float32{
+		{0, 0, 0, 0, 0, 0, 0, 0}, // empty
+		{0, 0, 1, 1, 0, 0, 0, 0}, // bins 2..3
+		{0, 0, 0, 0, 0, 2, 0, 0}, // single bin 5
+		{0, 0, 0, 0, 0, 0, 0, 0}, // empty
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lo, hi := fb.activeRange(); lo != 2 || hi != 6 {
+		t.Fatalf("activeRange = [%d, %d), want [2, 6)", lo, hi)
+	}
+	// An all-empty bank returns (0, 0), so apply skips the zero-length sqrt.
+	empty, err := FilterbankFromRows([][]float32{{0, 0, 0, 0}, {0, 0, 0, 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lo, hi := empty.activeRange(); lo != 0 || hi != 0 {
+		t.Fatalf("all-empty activeRange = [%d, %d), want [0, 0)", lo, hi)
+	}
+	// A single trailing-edge bin: [start, start+1).
+	single, err := FilterbankFromRows([][]float32{{0, 0, 0, 7}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lo, hi := single.activeRange(); lo != 3 || hi != 4 {
+		t.Fatalf("single-bin activeRange = [%d, %d), want [3, 4)", lo, hi)
+	}
+}
+
+// TestFilterbankAgainstLibrosaGolden anchors the triangle construction, the Slaney
+// normalization, and the HTK 700 nonlinearity constant against real librosa
+// filters.mel output (Slaney with slaney norm, and HTK with no norm), not just the
+// in-test float64 transcription that shares its formula with the implementation.
+// The HTK 2595 scale factor cancels in the mel round trip that places the edges
+// (equal spacing in mel is equal spacing in any positive multiple of it), so no
+// filterbank golden can pin it; TestHzMelKnownPoints pins it directly instead. The
+// fixture is static test data; librosa runs offline (reference tools stay
+// test-time only).
+func TestFilterbankAgainstLibrosaGolden(t *testing.T) {
+	data, err := os.ReadFile("testdata/librosa_mel_golden.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var golden struct {
+		Cases []struct {
+			Name       string      `json:"name"`
+			SampleRate int         `json:"sample_rate"`
+			NFFT       int         `json:"n_fft"`
+			NMels      int         `json:"n_mels"`
+			Fmin       float64     `json:"fmin"`
+			Fmax       float64     `json:"fmax"`
+			HTK        bool        `json:"htk"`
+			Norm       *string     `json:"norm"`
+			Mel        [][]float64 `json:"mel"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(data, &golden); err != nil {
+		t.Fatal(err)
+	}
+	if len(golden.Cases) == 0 {
+		t.Fatal("no golden cases loaded")
+	}
+	for _, gc := range golden.Cases {
+		t.Run(gc.Name, func(t *testing.T) {
+			scale := Slaney
+			if gc.HTK {
+				scale = HTK
+			}
+			norm := NormSlaney
+			if gc.Norm == nil {
+				norm = NormNone
+			}
+			fb, err := NewFilterbank(FilterbankConfig{
+				SampleRate: gc.SampleRate, FrameSize: gc.NFFT, NumMels: gc.NMels,
+				MinHz: gc.Fmin, MaxHz: gc.Fmax, Scale: scale, Norm: norm,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			dense := fb.Dense()
+			if len(dense) != len(gc.Mel) {
+				t.Fatalf("rows = %d, want %d", len(dense), len(gc.Mel))
+			}
+			for m := range gc.Mel {
+				if len(dense[m]) != len(gc.Mel[m]) {
+					t.Fatalf("row %d len = %d, want %d", m, len(dense[m]), len(gc.Mel[m]))
+				}
+				// librosa is float64; this package casts weights to float32, so compare at
+				// a peak-relative tolerance with a small absolute floor for empty rows.
+				peak := rowPeak(gc.Mel[m])
+				tol := 1e-5*peak + 1e-8
+				for k := range gc.Mel[m] {
+					if math.Abs(float64(dense[m][k])-gc.Mel[m][k]) > tol {
+						t.Fatalf("row %d bin %d: got %g, want %g (librosa, peak %g)", m, k, dense[m][k], gc.Mel[m][k], peak)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestNewFilterbankInvalid(t *testing.T) {
 	base := FilterbankConfig{SampleRate: 16000, FrameSize: 256, NumMels: 20, MinHz: 50, MaxHz: 7000}
 	mut := func(f func(*FilterbankConfig)) FilterbankConfig {
@@ -313,6 +420,7 @@ func TestNewFilterbankInvalid(t *testing.T) {
 		{"min ge max", mut(func(c *FilterbankConfig) { c.MinHz = 6000; c.MaxHz = 5000 })},
 		{"scale", mut(func(c *FilterbankConfig) { c.Scale = MelScale(9) })},
 		{"norm", mut(func(c *FilterbankConfig) { c.Norm = Norm(9) })},
+		{"num mels too large", mut(func(c *FilterbankConfig) { c.NumMels = maxNumMels + 1 })},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

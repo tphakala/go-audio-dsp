@@ -58,6 +58,17 @@ func (a *Analyzer) HopSize() int { return a.hop }
 // NumBins returns FrameSize/2 + 1, the Hermitian half-spectrum length.
 func (a *Analyzer) NumBins() int { return a.p.NumBins() }
 
+// NumFrames reports how many frames a whole-clip pass over a signal of signalLen
+// samples completes under pad, so a streaming caller can size a matrix the same
+// way a Plan caller does. For NoPad (the streaming framing) it is
+// 1 + (signalLen-FrameSize)/HopSize (0 when shorter than a frame); for the
+// centered modes it is 1 + signalLen/HopSize (0 when signalLen <= 0). It matches
+// Plan.NumFrames, so streaming and whole-clip callers agree bin for bin, and it
+// is the single frame-count formula shared with the mel and spectrogram producers.
+func (a *Analyzer) NumFrames(signalLen int, pad PadMode) int {
+	return a.p.NumFrames(signalLen, a.hop, pad.simd())
+}
+
 // Window returns the resolved analysis window. Do not mutate it.
 func (a *Analyzer) Window() []float32 { return a.window }
 

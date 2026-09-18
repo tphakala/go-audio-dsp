@@ -57,6 +57,11 @@ func BenchmarkProjectSparse(b *testing.B) {
 	shapes := map[string]Config{
 		"bsgbat128": {SampleRate: 384000, FrameSize: 1024, NumMels: 128, MinHz: 9000, MaxHz: 150000, Input: InputPower, Log: Log10, LogOffset: 1e-6},
 		"vad40":     {SampleRate: 16000, FrameSize: 1024, NumMels: 40, MinHz: 0, MaxHz: 0, Input: InputPower, Log: LogNatural, LogFloor: 1e-10},
+		// The -mag variants exercise the InputMagnitude sqrt path that the power
+		// variants above skip: bsgbat128-mag covers a sub-band, so the sqrt runs over
+		// only part of the spectrum, while vad40-mag spans the full band.
+		"bsgbat128-mag": {SampleRate: 384000, FrameSize: 1024, NumMels: 128, MinHz: 9000, MaxHz: 150000, Input: InputMagnitude, Log: Log10, LogOffset: 1e-6},
+		"vad40-mag":     {SampleRate: 16000, FrameSize: 1024, NumMels: 40, MinHz: 0, MaxHz: 0, Input: InputMagnitude, Log: LogNatural, LogFloor: 1e-10},
 	}
 	for name := range shapes {
 		cfg := shapes[name]

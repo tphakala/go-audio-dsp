@@ -48,10 +48,7 @@ func (s *Spectrogram) BinHz(bin int) float64 { return s.sc.binHzOf(bin) }
 // or 0 when the signal is shorter than one frame. A caller uses it to size a
 // Matrix.
 func (s *Spectrogram) NumFrames(signalLen int) int {
-	if signalLen < s.n {
-		return 0
-	}
-	return 1 + (signalLen-s.n)/s.hop
+	return s.an.NumFrames(signalLen, stft.NoPad)
 }
 
 // Matrix holds a spectrogram as frame-contiguous float32 values: column
