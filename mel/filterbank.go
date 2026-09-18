@@ -69,6 +69,12 @@ type FilterbankConfig struct {
 	Norm       Norm
 }
 
+// maxNumMels caps NumMels defensively. A pathological count would allocate an
+// absurd edge-frequency table (NumMels+2 entries) and as many filter rows,
+// exhausting memory long before any real front end needs this many bands (they use
+// 40 to 256), so it is a configuration error rather than an OOM waiting to happen.
+const maxNumMels = 1 << 16 // 65536
+
 // validate checks a FilterbankConfig, wrapping ErrInvalidConfig with the first
 // offending field. FrameSize is validated here (not deferred to stft) so a
 // standalone NewFilterbank rejects a bad transform size on its own.
@@ -79,8 +85,8 @@ func (c FilterbankConfig) validate() error {
 	if c.FrameSize < 2 || c.FrameSize&(c.FrameSize-1) != 0 {
 		return fmt.Errorf("%w: FrameSize must be a power of two >= 2, got %d", ErrInvalidConfig, c.FrameSize)
 	}
-	if c.NumMels <= 0 {
-		return fmt.Errorf("%w: NumMels must be > 0, got %d", ErrInvalidConfig, c.NumMels)
+	if c.NumMels <= 0 || c.NumMels > maxNumMels {
+		return fmt.Errorf("%w: NumMels must be in [1, %d], got %d", ErrInvalidConfig, maxNumMels, c.NumMels)
 	}
 	if !c.Scale.valid() {
 		return fmt.Errorf("%w: unknown Scale %d", ErrInvalidConfig, int(c.Scale))
@@ -261,4 +267,27 @@ func (fb *Filterbank) Dense() [][]float32 {
 		copy(out[m][r.start:], fb.weights[r.off:r.off+r.n])
 	}
 	return out
+}
+
+// activeRange returns [lo, hi), the union of every nonempty row's bin span: lo is
+// the smallest row start and hi the largest row end. The projector uses it to run
+// the InputMagnitude sqrt over only the bins some row reads, skipping the rest. An
+// all-empty bank (every row n == 0) returns (0, 0).
+func (fb *Filterbank) activeRange() (lo, hi int) {
+	lo, hi = fb.numBins, 0
+	for _, r := range fb.rows {
+		if r.n == 0 {
+			continue
+		}
+		if r.start < lo {
+			lo = r.start
+		}
+		if r.start+r.n > hi {
+			hi = r.start + r.n
+		}
+	}
+	if lo > hi {
+		return 0, 0
+	}
+	return lo, hi
 }

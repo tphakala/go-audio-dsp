@@ -67,3 +67,39 @@ func TestZeroAlloc(t *testing.T) {
 	}
 	_ = sink
 }
+
+// TestZeroAllocScalarAndMagnitude proves the projection branches added for the
+// sparse-projection tuning stay allocation-free per frame: the narrow BSG-BAT
+// shape drives the scalar fused loop, and its magnitude variant drives the
+// sub-band sqrt path.
+func TestZeroAllocScalarAndMagnitude(t *testing.T) {
+	configs := map[string]Config{
+		"narrow-power": {
+			SampleRate: 384000, FrameSize: 1024, HopSize: 768, NumMels: 128,
+			MinHz: 9000, MaxHz: 150000, Input: InputPower, Log: Log10, LogOffset: 1e-6,
+		},
+		"narrow-magnitude": {
+			SampleRate: 384000, FrameSize: 1024, HopSize: 768, NumMels: 128,
+			MinHz: 9000, MaxHz: 150000, Input: InputMagnitude, Log: Log10, LogOffset: 1e-6,
+		},
+	}
+	sig := toneSig(48000, 384000, []float64{12000, 48000, 96000}, 0.3)
+	for name, cfg := range configs {
+		t.Run(name, func(t *testing.T) {
+			ex, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := Matrix{Data: make([]float32, ex.NumMels()*ex.NumFrames(len(sig), stft.NoPad))}
+			// Checked warm-up: a regression that writes no columns fails here rather
+			// than pass AllocsPerRun, which ignores the result.
+			if got, err := ex.ComputeInto(&m, sig, stft.NoPad); err != nil || got == 0 {
+				t.Fatalf("warm-up ComputeInto = (%d, %v), want (>0, nil)", got, err)
+			}
+			compute := func() { _, _ = ex.ComputeInto(&m, sig, stft.NoPad) }
+			if got := testing.AllocsPerRun(20, compute); got != 0 {
+				t.Errorf("%s ComputeInto allocated %v times, want 0", name, got)
+			}
+		})
+	}
+}

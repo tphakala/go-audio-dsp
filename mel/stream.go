@@ -42,6 +42,9 @@ func (s *ColumnSource) HopSize() int { return s.hop }
 // NumMels returns the number of mel rows in each emitted column.
 func (s *ColumnSource) NumMels() int { return s.pr.fb.numMels }
 
+// NumBins returns the transform's Hermitian half-spectrum length, FrameSize/2 + 1.
+func (s *ColumnSource) NumBins() int { return s.an.NumBins() }
+
 // Filterbank returns the immutable mel filterbank in use. Do not mutate it.
 func (s *ColumnSource) Filterbank() *Filterbank { return s.pr.fb }
 
