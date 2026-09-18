@@ -42,6 +42,35 @@ func (w Window) String() string {
 	return fmt.Sprintf("Window(%d)", int(w))
 }
 
+// WindowAlign places an analysis window shorter than the frame inside the frame.
+// It is ignored when the window length equals FrameSize. The zero value is
+// AlignCenter.
+type WindowAlign int
+
+const (
+	// AlignCenter pads (FrameSize-WindowLength)/2 zeros before the window (floor
+	// division, matching librosa util.pad_center) and the remaining zeros after,
+	// centering a short window in the frame.
+	AlignCenter WindowAlign = iota
+	// AlignLeft places the window at the frame start and pads the remaining zeros
+	// after it (the Kaldi / torchaudio "round up to a power of two" convention).
+	AlignLeft
+)
+
+// valid reports whether a is a defined alignment.
+func (a WindowAlign) valid() bool { return a >= AlignCenter && a <= AlignLeft }
+
+// String returns the alignment name.
+func (a WindowAlign) String() string {
+	switch a {
+	case AlignCenter:
+		return "center"
+	case AlignLeft:
+		return "left"
+	}
+	return fmt.Sprintf("WindowAlign(%d)", int(a))
+}
+
 // GenerateWindow returns the built-in window w of length n as float32 samples,
 // computed in float64 and cast down. n <= 0 returns an empty slice and n == 1 a
 // single unit sample (a length below 2 carries no meaningful taper). An
