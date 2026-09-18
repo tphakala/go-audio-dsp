@@ -44,7 +44,10 @@ func (s Strength) String() string {
 	return fmt.Sprintf("Strength(%d)", int(s))
 }
 
-func (s Strength) valid() bool { return s >= Medium && s <= Heavy }
+// Valid reports whether s is one of the defined strengths (Medium, Light,
+// Heavy). It is exported so a sibling method package can range-check a Strength
+// against the shared vocabulary rather than duplicating the bound.
+func (s Strength) Valid() bool { return s >= Medium && s <= Heavy }
 
 // NoiseLearner is a capability interface implemented by denoise methods that
 // can learn their noise estimate from a noise-only excerpt. A consumer

@@ -1,25 +1,27 @@
-package denoiser
+package gate
 
 import (
 	"fmt"
 	"math"
+
+	"github.com/tphakala/go-audio-dsp/denoiser"
 )
 
-// Config configures a Denoiser. Only SampleRate is required.
+// Config configures a Gate. Only SampleRate is required.
 type Config struct {
 	// SampleRate in Hz; required.
 	SampleRate int
-	// FrameSize is the FFT length in samples, a power of two >= 64. 0 selects
-	// the power of two nearest to 21.3 ms of audio: 1024 at 44.1 and 48 kHz,
-	// 512 at 22.05-32 kHz, 256 at 16 kHz.
+	// FrameSize is the FFT length in samples, a power of two >= 64. 0 selects the
+	// power of two nearest to 21.3 ms of audio: 1024 at 44.1 and 48 kHz, 512 at
+	// 22.05-32 kHz, 256 at 16 kHz. This matches the flagship denoiser's auto rule
+	// (pinned by a test) so both methods frame a given rate identically.
 	FrameSize int
 	// HopSize is the frame advance in samples; it must be a divisor of FrameSize
-	// smaller than FrameSize, giving at least 2x overlap (a periodic Hann window
-	// needs overlap to reconstruct without gaps). 0 selects FrameSize/4 (75%
-	// overlap).
+	// smaller than FrameSize, giving at least 2x overlap. 0 selects FrameSize/4
+	// (75% overlap).
 	HopSize int
-	// Strength selects the tuned knob set; the zero value is Medium.
-	Strength Strength
+	// Strength selects the tuned knob set; the zero value is denoiser.Medium.
+	Strength denoiser.Strength
 	// Params, when non-nil, replaces the strength's knobs entirely.
 	Params *Params
 }
@@ -31,7 +33,9 @@ const (
 )
 
 // autoFrameSize returns the power of two nearest to autoFrameSeconds of audio,
-// never below minFrameSize.
+// never below minFrameSize. It duplicates the flagship denoiser's rule so a
+// caller gets the same frame size from either method; TestAutoFrameSizeMatchesFlagship
+// pins the two together.
 func autoFrameSize(sampleRate int) int {
 	e := int(math.Round(math.Log2(float64(sampleRate) * autoFrameSeconds)))
 	return max(minFrameSize, 1<<max(e, 0))

@@ -5,7 +5,6 @@ import (
 	"math"
 	"slices"
 
-	"github.com/tphakala/go-audio-dsp/stft"
 	"github.com/tphakala/simd/f32"
 )
 
@@ -79,34 +78,20 @@ func NewNoiseProfile(power []float32) (*NoiseProfile, error) {
 	return p, nil
 }
 
-// profileBatchFrames bounds the scratch meanPower uses per STFT batch.
-const profileBatchFrames = 64
-
 // meanPower averages the frame power spectrum over every full frame of x (hop
 // HopSize, no padding) into dst (len bins), floored at epsPower, and returns
 // the number of frames averaged (0 when x is shorter than one frame). It
-// allocates scratch; it is a setup-time helper, not part of the stream path.
+// delegates the averaging to stft.Plan.MeanPowerInto (the generic, unfloored
+// statistic) and then applies the noise-profile epsPower floor, which is this
+// method's policy, not the transform's. It allocates scratch; it is a
+// setup-time helper, not part of the stream path.
 func (d *Denoiser) meanPower(dst, x []float32) int {
-	frames := d.plan.NumFrames(len(x), stft.NoPad)
+	frames := d.plan.MeanPowerInto(dst, x)
 	if frames == 0 {
 		return 0
 	}
-	acc := make([]float64, d.bins)
-	flat := make([]float32, profileBatchFrames*d.bins)
-	for f0 := 0; f0 < frames; f0 += profileBatchFrames {
-		nf := min(profileBatchFrames, frames-f0)
-		start := f0 * d.hop
-		end := min(len(x), start+(nf-1)*d.hop+d.n)
-		got := d.plan.PowerInto(flat[:nf*d.bins], x[start:end], stft.NoPad)
-		for f := range got {
-			row := flat[f*d.bins : (f+1)*d.bins]
-			for k, v := range row {
-				acc[k] += float64(v)
-			}
-		}
-	}
 	for k := range dst {
-		v := float32(acc[k] / float64(frames))
+		v := dst[k]
 		if !(v > epsPower) || !(v < math.MaxFloat32) { // NaN, <= floor, or +Inf
 			v = epsPower
 		}

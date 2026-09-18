@@ -101,7 +101,7 @@ var strengthParams = [...]Params{
 // for an unknown value). Start from it to override individual knobs through
 // Config.Params.
 func ParamsFor(s Strength) Params {
-	if !s.valid() {
+	if !s.Valid() {
 		return strengthParams[Medium]
 	}
 	return strengthParams[s]

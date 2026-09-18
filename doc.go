@@ -19,9 +19,10 @@
 // processes one stream at a time and is not safe for concurrent use; run one
 // instance per route.
 //
-// Concrete blocks live in sub-packages: the denoiser, the equalizer and the gain
-// block satisfy this contract. The loudnorm package measures and normalizes
-// whole clips rather than streaming, so it does not implement Processor.
+// Concrete blocks live in sub-packages: the denoiser (with a soft-gate second
+// method in denoiser/gate), the equalizer and the gain block satisfy this
+// contract. The loudnorm package measures and normalizes whole clips rather than
+// streaming, so it does not implement Processor.
 // Conversion between the int16 PCM transport form and the float32 processing
 // form lives in the pcm sub-package.
 //
