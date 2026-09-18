@@ -29,9 +29,10 @@ type Params struct {
 	// bins.
 	FreqSmoothBins int
 	// TimeSmoothFrames is the width 2L+1 of a centered moving average of the gain
-	// across frames; 0 or 1 disables it. L = TimeSmoothFrames/2 frames of
-	// lookahead are added to Latency(), because the memoryless sigmoid would
-	// otherwise flutter frame to frame.
+	// across frames (odd; an even value rounds up to the next odd effective width,
+	// since L = TimeSmoothFrames/2); 0 or 1 disables it. L frames of lookahead are
+	// added to Latency(), because the memoryless sigmoid would otherwise flutter
+	// frame to frame.
 	TimeSmoothFrames int
 	// FloorWindowSec is the blind rolling-median window in seconds, used only
 	// while no floor is learned. It must be finite and > 0.
