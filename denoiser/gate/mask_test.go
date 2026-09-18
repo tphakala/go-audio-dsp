@@ -40,6 +40,9 @@ func TestGateAttenuatesNoiseKeepsTone(t *testing.T) {
 	if len(outFull) != len(clip) {
 		t.Fatalf("length %d != %d", len(outFull), len(clip))
 	}
+	// Guard before the dB metrics: spanRMSDB propagates NaN, and reduction < want
+	// is false on a NaN operand, so a NaN-emitting regression would pass vacuously.
+	assertFinite(t, "outFull", outFull)
 	reduction := spanRMSDB(clip, noiseSpans) - spanRMSDB(outFull, noiseSpans)
 
 	// Tone preservation with the gate isolated from frequency smoothing.
@@ -49,6 +52,7 @@ func TestGateAttenuatesNoiseKeepsTone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertFinite(t, "outIso", outIso)
 	toneChange := spanRMSDB(outIso, toneSpans) - spanRMSDB(clip, toneSpans)
 
 	t.Logf("noise reduction %.1f dB (floor %g dB), tone-region level change %.2f dB", reduction, full.MaxAttenuationDB, toneChange)
@@ -186,5 +190,31 @@ func TestScalarReferenceParity(t *testing.T) {
 		if d := math.Abs(float64(g.mask[k]) - want); d > scalarParityTol {
 			t.Errorf("bin %d: simd mask %g, scalar reference %g (diff %g > %g)", k, g.mask[k], want, d, scalarParityTol)
 		}
+	}
+}
+
+// TestInfMaxAttenuationFullGating streams a +Inf MaxAttenuationDB gate (gFloor=0,
+// full gating allowed): the output stays finite and the noise-only clip is
+// reduced further than the 12 dB Medium floor could allow, proving gFloor really
+// reaches 0. If gFloor were not 0 for +Inf, reduction would cap near the Medium
+// floor.
+func TestInfMaxAttenuationFullGating(t *testing.T) {
+	const sr, frame, hop = 48000, 1024, 256
+	noise := whiteNoise(2*sr, dbToLin(-40), 60)
+	p := ParamsFor(denoiser.Medium)
+	p.MaxAttenuationDB = float32(math.Inf(1))
+	cfg := Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Params: &p}
+
+	out, err := DenoiseWithNoise(noise, noise[:sr/2], cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFinite(t, "+Inf gate output", out)
+	span := [][2]int{{sr / 4, 2*sr - sr/4}}
+	reduction := spanRMSDB(noise, span) - spanRMSDB(out, span)
+	medFloor := float64(ParamsFor(denoiser.Medium).MaxAttenuationDB) // 12
+	t.Logf("+Inf full-gating reduction %.1f dB (Medium floor caps at %.0f dB)", reduction, medFloor)
+	if reduction <= medFloor {
+		t.Errorf("+Inf gate reduced noise by %.1f dB, want more than the %.0f dB Medium floor (gFloor did not reach 0)", reduction, medFloor)
 	}
 }

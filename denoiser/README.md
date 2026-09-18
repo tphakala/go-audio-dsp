@@ -125,10 +125,12 @@ sources:
 
 ## Methods
 
-This package is the default spectral (STFT) method. It is built to grow:
-additional denoise families (an RNNoise-style ML method, a noise gate, a wavelet
-method) land as sibling `denoiser/<method>` sub-packages, each satisfying only
-the shared `dsp.Processor` (plus `dsp.Flusher`) streaming contract. Method-specific
+This package is the default spectral (STFT) method. It grows by sibling
+`denoiser/<method>` sub-packages, each satisfying only the shared `dsp.Processor`
+(plus `dsp.Flusher`) streaming contract. The first is
+[`denoiser/gate`](gate/README.md), a lighter spectral soft-gate for the clip and
+export path; an RNNoise-style ML method or a wavelet method would follow the same
+pattern. Method-specific
 concepts stay in their own package and never enter a shared interface;
 cross-cutting optional behaviour is a capability interface such as `NoiseLearner`,
 which a consumer finds with a type assertion; and `Strength` is the coarse

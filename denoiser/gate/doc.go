@@ -13,15 +13,16 @@
 // How it works. Each Hann-windowed frame is transformed with a real FFT; a
 // per-bin soft mask is derived from how far the bin's power sits above an
 // estimated per-bin noise floor (a smooth sigmoid knee around ThresholdDB, of
-// width TransitionDB, mapped into a residual gain in [gainFloor, 1]); the mask is
+// width TransitionDB, mapped into a residual gain bounded below by the
+// MaxAttenuationDB floor); the mask is
 // smoothed across frequency and, optionally, time; and the frame is
 // resynthesized by overlap-add. The whole per-bin apply path is elementwise, so
 // it takes github.com/tphakala/simd's AVX or NEON tiers where available and a
 // portable Go fallback elsewhere, with no scalar transcendental in the hot loop.
 // This is the concrete difference from the flagship, whose per-bin gain is a
-// scalar float64 loop through the exponential integral: the gate is lighter and
-// faster on low-power hosts, and gentle on tonal song by construction. It does
-// not replace the flagship.
+// scalar float64 loop through the exponential integral: the gate is, by
+// construction, lighter and faster on low-power hosts and gentle on tonal song.
+// It does not replace the flagship.
 //
 // Noise floor. Two estimators feed the mask. The primary path is a learned floor
 // measured from a noise-only excerpt (LearnNoise, satisfying the

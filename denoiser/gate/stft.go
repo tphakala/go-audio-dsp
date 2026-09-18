@@ -59,7 +59,8 @@ func (g *Gate) pendingOutput(extra int) int {
 }
 
 // feed pushes in through the analyzer and, for each frame that completes, updates
-// the blind floor (unless learned or flushing), computes that frame's soft-gate
+// the blind floor (unless learned, flushing, or in the leading warm-up frames),
+// computes that frame's soft-gate
 // mask, and stores the frame's mask and spectrum in the smoothing rings. Once L
 // frames of lookahead are buffered it produces the output for the L-delayed frame:
 // time- and frequency-smoothed gain, applied to that frame's spectrum, inverse

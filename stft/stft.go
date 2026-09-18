@@ -110,8 +110,11 @@ const meanPowerBatchFrames = 64
 // allocates scratch, so it is a setup-time statistic, not part of a hot loop.
 // Unlike PowerInto it applies no floor: empty or non-finite bins are left as the
 // raw average, so the caller decides how to treat them (a noise-profile caller
-// floors at its own epsilon). It is the generic STFT statistic the denoiser's
-// noise-profile measurement is built on.
+// floors at its own epsilon). It frames NoPad only and, unlike Spectrum and
+// PowerInto, takes no PadMode: the batched averaging assumes non-padded framing
+// (frame f is signal[f*hop : f*hop+FrameSize]), so a caller needing a centered
+// statistic composes PowerInto with its own reduction. It is the generic STFT
+// statistic the denoiser's noise-profile measurement is built on.
 func (p *Plan) MeanPowerInto(dst, signal []float32) int {
 	frames := p.NumFrames(len(signal), NoPad)
 	if frames == 0 {

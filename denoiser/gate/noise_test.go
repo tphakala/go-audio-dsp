@@ -8,11 +8,12 @@ import (
 	"github.com/tphakala/go-audio-dsp/denoiser"
 )
 
-// TestLearnedFloorFreezesTracker pins that a learned floor is immutable: streaming
-// loud audio never changes what NoiseFloor() reports, and it survives Flush's
-// Reset. Any code path that mutates the learned floor during streaming turns it
-// red.
-func TestLearnedFloorFreezesTracker(t *testing.T) {
+// TestLearnedFloorImmutableDuringStreaming pins that a learned floor never adapts:
+// streaming loud audio does not change what NoiseFloor() reports, and the floor
+// survives Flush's Reset. (On the learned path the blind tracker is never pushed,
+// so this pins floor immutability, not the tracker itself.) Any code path that
+// mutates the learned floor during streaming turns it red.
+func TestLearnedFloorImmutableDuringStreaming(t *testing.T) {
 	const sr, frame, hop = 48000, 1024, 256
 	noise := whiteNoise(frame*8, dbToLin(-40), 4)
 	g, err := New(Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Strength: denoiser.Medium})

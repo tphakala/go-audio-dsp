@@ -133,15 +133,18 @@ overlap), matching the flagship.
    by default.
 2. **Noise floor**: a learned per-bin floor (`LearnNoise` / `SetNoiseFloor`), or
    the blind per-bin rolling median otherwise.
-3. **Soft mask**: per bin, `power/floor` -> log10 -> a sigmoid knee at
-   `ThresholdDB` of width `TransitionDB` -> a gain in `[floor, 1]`. Optionally
-   smoothed across frequency (fewer isolated musical-noise bins) and time (the
-   memoryless sigmoid would otherwise flutter).
+3. **Soft mask**: per bin, `power / noise-floor` -> log10 -> a sigmoid knee at
+   `ThresholdDB` of width `TransitionDB` -> a gain in the residual-gain range
+   `[gFloor, 1]`, where `gFloor` is set by `MaxAttenuationDB`. Optionally smoothed
+   across frequency (fewer isolated musical-noise bins) and time (the memoryless
+   sigmoid would otherwise flutter).
 4. **Synthesis**: inverse FFT, synthesis window, and weighted overlap-add,
    normalized for exact reconstruction.
 
-Non-finite input and floor values are guarded throughout: a NaN or Inf cannot
-poison the stream or corrupt the blind tracker's sliding window.
+The blind tracker and the learned floor are guarded against non-finite values: a
+NaN or Inf in the input cannot corrupt the sliding-window histogram or the stored
+floor, so it cannot poison later output. Output samples overlapping a non-finite
+input sample are not themselves sanitized (garbage in, garbage out, localized).
 
 ## Correctness
 

@@ -53,10 +53,10 @@ func (g *Gate) NoiseFloor() []float32 {
 	return slices.Clone(g.noiseBuf)
 }
 
-// copyFloor copies src into dst, replacing each NaN, non-positive, or +Inf value
-// with epsPower (the guard NewNoiseProfile applies in the parent package), so the
-// floor is always finite and strictly positive and every power/floor ratio stays
-// finite. dst may alias src for an in-place floor.
+// copyFloor copies src into dst, replacing each NaN, +Inf, or value at or below
+// epsPower with epsPower (the guard NewNoiseProfile applies in the parent
+// package), so the floor is always finite and strictly positive and a finite
+// power divided by it stays finite. dst may alias src for an in-place floor.
 func copyFloor(dst, src []float32) {
 	for k, v := range src {
 		if !(v > epsPower) || !(v < math.MaxFloat32) { // NaN, <= floor, or +Inf

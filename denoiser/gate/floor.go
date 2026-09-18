@@ -130,7 +130,9 @@ func (t *floorTracker) publish() {
 	for k := range t.bins {
 		row := t.hist[k*t.nb : k*t.nb+t.nb]
 		cum, b := 0, 0
-		for ; b < t.nb-1; b++ {
+		// Bound on len(row) (== t.nb by construction), not the struct field, so
+		// the compiler proves row[b] in-bounds and drops the per-bucket check.
+		for ; b < len(row)-1; b++ {
 			cum += int(row[b])
 			if cum >= half {
 				break

@@ -28,6 +28,18 @@ func TestConfigResolveErrors(t *testing.T) {
 	}
 }
 
+// TestNewRejectsInvalidCustomParams pins that a Config.Params override is run
+// through validate() by resolve(): an invalid custom Params fails New with
+// ErrInvalidConfig (covering the resolve -> validate wiring on the override path,
+// which the direct validate() tests do not exercise).
+func TestNewRejectsInvalidCustomParams(t *testing.T) {
+	bad := ParamsFor(denoiser.Medium)
+	bad.TransitionDB = 0 // invalid: must be finite and > 0
+	if _, err := New(Config{SampleRate: 48000, Params: &bad}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("New with invalid custom Params: err %v, want ErrInvalidConfig", err)
+	}
+}
+
 // TestDefaultHopAndStrength pins the resolved defaults: hop is FrameSize/4 and the
 // zero-value Strength is Medium's floor.
 func TestDefaultHopAndStrength(t *testing.T) {

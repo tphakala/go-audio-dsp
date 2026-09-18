@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"errors"
 	"math"
 	"math/rand/v2"
 	"testing"
@@ -62,6 +63,19 @@ func spanRMSDB(x []float32, spans [][2]int) float64 {
 	return 10 * math.Log10(s/float64(cnt))
 }
 
+// assertFinite fails if x holds a NaN or Inf. Every dB/RMS metric here propagates
+// a non-finite sample (NaN), and an ordered comparison against NaN is false, so a
+// regression that emits non-finite audio would pass a bar vacuously; assert
+// finiteness before measuring (the go-audio-dsp #8 escaped-defect pattern).
+func assertFinite(t *testing.T, name string, x []float32) {
+	t.Helper()
+	for i, v := range x {
+		if f := float64(v); math.IsNaN(f) || math.IsInf(f, 0) {
+			t.Fatalf("%s: non-finite sample at index %d (%v)", name, i, v)
+		}
+	}
+}
+
 // streamAll runs x through g and flushes, returning one exact-length result.
 func streamAll(t *testing.T, g *Gate, x []float32) []float32 {
 	t.Helper()
@@ -121,7 +135,9 @@ func runStream(t *testing.T, cfg Config, learn, x []float32, chunks []int) []flo
 func TestUnityFloorIsIdentity(t *testing.T) {
 	base := ParamsFor(denoiser.Medium)
 	base.MaxAttenuationDB = 0
-	for _, cc := range []struct{ frame, hop int }{{1024, 256}, {256, 64}, {64, 1}} {
+	// {256,128} is the 2x-overlap (ovl=2) minimum, the edge of the warm=ovl-1+L
+	// accounting; {64,1} is heavy overlap; {1024,256} the default.
+	for _, cc := range []struct{ frame, hop int }{{1024, 256}, {256, 64}, {256, 128}, {64, 1}} {
 		for _, n := range []int{0, 1, cc.frame - 1, cc.frame, cc.frame + 1, 3*cc.frame + 7, 20000} {
 			p := base
 			cfg := Config{SampleRate: 48000, FrameSize: cc.frame, HopSize: cc.hop, Params: &p}
@@ -135,6 +151,11 @@ func TestUnityFloorIsIdentity(t *testing.T) {
 			}
 			var maxErr float64
 			for i := range x {
+				// A non-finite output makes math.Max(_, NaN)=NaN and maxErr>1e-4
+				// false (vacuous pass); fail explicitly instead.
+				if v := out[i]; math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+					t.Fatalf("frame=%d hop=%d n=%d: non-finite output at %d (%v)", cc.frame, cc.hop, n, i, v)
+				}
 				maxErr = math.Max(maxErr, math.Abs(float64(out[i]-x[i])))
 			}
 			if maxErr > 1e-4 {
@@ -324,4 +345,125 @@ func TestAutoFrameSizeMatchesFlagship(t *testing.T) {
 			t.Errorf("sr=%d: gate auto FrameSize %d != flagship %d", sr, g.FrameSize(), d.FrameSize())
 		}
 	}
+}
+
+// TestDenoiseWithFloorMatchesManualSequence pins that DenoiseWithFloor is exactly
+// New + SetNoiseFloor + ProcessInto + FlushInto. Dropping the SetNoiseFloor call
+// inside DenoiseWithFloor would leave it on the blind path and diverge.
+func TestDenoiseWithFloorMatchesManualSequence(t *testing.T) {
+	const sr, frame, hop = 48000, 256, 64
+	x := whiteNoise(12000, dbToLin(-30), 13)
+	tn := tone(len(x), sr, 3000, dbToLin(-18))
+	for i := range x {
+		x[i] += tn[i]
+	}
+	plan, err := stft.New(stft.Config{FrameSize: frame, HopSize: hop, Window: stft.Hann})
+	if err != nil {
+		t.Fatal(err)
+	}
+	floor := make([]float32, plan.NumBins())
+	plan.MeanPowerInto(floor, whiteNoise(frame*8, dbToLin(-30), 4))
+	cfg := Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Strength: denoiser.Medium}
+
+	auto, err := DenoiseWithFloor(x, floor, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.SetNoiseFloor(floor); err != nil {
+		t.Fatal(err)
+	}
+	manual := streamAll(t, g, x)
+	if len(auto) != len(manual) {
+		t.Fatalf("length %d != %d", len(auto), len(manual))
+	}
+	for i := range auto {
+		if auto[i] != manual[i] {
+			t.Fatalf("DenoiseWithFloor differs from manual sequence at %d: %g vs %g", i, auto[i], manual[i])
+		}
+	}
+	assertFinite(t, "DenoiseWithFloor output", auto)
+}
+
+// TestBufferTooSmallConsumesNothing pins the ErrBufferTooSmall contract for both
+// ProcessInto and FlushInto: a too-small out returns ErrBufferTooSmall, writes 0,
+// and consumes nothing, so a correctly-sized retry emits the full expected count.
+func TestBufferTooSmallConsumesNothing(t *testing.T) {
+	const sr, frame, hop = 48000, 256, 64
+	cfg := Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Strength: denoiser.Medium}
+	in := whiteNoise(6000, 0.1, 21)
+
+	// A fresh probe gate reports how many samples the first chunk emits.
+	probe, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := make([]float32, probe.MaxOutputLen(len(in)))
+	want, err := probe.ProcessInto(in, full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want == 0 {
+		t.Skip("first chunk emits nothing; cannot exercise the too-small path")
+	}
+
+	// ProcessInto with a buffer one short of the pending count.
+	g, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := g.ProcessInto(in, make([]float32, want-1)); !errors.Is(err, ErrBufferTooSmall) || n != 0 {
+		t.Fatalf("ProcessInto too-small: (n=%d, err=%v), want (0, ErrBufferTooSmall)", n, err)
+	}
+	// Nothing consumed: a correctly-sized retry emits exactly the expected count.
+	retry := make([]float32, g.MaxOutputLen(len(in)))
+	if n, err := g.ProcessInto(in, retry); err != nil || n != want {
+		t.Fatalf("retry after ErrBufferTooSmall emitted (n=%d, err=%v), want (%d, nil); input was consumed on the failed call", n, err, want)
+	}
+
+	// FlushInto with a buffer one short of the remaining tail.
+	g2, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc, err := g2.Process(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remaining := len(in) - len(proc)
+	if remaining == 0 {
+		return // whole stream already emitted; nothing to flush
+	}
+	if n, err := g2.FlushInto(make([]float32, remaining-1)); !errors.Is(err, ErrBufferTooSmall) || n != 0 {
+		t.Fatalf("FlushInto too-small: (n=%d, err=%v), want (0, ErrBufferTooSmall)", n, err)
+	}
+	if n, err := g2.FlushInto(make([]float32, remaining)); err != nil || n != remaining {
+		t.Fatalf("FlushInto retry emitted (n=%d, err=%v), want (%d, nil); the failed flush consumed state", n, err, remaining)
+	}
+}
+
+// TestFlushAllocatingReturnsTail covers the allocating Process/Flush variants:
+// together they emit exactly len(in) finite samples.
+func TestFlushAllocatingReturnsTail(t *testing.T) {
+	const sr, frame, hop = 48000, 256, 64
+	g, err := New(Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Strength: denoiser.Medium})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := whiteNoise(5000, 0.1, 71)
+	proc, err := g.Process(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tail, err := g.Flush()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(proc) + len(tail); got != len(in) {
+		t.Fatalf("Process+Flush allocating variants emitted %d, want %d", got, len(in))
+	}
+	assertFinite(t, "Flush tail", tail)
 }

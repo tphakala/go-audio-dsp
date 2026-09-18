@@ -22,10 +22,11 @@ type Params struct {
 	// TransitionDB is the soft-knee width in dB over which a bin goes from mostly
 	// closed to mostly open. It must be finite and > 0.
 	TransitionDB float32
-	// FreqSmoothBins is the width (odd; even values are rounded down to the
-	// enclosing odd width via the half-width) of a centered moving average of the
-	// gain across bins; 0 or 1 disables it. Smoothing across frequency suppresses
-	// isolated musical-noise bins.
+	// FreqSmoothBins is the width (odd; an even value rounds up to the next odd
+	// width, since the half-width is FreqSmoothBins/2 and the box spans
+	// 2*half+1) of a centered moving average of the gain across bins; 0 or 1
+	// disables it. Smoothing across frequency suppresses isolated musical-noise
+	// bins.
 	FreqSmoothBins int
 	// TimeSmoothFrames is the width 2L+1 of a centered moving average of the gain
 	// across frames; 0 or 1 disables it. L = TimeSmoothFrames/2 frames of
