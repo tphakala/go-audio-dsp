@@ -25,13 +25,15 @@
 //
 // This package is the default spectral (STFT) denoise method and the home of
 // the shared vocabulary for a pluggable set of methods. Additional method
-// families (an ML denoiser, a noise gate, a wavelet method) live as sibling
-// denoiser/<method> sub-packages, each satisfying only the shared dsp.Processor
-// contract (plus dsp.Flusher when it holds a tail). Method-specific concepts
-// stay in their own package and never enter a shared interface; cross-cutting
-// optional behaviour is a capability interface such as NoiseLearner, discovered
-// by type assertion; and Strength is the coarse aggressiveness dial shared
-// across methods.
+// families live as sibling denoiser/<method> sub-packages, each satisfying only
+// the shared dsp.Processor contract (plus dsp.Flusher when it holds a tail): the
+// soft-gate waveform denoiser in denoiser/gate is the first such sibling (lighter
+// and gentler on tonal song, for the clip and export path), and an ML or wavelet
+// method would follow the same pattern. Method-specific concepts stay in their
+// own package and never enter a shared interface; cross-cutting optional
+// behaviour is a capability interface such as NoiseLearner, discovered by type
+// assertion; and Strength is the coarse aggressiveness dial shared across
+// methods.
 //
 // The transform and the elementwise kernels come from
 // github.com/tphakala/simd, so the hot loops take its AVX/NEON paths where
