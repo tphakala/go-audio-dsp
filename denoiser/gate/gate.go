@@ -26,7 +26,7 @@ type Gate struct {
 	freqR      int // R = FreqSmoothBins/2: frequency-smoothing half-width
 	warm       int // ovl-1+L: frames whose output block is discarded (leading zeros + lookahead priming)
 
-	plan     *stft.Plan     // whole-clip transform, for the learned floor (LearnNoise only)
+	plan     *stft.Plan     // whole-clip transform for the learned floor; built lazily on first LearnNoise, nil until then
 	an       *stft.Analyzer // streaming analysis: framing, window, RFFT, |X|^2
 	window   []float32      // periodic Hann, analysis and synthesis (the analyzer's)
 	invNorm  []float32      // len hop: 1 / WOLA normalization per position in a block
@@ -66,24 +66,19 @@ func New(cfg Config) (*Gate, error) {
 	if err != nil {
 		return nil, err
 	}
-	// One shared analysis Config drives two independent stft objects: a whole-clip
-	// Plan for the learned floor (LearnNoise) and a streaming Analyzer for the
-	// frame-by-frame gate path. Each owns its own simd plan, a deliberate setup-time
-	// cost that keeps their transform scratch independent (the two are never used
-	// concurrently). Both resolve the same periodic Hann window, so a learned floor
-	// and the stream power are measured on the identical window. The two constructors
-	// wrap any failure in ErrInvalidConfig and Config.resolve validates a tighter
-	// range, so they never fail here.
-	stftCfg := stft.Config{FrameSize: rc.FrameSize, HopSize: rc.HopSize, Window: stft.Hann}
-	plan, err := stft.New(stftCfg)
+	// The streaming Analyzer (framing, periodic Hann window, RFFT, |X|^2) drives the
+	// frame-by-frame gate path and is always needed. The whole-clip Plan the learned
+	// floor uses is built lazily on the first LearnNoise call (see noise.go), so the
+	// blind and SetNoiseFloor paths never construct an FFT plan they never touch.
+	// Both resolve the same periodic Hann window, so a learned floor and the stream
+	// power are measured on the identical window. NewAnalyzer wraps any failure in
+	// ErrInvalidConfig and Config.resolve validated a tighter range, so it never fails
+	// here.
+	an, err := stft.NewAnalyzer(stft.Config{FrameSize: rc.FrameSize, HopSize: rc.HopSize, Window: stft.Hann})
 	if err != nil {
 		return nil, err
 	}
-	an, err := stft.NewAnalyzer(stftCfg)
-	if err != nil {
-		return nil, err
-	}
-	bins := plan.NumBins()
+	bins := an.NumBins()
 	l := p.TimeSmoothFrames / 2
 	r := min(p.FreqSmoothBins/2, bins-1) // a box wider than the spectrum just averages all bins
 	ovl := rc.FrameSize / rc.HopSize
@@ -98,7 +93,6 @@ func New(cfg Config) (*Gate, error) {
 		lookahead:  l,
 		freqR:      r,
 		warm:       ovl - 1 + l,
-		plan:       plan,
 		an:         an,
 	}
 	g.window = an.Window()

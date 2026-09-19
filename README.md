@@ -12,13 +12,17 @@ via [`github.com/tphakala/simd`](https://github.com/tphakala/simd).
 | ------- | ------ | ------------ |
 | [`loudnorm`](loudnorm/) | stable | EBU R 128 / ITU-R BS.1770-4 loudness normalization of in-memory PCM (LUFS measurement, true-peak limiting, linear gain). |
 | [`denoiser`](denoiser/) | beta | Spectral audio denoiser (STFT, measured or adaptive noise profile, Wiener / MMSE-LSA gain, overlap-add reconstruction). Replaces ffmpeg `afftdn` on the BirdNET-Go clip path. |
+| [`denoiser/gate`](denoiser/gate/) | beta | Spectral soft-gate waveform denoiser: a lighter second denoise method for the clip/export path that suppresses continuous background noise (wind, rain, hum, cicadas) while preserving bird song. |
 | [`equalizer`](equalizer/) | beta | RBJ biquad filter chain (low/high/all-pass, band-pass, notch, shelves, peaking) as a streaming block, with frequency-response output for a UI curve. |
 | [`gain`](gain/) | beta | Fixed decibel gain as a streaming block, with saturating int16 entry points. |
+| [`stft`](stft/) | beta | Shared short-time Fourier analysis layer (framing, analysis windows, padding convention, per-frame real transform): a whole-clip `Plan` and a streaming `Analyzer` the denoiser, spectrogram, and mel blocks are built on. |
+| [`spectrogram`](spectrogram/) | beta | Numeric magnitude, power, or dB spectrogram matrix over the shared STFT core, as a whole-clip matrix or an incremental streaming column source. Native replacement for the sox / ffmpeg spectrogram subprocess. |
+| [`mel`](mel/) | beta | Per-frame (log-)mel spectrogram columns over the shared STFT core (whole-clip `Extractor` or streaming source); pure DSP, leaving per-model normalization, frame stacking, and tensor layout to the consumer. |
 | [`pcm`](pcm/) | stable | int16 <-> float32 conversion at the chain edges (the transport/processing boundary), plus an in-place saturating int16 gain (`ScaleInt16`). |
 
 The root package defines the streaming `Processor` contract the streaming blocks
-(denoiser, equalizer, gain) share, so a consumer can chain them over reused
-buffers. More processors may follow as the need arises.
+(denoiser, denoiser/gate, equalizer, gain) share, so a consumer can chain them
+over reused buffers. More processors may follow as the need arises.
 
 ## Install
 
@@ -32,7 +36,7 @@ Import the package you need:
 import "github.com/tphakala/go-audio-dsp/loudnorm"
 ```
 
-See each package's README for usage: [`loudnorm`](loudnorm/README.md), [`denoiser`](denoiser/README.md), [`equalizer`](equalizer/README.md) and [`gain`](gain/README.md). A runnable end-to-end chain is in [`examples/streaming`](examples/streaming/).
+See each package's README for usage: [`loudnorm`](loudnorm/README.md), [`denoiser`](denoiser/README.md), [`denoiser/gate`](denoiser/gate/README.md), [`equalizer`](equalizer/README.md), [`gain`](gain/README.md) and [`mel`](mel/README.md). A runnable end-to-end chain is in [`examples/streaming`](examples/streaming/).
 
 ## Design goals
 
