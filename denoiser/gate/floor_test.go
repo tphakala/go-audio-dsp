@@ -2,6 +2,7 @@ package gate
 
 import (
 	"math"
+	"math/rand"
 	"slices"
 	"testing"
 
@@ -142,5 +143,64 @@ func TestNaNChunkKeepsHistogramConsistent(t *testing.T) {
 		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
 			t.Fatalf("tail sample %d non-finite (%v); the blind path did not recover after the NaN chunk", i, v)
 		}
+	}
+}
+
+// TestBlindMedianMatchesRescan pins the incrementally-tracked per-bin median to a
+// from-scratch histogram rescan. The whole point of the incremental tracker is to
+// publish the identical floor as recomputing each median from bucket 0, so on every
+// publish frame the tracked median bucket must equal the rescan result and below[k]
+// must equal sum(hist[k][0..med-1]). It drives varied power (including non-finite,
+// coerced to bucket 0) through warm-up, steady state, and window eviction. Break the
+// rebalance in publish (for example flip the up-loop's `< half` to `<= half`, or
+// drop the down-loop) and this test turns red.
+func TestBlindMedianMatchesRescan(t *testing.T) {
+	const bins, window = 40, 50 // short window so eviction runs well within the drive
+	tr := newFloorTracker(bins, window, blindEvery)
+	rng := rand.New(rand.NewSource(7))
+	power := make([]float32, bins)
+	publishes := 0
+	for frame := range 500 {
+		for k := range power {
+			db := -120 + rng.Float64()*180 // spread across the bucket range
+			power[k] = float32(math.Pow(10, db/10))
+		}
+		if frame%37 == 0 { // exercise the bucket-0 coercion path
+			power[frame%bins] = float32(math.Inf(1))
+		}
+		tr.push(power)
+		if tr.since != 0 { // since resets to 0 only on a publish frame
+			continue
+		}
+		publishes++
+		half := (tr.filled + 1) / 2
+		for k := range tr.bins {
+			// Replicate the original from-scratch scan: first bucket whose inclusive
+			// prefix reaches half, capped at nb-1.
+			cum := 0
+			want := 0
+			for ; want < tr.nb-1; want++ {
+				cum += int(tr.hist[k*tr.nb+want])
+				if cum >= half {
+					break
+				}
+			}
+			if tr.med[k] != want {
+				t.Fatalf("frame %d bin %d: tracked median bucket %d != rescan %d", frame, k, tr.med[k], want)
+			}
+			sumBelow := 0
+			for b := range tr.med[k] {
+				sumBelow += int(tr.hist[k*tr.nb+b])
+			}
+			if tr.below[k] != sumBelow {
+				t.Fatalf("frame %d bin %d: below %d != sum(hist[0..med-1]) %d", frame, k, tr.below[k], sumBelow)
+			}
+			if got := max(tr.level[want], epsPower); tr.noise[k] != got {
+				t.Fatalf("frame %d bin %d: published floor %g != level[%d] %g", frame, k, tr.noise[k], want, got)
+			}
+		}
+	}
+	if publishes < 50 {
+		t.Fatalf("only %d publishes observed; the drive did not exercise steady-state refreshes", publishes)
 	}
 }
