@@ -3,6 +3,8 @@ package denoiser
 import (
 	"fmt"
 	"testing"
+
+	"github.com/tphakala/go-audio-dsp/internal/audiotest"
 )
 
 // minReductionMarginDB is how far below MaxAttenuationDB the measured
@@ -28,30 +30,30 @@ func TestStrengthsOnSyntheticClips(t *testing.T) {
 	// realization (guards against a cherry-picked seed).
 	for _, seed := range []uint64{7, 12, 20} {
 		for _, pink := range []bool{false, true} {
-			clip := makeSynthClip(48000, -40, -20, pink, seed)
+			clip := audiotest.MakeSynthClip(48000, -40, -20, pink, seed)
 			// reduction on the same clip per strength, for the monotonicity check.
 			reductionByStrength := make(map[Strength]float64, 3)
 			for _, strength := range []Strength{Light, Medium, Heavy} {
 				t.Run(fmt.Sprintf("%v/pink=%v/seed=%d", strength, pink, seed), func(t *testing.T) {
 					p := ParamsFor(strength)
-					out, err := Denoise(clip.mix, Config{SampleRate: clip.sr, Strength: strength})
+					out, err := Denoise(clip.Mix, Config{SampleRate: clip.SR, Strength: strength})
 					if err != nil {
 						t.Fatal(err)
 					}
-					if len(out) != len(clip.mix) {
-						t.Fatalf("%d samples, want %d", len(out), len(clip.mix))
+					if len(out) != len(clip.Mix) {
+						t.Fatalf("%d samples, want %d", len(out), len(clip.Mix))
 					}
-					outNoise := spanRMSDB(out, clip.noiseSpans)
-					red := spanRMSDB(clip.mix, clip.noiseSpans) - outNoise
+					outNoise := audiotest.SpanRMSDB(out, clip.NoiseSpans)
+					red := audiotest.SpanRMSDB(clip.Mix, clip.NoiseSpans) - outNoise
 					reductionByStrength[strength] = red
 					want := float64(p.MaxAttenuationDB) - minReductionMarginDB
-					before := segSNRDB(clip.clean, clip.mix, clip.signalSpans, 960) // 20 ms segments at 48 kHz
-					after := segSNRDB(clip.clean, out, clip.signalSpans, 960)
+					before := audiotest.SegSNRDB(clip.Clean, clip.Mix, clip.SignalSpans, 960) // 20 ms segments at 48 kHz
+					after := audiotest.SegSNRDB(clip.Clean, out, clip.SignalSpans, 960)
 					// Align on the second burst (a 2-6 kHz chirp): its cross
 					// correlation peaks sharply and unambiguously. The first burst is
 					// a pure 4 kHz tone (period 12 samples at 48 kHz), whose periodic
 					// correlation would invite cycle slipping.
-					lag := bestLag(clip.mix, out, clip.signalSpans[1][0], clip.signalSpans[1][1], 64)
+					lag := audiotest.BestLag(clip.Mix, out, clip.SignalSpans[1][0], clip.SignalSpans[1][1], 64)
 					t.Logf("reduction %.1f dB (want >= %.1f, floor %g) segSNR %.1f -> %.1f dB lag %d", red, want, p.MaxAttenuationDB, before, after, lag)
 
 					// Signal preservation and alignment hold for every strength.
@@ -100,21 +102,21 @@ func TestStrengthsOnSyntheticClips(t *testing.T) {
 // reachable only through a custom Params.FreqSmoothBins > 1. This guards the
 // integration wiring end to end, complementing the direct smoothGain unit test.
 func TestFreqSmoothingParamEngages(t *testing.T) {
-	clip := makeSynthClip(48000, -40, -20, false, 7)
+	clip := audiotest.MakeSynthClip(48000, -40, -20, false, 7)
 	off := ParamsFor(Medium)
 	off.FreqSmoothBins = 0
 	on := off
 	on.FreqSmoothBins = 5
-	outOff, err := Denoise(clip.mix, Config{SampleRate: clip.sr, Params: &off})
+	outOff, err := Denoise(clip.Mix, Config{SampleRate: clip.SR, Params: &off})
 	if err != nil {
 		t.Fatal(err)
 	}
-	outOn, err := Denoise(clip.mix, Config{SampleRate: clip.sr, Params: &on})
+	outOn, err := Denoise(clip.Mix, Config{SampleRate: clip.SR, Params: &on})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(outOn) != len(clip.mix) {
-		t.Fatalf("%d samples, want %d", len(outOn), len(clip.mix))
+	if len(outOn) != len(clip.Mix) {
+		t.Fatalf("%d samples, want %d", len(outOn), len(clip.Mix))
 	}
 	// Frequency smoothing must actually change the output; identical output would
 	// mean the compute -> smoothGain wiring is dead.

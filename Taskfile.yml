@@ -43,9 +43,9 @@ tasks:
       - go test -bench=. -benchmem -benchtime={{.BENCH_TIME}} ./...
 
   ab:
-    desc: Corpus A/B against ffmpeg afftdn (needs testdata/corpus/*.wav and ffmpeg)
+    desc: Corpus A/B against ffmpeg afftdn for denoiser and denoiser/gate (needs testdata/corpus/*.wav, optionally testdata/noisebed/*.wav, and ffmpeg)
     cmds:
-      - go test -run TestCorpusAgainstAfftdn -v -count=1 ./denoiser
+      - go test -run 'TestCorpusAgainstAfftdn|TestNoiseBedAgainstAfftdn' -v -count=1 ./denoiser ./denoiser/gate
 
   vet:
     desc: Run go vet for amd64 and arm64

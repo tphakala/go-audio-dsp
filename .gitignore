@@ -28,6 +28,8 @@ docs/
 # Depth-independent so it matches the corpus at denoiser/testdata/corpus/ (the test's cwd is
 # the package dir), not only a repo-root testdata/corpus/.
 **/testdata/corpus/
+# Recorded noise beds for the mixed real-noise A/B (audiotest.RunNoiseBedAB); local only.
+**/testdata/noisebed/
 
 # Build artifacts
 /bin/
