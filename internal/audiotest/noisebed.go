@@ -42,6 +42,32 @@ func quietestSlice(x []float32, sr, n int) []float32 {
 // lowest noise_floor afftdn takes.
 const minBedDB = -80.0
 
+// loadNoiseBed decodes one recording and returns its quietest synthSeconds as a
+// noise bed. When the recording cannot serve as a bed it returns a nil bed and
+// the reason: shorter than the bed length, or below minBedDB.
+func loadNoiseBed(t *testing.T, bin, path string, sr int) (bed []float32, skip string) {
+	t.Helper()
+	bed = quietestSlice(DecodeToF32Mono(t, bin, path, sr), sr, synthSeconds*sr)
+	if bed == nil {
+		return nil, fmt.Sprintf("shorter than %d s", synthSeconds)
+	}
+	bed = slices.Clone(bed)
+	AssertFinite(t, filepath.Base(path), bed)
+	if level, quiet := bedTooQuiet(bed); quiet {
+		return nil, fmt.Sprintf("quietest %d s is %.0f dBFS, below the %.0f dBFS afftdn can act on", synthSeconds, level, minBedDB)
+	}
+	return bed, ""
+}
+
+// bedTooQuiet reports whether a noise bed is below minBedDB and returns its
+// level in dBFS RMS. Below afftdn's lowest noise_floor the reference does almost
+// nothing, so every bar would pass without measuring anything. An all-zero or
+// empty bed is -200 dBFS and always too quiet.
+func bedTooQuiet(bed []float32) (level float64, tooQuiet bool) {
+	level = RMSDB(bed)
+	return level, level < minBedDB
+}
+
 // Bars are the margins, in dB, a method may trail afftdn on the mixed-noise A/B.
 type Bars struct {
 	// ReductionDB: noise-span reduction may be at most this far below afftdn's.
@@ -80,17 +106,9 @@ func RunNoiseBedAB(t *testing.T, dir string, snrDB float64, levels []Level, bars
 	measured := 0
 	for _, path := range beds {
 		name := filepath.Base(path)
-		bed := quietestSlice(DecodeToF32Mono(t, bin, path, sr), sr, synthSeconds*sr)
-		if bed == nil {
-			t.Logf("%s: shorter than %d s; skipping", name, synthSeconds)
-			continue
-		}
-		bed = slices.Clone(bed)
-		AssertFinite(t, name, bed)
-		// Below afftdn's lowest noise_floor the reference does almost nothing, so
-		// every bar would pass without measuring anything.
-		if level := RMSDB(bed); level < minBedDB {
-			t.Logf("%s: quietest %d s is %.0f dBFS, below the %.0f dBFS afftdn can act on; skipping", name, synthSeconds, level, minBedDB)
+		bed, skip := loadNoiseBed(t, bin, path, sr)
+		if skip != "" {
+			t.Logf("%s: %s; skipping", name, skip)
 			continue
 		}
 		clip := MixBursts(sr, bed, RMSDB(bed)+snrDB)
