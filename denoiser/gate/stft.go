@@ -1,8 +1,8 @@
 package gate
 
 import (
+	"github.com/tphakala/go-audio-dsp/internal/dspshared"
 	"github.com/tphakala/simd/c64"
-	"github.com/tphakala/simd/f32"
 )
 
 // The stream is modelled as the padded sequence p = (n-hop zeros) ++ input ++
@@ -12,12 +12,8 @@ import (
 // first ovl-1 frames are all leading zeros (discarded), and time smoothing looks
 // L frames ahead, so the output for frame g is produced when frame g+L completes.
 // The steady-state lag is therefore (n-hop) + L*hop. The framing, windowing, RFFT
-// and |X|^2 live in the stft.Analyzer; this file drives it and does the
-// L-delayed overlap-add.
-
-// noEmit is the no-op frame callback used to feed the analyzer's leading-zero
-// preroll, during which no frame completes and nothing is synthesized.
-func noEmit(spec []complex64, power []float32) {}
+// and |X|^2 live in the stft.Analyzer; this file drives it and the
+// stft.Synthesizer does the L-delayed overlap-add.
 
 // maskRow returns the ring row holding frame f's per-bin mask. The ring holds the
 // last 2L+1 frames; a pre-stream frame index (negative, only at stream start)
@@ -44,18 +40,7 @@ func (g *Gate) specRow(f int64) []complex64 {
 // when frame g+L completes and the first warm = ovl-1+L frames are discarded, so
 // the emitted-frame count after F frames is max(0, F-warm).
 func (g *Gate) pendingOutput(extra int) int {
-	total := g.an.InFill() + extra
-	if total < g.n {
-		return 0
-	}
-	completing := int64((total-g.n)/g.hop) + 1 // frames that will complete
-	warm := int64(g.warm)
-	emitFrom := max(g.frames, warm)
-	cnt := g.frames + completing - emitFrom
-	if cnt <= 0 {
-		return 0
-	}
-	return int(cnt) * g.hop
+	return dspshared.PendingOutput(g.an.InFill(), extra, g.n, g.hop, g.frames, int64(g.warm))
 }
 
 // feed pushes in through the analyzer and, for each frame that completes, updates
@@ -88,28 +73,13 @@ func (g *Gate) feed(in, out []float32, flushing bool) int {
 		g.smoothInto(g.gain, f) // time smoothing over the ring, then frequency smoothing
 		row := g.specRow(gOut)
 		c64.MulReal(row, row, g.gain) // per-bin real gain; alias-safe (dst == a), scalar in simd (simd #259)
-		g.an.Inverse(g.synth, row)
-		// Fuse the synthesis window and overlap-add: ola += synth * window. synth is
-		// only the IRFFT output and is not read after this; MulAdd uses a hardware
-		// FMA where available, so it is tolerance-stable across CPU tiers.
-		f32.MulAdd(g.ola, g.synth, g.window)
+		g.syn.Add(row)
 		if gOut >= int64(g.ovl-1) {
-			m := min(g.hop, len(out)-written)
-			g.finishBlock(out[written : written+m])
-			written += m
+			written += g.syn.Finish(out[written:])
 		} else {
-			g.finishBlock(nil)
+			g.syn.Discard()
 		}
 		g.frames++
 	})
 	return written
-}
-
-// finishBlock emits the oldest hop samples of the overlap-add accumulator, divided
-// by the WOLA normalization, into dst (at most hop samples; empty when the block
-// is discarded), then advances the accumulator by one hop.
-func (g *Gate) finishBlock(dst []float32) {
-	f32.Mul(dst, g.ola[:len(dst)], g.invNorm[:len(dst)])
-	copy(g.ola, g.ola[g.hop:])
-	clear(g.ola[g.n-g.hop:])
 }

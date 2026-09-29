@@ -117,11 +117,14 @@ func TestMCRAResetAndWindowFrames(t *testing.T) {
 			t.Errorf("reset noise = %g, want epsPower", v)
 		}
 	}
-	if f := trackWindowFrames(2, 48000, 256); f != 375 {
-		t.Errorf("trackWindowFrames(2 s) = %d, want 375", f)
+	params := ParamsFor(Medium)
+	params.TrackWindowSec = 2
+	d, err := New(Config{SampleRate: 48000, FrameSize: 1024, HopSize: 256, Params: &params})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if f := trackWindowFrames(0.001, 48000, 256); f != 1 {
-		t.Errorf("trackWindowFrames(tiny) = %d, want 1", f)
+	if d.tracker.window != 375 {
+		t.Errorf("tracker window = %d frames, want 375 (2 s at hop 256, 48 kHz)", d.tracker.window)
 	}
 	// A NaN frame must not poison the tracker: state stays finite and the
 	// tracker keeps adapting afterwards.

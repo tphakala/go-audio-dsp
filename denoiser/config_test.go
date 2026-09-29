@@ -12,8 +12,9 @@ func TestAutoFrameSize(t *testing.T) {
 		44100: 1024, 48000: 1024, 96000: 2048,
 	}
 	for sr, want := range cases {
-		if got := autoFrameSize(sr); got != want {
-			t.Errorf("autoFrameSize(%d) = %d, want %d", sr, got, want)
+		rc, _, err := Config{SampleRate: sr}.resolve()
+		if err != nil || rc.FrameSize != want {
+			t.Errorf("resolve(%d) FrameSize = %d (err %v), want %d", sr, rc.FrameSize, err, want)
 		}
 	}
 }

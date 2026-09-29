@@ -92,8 +92,3 @@ func (m *mcra) update(power []float32) {
 		m.count = 0
 	}
 }
-
-// trackWindowFrames converts the tracker window from seconds to frames.
-func trackWindowFrames(sec float32, sampleRate, hop int) int {
-	return max(1, int(math.Round(float64(sec)*float64(sampleRate)/float64(hop))))
-}

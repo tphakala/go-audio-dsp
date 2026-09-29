@@ -2,14 +2,13 @@ package gate
 
 import (
 	dsp "github.com/tphakala/go-audio-dsp"
+	"github.com/tphakala/go-audio-dsp/internal/dspshared"
 	"github.com/tphakala/go-audio-dsp/stft"
-	"github.com/tphakala/simd/f32"
 )
 
-// epsPower floors every noise power estimate so SNR ratios stay finite. It
-// matches the flagship denoiser's floor; inputs are normalized float32 audio, so
-// real bin powers sit far above it.
-const epsPower = 1e-12
+// epsPower floors every noise power estimate so SNR ratios stay finite. It is
+// shared with the flagship denoiser.
+const epsPower = dspshared.EpsPower
 
 // Gate is a streaming single-channel spectral soft-gate denoiser. Create one with
 // New, then call Process (or ProcessInto) with consecutive chunks and Flush at the
@@ -26,11 +25,10 @@ type Gate struct {
 	freqR      int // R = FreqSmoothBins/2: frequency-smoothing half-width
 	warm       int // ovl-1+L: frames whose output block is discarded (leading zeros + lookahead priming)
 
-	plan     *stft.Plan     // whole-clip transform for the learned floor; built lazily on first LearnNoise, nil until then
-	an       *stft.Analyzer // streaming analysis: framing, window, RFFT, |X|^2
-	window   []float32      // periodic Hann, analysis and synthesis (the analyzer's)
-	invNorm  []float32      // len hop: 1 / WOLA normalization per position in a block
-	prezeros []float32      // len n-hop: the leading-zero preroll fed on Reset
+	plan     *stft.Plan        // whole-clip transform for the learned floor; built lazily on first LearnNoise, nil until then
+	an       *stft.Analyzer    // streaming analysis: framing, window, RFFT, |X|^2
+	syn      *stft.Synthesizer // WOLA overlap-add over the analyzer's window
+	prezeros []float32         // len n-hop: the leading-zero preroll fed on Reset
 
 	gFloor        float32 // residual gain floor, FactorFromDB(-MaxAttenuationDB)
 	slope, offset float32 // affine map from log10 power ratio to the sigmoid knee argument
@@ -47,8 +45,6 @@ type Gate struct {
 	tmp      []float32   // frequency-smoothing accumulator
 	invCount []float32   // 1 / (bins in the frequency box at k), for edge-aware averaging
 	gain     []float32   // final per-bin gain for the output frame
-	synth    []float32   // inverse frame, len n
-	ola      []float32   // overlap-add accumulator, len n
 	zeros    []float32   // len hop, fed by Flush
 	maskRing []float32   // (2L+1)*bins: the last 2L+1 frames' masks, for time smoothing
 	specRing []complex64 // (L+1)*bins: the last L+1 frames' spectra, awaiting their delayed output
@@ -74,7 +70,7 @@ func New(cfg Config) (*Gate, error) {
 	// power are measured on the identical window. NewAnalyzer wraps any failure in
 	// ErrInvalidConfig and Config.resolve validated a tighter range, so it never fails
 	// here.
-	an, err := stft.NewAnalyzer(stft.Config{FrameSize: rc.FrameSize, HopSize: rc.HopSize, Window: stft.Hann})
+	an, err := stft.NewAnalyzer(dspshared.STFTConfig(rc.FrameSize, rc.HopSize))
 	if err != nil {
 		return nil, err
 	}
@@ -95,10 +91,11 @@ func New(cfg Config) (*Gate, error) {
 		warm:       ovl - 1 + l,
 		an:         an,
 	}
-	g.window = an.Window()
-	norm := stft.WOLANorm(g.window, g.window, g.hop)
-	g.invNorm = make([]float32, g.hop)
-	f32.Reciprocal(g.invNorm, norm) // full-precision division, not approximate rcp
+	syn, err := stft.NewSynthesizer(an)
+	if err != nil {
+		return nil, err
+	}
+	g.syn = syn
 	g.prezeros = make([]float32, g.n-g.hop)
 	g.gFloor = float32(dsp.FactorFromDB(-float64(p.MaxAttenuationDB)))
 	// knee argument = 4*(snrDB - ThresholdDB)/TransitionDB, with
@@ -112,8 +109,6 @@ func New(cfg Config) (*Gate, error) {
 	g.acc = make([]float32, bins)
 	g.tmp = make([]float32, bins)
 	g.gain = make([]float32, bins)
-	g.synth = make([]float32, g.n)
-	g.ola = make([]float32, g.n)
 	g.zeros = make([]float32, g.hop)
 	g.maskRing = make([]float32, (2*l+1)*bins)
 	g.specRing = make([]complex64, (l+1)*bins)
@@ -122,7 +117,7 @@ func New(cfg Config) (*Gate, error) {
 		lo, hi := max(0, k-r), min(bins-1, k+r)
 		g.invCount[k] = 1 / float32(hi-lo+1)
 	}
-	g.tracker = newFloorTracker(bins, trackWindowFrames(p.FloorWindowSec, rc.SampleRate, rc.HopSize), blindEvery)
+	g.tracker = newFloorTracker(bins, dspshared.TrackWindowFrames(p.FloorWindowSec, rc.SampleRate, rc.HopSize), blindEvery)
 	g.initNoiseSource()
 	g.Reset()
 	return g, nil
@@ -148,10 +143,10 @@ func (g *Gate) Latency() int { return (g.n - g.hop) + g.lookahead*g.hop }
 func (g *Gate) Reset() {
 	// The stream is modelled as n-hop leading zeros ++ input. Prime the analyzer
 	// with that preroll so the first output sample aligns with the first input
-	// sample; n-hop < n, so no frame completes and noEmit is never called.
+	// sample; n-hop < n, so no frame completes and NoEmit is never called.
 	g.an.Reset()
-	g.an.Feed(g.prezeros, noEmit)
-	clear(g.ola)
+	g.an.Feed(g.prezeros, dspshared.NoEmit)
+	g.syn.Reset()
 	// Prime the mask ring to unity gain, not zero: the pre-stream frames a
 	// start-edge output frame averages over represent "no gating yet"
 	// (pass-through), so a unity-floor stream reconstructs exactly and real gating

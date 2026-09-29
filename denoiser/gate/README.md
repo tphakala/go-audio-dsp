@@ -163,9 +163,9 @@ SIMD_DISABLE=all go test ./denoiser/gate/   # pure-Go tier (scalar parity)
 go test -bench=. ./denoiser/gate/   # throughput and per-call allocations
 ```
 
-A shared `afftdn` reference oracle and real-corpus A/B comparison across both
-denoise methods are planned once the flagship's test harness is extracted to an
-internal package.
+`ab_test.go` measures the gate against ffmpeg `afftdn` and the flagship denoiser
+on synthetic clips, a real-clip corpus and a recorded noise bed, through the
+shared `internal/audiotest` helpers.
 
 ## License
 

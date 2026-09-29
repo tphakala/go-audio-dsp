@@ -1,9 +1,9 @@
 package gate
 
 import (
-	"math"
 	"slices"
 
+	"github.com/tphakala/go-audio-dsp/internal/dspshared"
 	"github.com/tphakala/go-audio-dsp/stft"
 )
 
@@ -25,14 +25,14 @@ func (g *Gate) LearnNoise(samples []float32) error {
 		// rather than in New. Config.resolve already validated the geometry (New built
 		// the streaming Analyzer from the same config), so this shares its window and
 		// does not fail in practice; the wrapped error is returned for completeness.
-		plan, err := stft.New(stft.Config{FrameSize: g.n, HopSize: g.hop, Window: stft.Hann})
+		plan, err := stft.New(dspshared.STFTConfig(g.n, g.hop))
 		if err != nil {
 			return err
 		}
 		g.plan = plan
 	}
 	g.plan.MeanPowerInto(g.noiseBuf, samples)
-	copyFloor(g.noiseBuf, g.noiseBuf) // apply the epsPower guard the transform leaves to the caller
+	dspshared.CopyFloor(g.noiseBuf, g.noiseBuf) // apply the epsPower guard the transform leaves to the caller
 	g.noise = g.noiseBuf
 	g.learned = true
 	return nil
@@ -52,7 +52,7 @@ func (g *Gate) SetNoiseFloor(power []float32) error {
 	if len(power) != g.bins {
 		return ErrFloorMismatch
 	}
-	copyFloor(g.noiseBuf, power)
+	dspshared.CopyFloor(g.noiseBuf, power)
 	g.noise = g.noiseBuf
 	g.learned = true
 	return nil
@@ -65,17 +65,4 @@ func (g *Gate) NoiseFloor() []float32 {
 		return nil
 	}
 	return slices.Clone(g.noiseBuf)
-}
-
-// copyFloor copies src into dst, replacing each NaN, +Inf, or value at or below
-// epsPower with epsPower (the guard NewNoiseProfile applies in the parent
-// package), so the floor is always finite and strictly positive and a finite
-// power divided by it stays finite. dst may alias src for an in-place floor.
-func copyFloor(dst, src []float32) {
-	for k, v := range src {
-		if !(v > epsPower) || !(v < math.MaxFloat32) { // NaN, <= floor, or +Inf
-			v = epsPower
-		}
-		dst[k] = v
-	}
 }

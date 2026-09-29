@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tphakala/go-audio-dsp/denoiser"
+	"github.com/tphakala/go-audio-dsp/internal/dspshared"
 )
 
 // TestGateAttenuatesNoiseKeepsTone pins the core gate mechanism: with a learned
@@ -177,7 +178,7 @@ func TestScalarReferenceParity(t *testing.T) {
 		power[k] = float32(math.Abs(rng.NormFloat64())) * float32(dbToLin(-30))
 		noise[k] = float32(math.Abs(rng.NormFloat64())+0.1) * float32(dbToLin(-40))
 	}
-	copyFloor(g.noiseBuf, noise)
+	dspshared.CopyFloor(g.noiseBuf, noise)
 	g.noise = g.noiseBuf
 	g.learned = true
 	g.computeMask(power)

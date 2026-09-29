@@ -180,9 +180,3 @@ func (t *floorTracker) publish() {
 		t.noise[k] = max(t.level[m], epsPower)
 	}
 }
-
-// trackWindowFrames converts the blind-floor window from seconds to frames,
-// matching the flagship tracker's conversion.
-func trackWindowFrames(sec float32, sampleRate, hop int) int {
-	return max(1, int(math.Round(float64(sec)*float64(sampleRate)/float64(hop))))
-}

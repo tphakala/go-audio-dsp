@@ -4,11 +4,11 @@ import (
 	"math"
 
 	dsp "github.com/tphakala/go-audio-dsp"
+	"github.com/tphakala/go-audio-dsp/internal/dspshared"
 )
 
 // epsPower floors every noise power estimate so SNR ratios stay finite.
-// Inputs are normalized float32 audio, so real bin powers sit far above it.
-const epsPower = 1e-12
+const epsPower = dspshared.EpsPower
 
 // lsaVMin and lsaVMax clamp the MMSE-LSA integrand argument: below lsaVMin
 // exp(0.5*E1(v)) grows without bound (and is then capped by the gain <= 1

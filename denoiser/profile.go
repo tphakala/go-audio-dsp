@@ -5,6 +5,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/tphakala/go-audio-dsp/internal/dspshared"
 	"github.com/tphakala/simd/f32"
 )
 
@@ -65,16 +66,11 @@ func (p *NoiseProfile) Spectrum() []float32 { return slices.Clone(p.power) }
 // ErrProfileMismatch is returned. Values are copied and floored at epsPower.
 func NewNoiseProfile(power []float32) (*NoiseProfile, error) {
 	n := (len(power) - 1) * 2
-	if len(power) < 2 || n < minFrameSize || n&(n-1) != 0 {
+	if len(power) < 2 || n < dspshared.MinFrameSize || n&(n-1) != 0 {
 		return nil, ErrProfileMismatch
 	}
 	p := &NoiseProfile{power: make([]float32, len(power)), frameSize: n, info: ProfileInfo{Source: ProfileExternal}}
-	for k, v := range power {
-		if !(v > epsPower) || !(v < math.MaxFloat32) { // NaN, <= floor, or +Inf
-			v = epsPower
-		}
-		p.power[k] = v
-	}
+	dspshared.CopyFloor(p.power, power)
 	return p, nil
 }
 
@@ -90,13 +86,7 @@ func (d *Denoiser) meanPower(dst, x []float32) int {
 	if frames == 0 {
 		return 0
 	}
-	for k := range dst {
-		v := dst[k]
-		if !(v > epsPower) || !(v < math.MaxFloat32) { // NaN, <= floor, or +Inf
-			v = epsPower
-		}
-		dst[k] = v
-	}
+	dspshared.CopyFloor(dst, dst)
 	return frames
 }
 
