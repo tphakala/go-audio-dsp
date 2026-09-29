@@ -2,6 +2,7 @@ package stft
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/tphakala/simd/f32"
 )
@@ -37,16 +38,20 @@ type Synthesizer struct {
 }
 
 // NewSynthesizer builds a Synthesizer for an, using an's window and frame
-// geometry. It returns an error wrapping ErrInvalidConfig when the window's
-// overlap sum vanishes at some position of the hop (for example HopSize equal to
-// FrameSize, or a window much shorter than the hop), since no normalization can
+// geometry. It returns an error wrapping ErrInvalidConfig when an is nil, or when the
+// window's overlap sum vanishes or is not finite at some position of the hop (for
+// example HopSize equal to FrameSize, a window much shorter than the hop, or a
+// custom window with infinite or overflowing values), since no normalization can
 // reconstruct those samples. A HopSize that does not divide FrameSize is accepted
 // as long as the overlap sum stays positive; the leading-zero preroll then ends part way through a block, so only floor((FrameSize-HopSize)/HopSize) blocks are entirely leading zeros.
 func NewSynthesizer(an *Analyzer) (*Synthesizer, error) {
+	if an == nil {
+		return nil, fmt.Errorf("%w: NewSynthesizer needs a non-nil Analyzer", ErrInvalidConfig)
+	}
 	norm := WOLANorm(an.window, an.window, an.hop)
 	for i, v := range norm {
-		if !(v > minWOLANorm) {
-			return nil, fmt.Errorf("%w: window overlap sum at hop position %d is %g, too small to reconstruct", ErrInvalidConfig, i, v)
+		if !(v > minWOLANorm) || v > math.MaxFloat32 { // too small, NaN, or +Inf
+			return nil, fmt.Errorf("%w: window overlap sum at hop position %d is %g, outside the range that reconstructs", ErrInvalidConfig, i, v)
 		}
 	}
 	inv := make([]float32, an.hop)

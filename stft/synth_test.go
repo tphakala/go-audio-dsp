@@ -105,6 +105,31 @@ func TestNewSynthesizerNormFloorBand(t *testing.T) {
 	}
 }
 
+func TestNewSynthesizerRejectsNilAndNonFinite(t *testing.T) {
+	if _, err := NewSynthesizer(nil); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("nil Analyzer: err = %v, want ErrInvalidConfig", err)
+	}
+	const n, hop = 256, 64
+	inf := make([]float32, n)
+	for i := range inf {
+		inf[i] = 1
+	}
+	inf[10] = float32(math.Inf(1))
+	huge := make([]float32, n) // squares overflow float32 in the overlap sum
+	for i := range huge {
+		huge[i] = 1e20
+	}
+	for name, w := range map[string][]float32{"+Inf tap": inf, "overflowing taps": huge} {
+		an, err := NewAnalyzer(Config{FrameSize: n, HopSize: hop, CustomWindow: w})
+		if err != nil {
+			t.Fatalf("%s: NewAnalyzer: %v", name, err)
+		}
+		if _, err := NewSynthesizer(an); !errors.Is(err, ErrInvalidConfig) {
+			t.Errorf("%s: err = %v, want ErrInvalidConfig", name, err)
+		}
+	}
+}
+
 func TestSynthesizerAddLeavesSpecUnchanged(t *testing.T) {
 	an, err := NewAnalyzer(Config{FrameSize: 256, HopSize: 64, Window: Hann})
 	if err != nil {
