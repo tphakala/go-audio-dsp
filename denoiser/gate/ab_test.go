@@ -96,7 +96,10 @@ func TestGateAgainstAfftdnSynthetic(t *testing.T) {
 // target: it shares audiotest.RunCorpusAB with the flagship denoiser. The corpus
 // is the same gitignored denoiser/testdata/corpus/*.wav.
 func TestCorpusAgainstAfftdn(t *testing.T) {
-	audiotest.RunCorpusAB(t, audiotest.CorpusDir("../testdata/corpus"), abLevels(), 0)
+	// RunCorpusAB applies one tolerance to both noise reduction and signal-level
+	// drop. abBars.ReductionDB is a regression guard that has not been calibrated
+	// on a corpus, so the signal-drop guard here is as loose as the reduction one.
+	audiotest.RunCorpusAB(t, audiotest.CorpusDir("../testdata/corpus"), abLevels(), abBars.ReductionDB)
 }
 
 // TestNoiseBedAgainstAfftdn mixes synthetic bursts of known position and level
