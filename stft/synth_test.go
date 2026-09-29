@@ -126,40 +126,65 @@ func TestSynthesizerAddLeavesSpecUnchanged(t *testing.T) {
 }
 
 func TestSynthesizerFinishClipsAndDiscards(t *testing.T) {
-	an, err := NewAnalyzer(Config{FrameSize: 256, HopSize: 64, Window: Hann})
-	if err != nil {
-		t.Fatal(err)
+	newSyn := func() (*Synthesizer, []complex64) {
+		an, err := NewAnalyzer(Config{FrameSize: 256, HopSize: 64, Window: Hann})
+		if err != nil {
+			t.Fatal(err)
+		}
+		syn, err := NewSynthesizer(an)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// One cosine bin: its frame is not zero under the Hann window, so every
+		// block of the frame carries signal.
+		spec := make([]complex64, an.NumBins())
+		spec[4] = complex(1, 0)
+		return syn, spec
 	}
-	syn, err := NewSynthesizer(an)
-	if err != nil {
-		t.Fatal(err)
+	nonzero := func(x []float32) bool {
+		for _, v := range x {
+			if v != 0 {
+				return true
+			}
+		}
+		return false
 	}
-	spec := make([]complex64, an.NumBins())
-	for k := range spec {
-		spec[k] = complex(1, 0)
+
+	// Reference blocks of one frame: block 0 and block 1.
+	ref, spec := newSyn()
+	ref.Add(spec)
+	b0, b1 := make([]float32, 64), make([]float32, 64)
+	ref.Finish(b0)
+	ref.Finish(b1)
+	if !nonzero(b0) || !nonzero(b1) {
+		t.Fatal("test spectrum yields a silent block; the assertions below would be vacuous")
 	}
+
+	// Discard drops exactly the oldest block: the next Finish is block 1.
+	syn, spec := newSyn()
 	syn.Add(spec)
 	syn.Discard()
-	syn.Add(spec)
-	out := make([]float32, 100)
-	if got := syn.Finish(out); got != 64 {
-		t.Errorf("full block wrote %d, want 64", got)
+	got := make([]float32, 64)
+	syn.Finish(got)
+	if !slices.Equal(got, b1) {
+		t.Error("after Add and Discard, Finish did not return the second block")
 	}
+
+	// Finish clips to len(out) and reports the samples written.
+	syn, spec = newSyn()
 	syn.Add(spec)
-	if got := syn.Finish(out[:10]); got != 10 {
-		t.Errorf("clipped block wrote %d, want 10", got)
+	short := make([]float32, 10)
+	if n := syn.Finish(short); n != 10 || !slices.Equal(short, b0[:10]) {
+		t.Errorf("clipped Finish wrote %d samples, want 10 matching the block head", n)
 	}
-	// Reset clears the accumulator: a kept block after Reset is silent.
+
+	// Reset clears the accumulator: nothing from before it reaches later blocks.
+	syn, spec = newSyn()
 	syn.Add(spec)
 	syn.Reset()
-	out2 := make([]float32, 64)
-	for i := range out2 {
-		out2[i] = 1
-	}
-	syn.Finish(out2)
-	for i, v := range out2 {
-		if v != 0 {
-			t.Fatalf("after Reset out[%d] = %g, want 0", i, v)
-		}
+	after := make([]float32, 64)
+	after[0] = 1 // a stale destination value must be overwritten too
+	if n := syn.Finish(after); n != 64 || nonzero(after) {
+		t.Errorf("after Reset, Finish wrote %d samples, nonzero %v; want a silent block", n, nonzero(after))
 	}
 }
