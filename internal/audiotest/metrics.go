@@ -122,11 +122,6 @@ func Shifted(x []float32, lag int) []float32 {
 	return y
 }
 
-// TestMetricInstruments calibrates the measurement helpers against known
-// inputs. The quality and afftdn-oracle tests use these as their instruments,
-// so a silent sign or scale error here would invert an assertion's meaning
-// (e.g. SegSNRDB's direction) and let a real regression pass.
-
 // AssertFinite fails if x holds a NaN or Inf sample. A non-finite sample makes
 // SpanRMSDB return NaN, and every ordered metric comparison against NaN is false,
 // so the A/B bars would pass on invalid audio; reject it before measuring.

@@ -16,6 +16,10 @@ func whiteNoise(n int, rms float64, seed uint64) []float32 {
 	return x
 }
 
+// TestMetricInstruments calibrates the measurement helpers against known
+// inputs. The quality and afftdn-oracle tests use these as their instruments,
+// so a silent sign or scale error here would invert an assertion's meaning
+// (e.g. SegSNRDB's direction) and let a real regression pass.
 func TestMetricInstruments(t *testing.T) {
 	const sr = 48000
 	const n = sr // 1 s

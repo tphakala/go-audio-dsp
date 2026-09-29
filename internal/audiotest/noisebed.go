@@ -56,9 +56,12 @@ type Bars struct {
 // the recording as a noise bed, lays the four synthetic SynthClip bursts over it
 // at snrDB above the bed's RMS level (MixBursts), and runs each Level over the
 // mix. Unlike RunCorpusAB the signal is known, so the comparison uses distance
-// metrics: noise-span reduction and the signal-span log-spectral distance and
-// segmental SNR against the clean bursts. It skips when no bed or ffmpeg is
-// present, and fails when a bar is missed. Beds shorter than 10 s, or whose quietest 10 s is below minBedDB, are skipped.
+// metrics. It fails when the noise floor rises, when noise-span reduction or the
+// signal-span log-spectral distance from the clean bursts misses the bars
+// against afftdn, or when that distance is more than 1 dB worse than the
+// untouched input's. Segmental SNR is logged only. It skips when no bed or
+// ffmpeg is present. Beds shorter than 10 s, or whose quietest 10 s is below
+// minBedDB, are skipped.
 func RunNoiseBedAB(t *testing.T, dir string, snrDB float64, levels []Level, bars Bars) {
 	t.Helper()
 	bin := FFmpegPath(t)
@@ -125,6 +128,9 @@ func RunNoiseBedAB(t *testing.T, dir string, snrDB float64, levels []Level, bars
 				}
 				if lsdOurs > lsdRef+bars.LSDDB {
 					t.Errorf("signal LSD %.2f dB exceeds afftdn's %.2f by %.2f (%.1f dB bar)", lsdOurs, lsdRef, lsdOurs-lsdRef, bars.LSDDB)
+				}
+				if lsdOurs > lsdIn+1 {
+					t.Errorf("signal LSD %.2f dB is worse than the untouched input's %.2f; the method is damaging the signal", lsdOurs, lsdIn)
 				}
 			})
 		}
