@@ -20,7 +20,7 @@ const minWOLANorm = 1e-8
 // Use it from the Analyzer's Feed callback: for every frame, call Add with the
 // (possibly modified) spectrum, then exactly one of Finish (keep the block) or
 // Discard (drop it). The stream is modelled as FrameSize-HopSize leading zeros
-// followed by the input, so the first FrameSize/HopSize-1 blocks are incomplete
+// followed by the input, so for a HopSize that divides FrameSize the first FrameSize/HopSize-1 blocks are incomplete
 // leading zeros; a caller feeds that preroll to the Analyzer and discards those
 // blocks. Finish with an out shorter than a hop drops the rest of the block, which
 // is how a final flush is clipped. Reset clears the accumulator and must be paired
@@ -41,7 +41,7 @@ type Synthesizer struct {
 // overlap sum vanishes at some position of the hop (for example HopSize equal to
 // FrameSize, or a window much shorter than the hop), since no normalization can
 // reconstruct those samples. A HopSize that does not divide FrameSize is accepted
-// as long as the overlap sum stays positive.
+// as long as the overlap sum stays positive; the leading-zero preroll then ends part way through a block, so only floor((FrameSize-HopSize)/HopSize) blocks are entirely leading zeros.
 func NewSynthesizer(an *Analyzer) (*Synthesizer, error) {
 	norm := WOLANorm(an.window, an.window, an.hop)
 	for i, v := range norm {
