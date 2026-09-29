@@ -1,8 +1,8 @@
 package denoiser
 
 import (
+	"github.com/tphakala/go-audio-dsp/internal/dspshared"
 	"github.com/tphakala/simd/c64"
-	"github.com/tphakala/simd/f32"
 )
 
 // The stream is modelled as the padded sequence p = (n-hop zeros) ++ input ++
@@ -11,27 +11,14 @@ import (
 // final. Input sample t is p[t+n-hop], so output is aligned with input, the
 // first ovl-1 blocks (all leading zeros) are discarded, and the steady-state
 // lag is n-hop samples. The leading n-hop zeros are the analyzer preroll Reset
-// feeds; framing, windowing, the RFFT and |X|^2 live in the stft.Analyzer.
-
-// noEmit is the no-op frame callback used to feed the analyzer's leading-zero
-// preroll, during which no frame completes and nothing is synthesized.
-func noEmit(spec []complex64, power []float32) {}
+// feeds; framing, windowing, the RFFT and |X|^2 live in the stft.Analyzer and
+// the overlap-add in the stft.Synthesizer.
 
 // pendingOutput reports how many output samples feeding extra more input
-// samples will emit, given the current stream state.
+// samples will emit, given the current stream state. The first ovl-1 frames'
+// blocks are leading zeros and discarded.
 func (d *Denoiser) pendingOutput(extra int) int {
-	total := d.an.InFill() + extra
-	if total < d.n {
-		return 0
-	}
-	completing := int64((total-d.n)/d.hop) + 1 // frames that will complete
-	warm := int64(d.ovl - 1)                   // frames whose block is leading zeros
-	emitFrom := max(d.frames, warm)
-	cnt := d.frames + completing - emitFrom
-	if cnt <= 0 {
-		return 0
-	}
-	return int(cnt) * d.hop
+	return dspshared.PendingOutput(d.an.InFill(), extra, d.n, d.hop, d.frames, int64(d.ovl-1))
 }
 
 // feed pushes in through the analyzer and, for each frame that completes,
@@ -45,19 +32,11 @@ func (d *Denoiser) feed(in, out []float32, flushing bool) int {
 		d.updateNoise(power, flushing)
 		d.gains.compute(d.gain, power, d.noise)
 		c64.MulReal(spec, spec, d.gain) // per-bin real gain; alias-safe (dst == a), scalar in simd (no SIMD kernel yet, simd #259)
-		d.an.Inverse(d.synth, spec)
-		// Fuse the synthesis window and overlap-add into one pass:
-		// d.ola += d.synth * d.window (was f32.Mul into d.synth, then f32.Add into
-		// d.ola). d.synth is only the IRFFT output buffer and is not read after this.
-		// MulAdd uses a hardware FMA where available, so like the IRFFT above it is
-		// tolerance-stable across CPU tiers, not bit-identical.
-		f32.MulAdd(d.ola, d.synth, d.window)
+		d.syn.Add(spec)
 		if d.frames >= int64(d.ovl-1) {
-			m := min(d.hop, len(out)-written)
-			d.finishBlock(out[written : written+m])
-			written += m
+			written += d.syn.Finish(out[written:])
 		} else {
-			d.finishBlock(nil)
+			d.syn.Discard()
 		}
 		d.frames++
 	})
@@ -74,13 +53,4 @@ func (d *Denoiser) updateNoise(power []float32, flushing bool) {
 		return
 	}
 	d.tracker.update(power)
-}
-
-// finishBlock emits the oldest hop samples of the overlap-add accumulator,
-// divided by the WOLA normalization, into dst (at most hop samples; empty when
-// the block is discarded), then advances the accumulator by one hop.
-func (d *Denoiser) finishBlock(dst []float32) {
-	f32.Mul(dst, d.ola[:len(dst)], d.invNorm[:len(dst)])
-	copy(d.ola, d.ola[d.hop:])
-	clear(d.ola[d.n-d.hop:])
 }

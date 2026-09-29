@@ -131,7 +131,7 @@ func runStream(t *testing.T, cfg Config, learn, x []float32, chunks []int) []flo
 // TestUnityFloorIsIdentity pins that MaxAttenuationDB == 0 makes the gate an exact
 // pass-through (gFloor == 1 forces every bin gain to unity). Smoothing is left on
 // so the identity flows through the smoothing passes too. Deleting the residual-
-// floor affine (mask.go step 6) or the invNorm divide in finishBlock breaks it.
+// floor affine (mask.go step 6) or the invNorm divide in stft.Synthesizer breaks it.
 func TestUnityFloorIsIdentity(t *testing.T) {
 	base := ParamsFor(denoiser.Medium)
 	base.MaxAttenuationDB = 0
@@ -329,8 +329,8 @@ func TestLearnNoiseMatchesSetNoiseFloor(t *testing.T) {
 	}
 }
 
-// TestAutoFrameSizeMatchesFlagship pins the duplicated auto-frame rule to the
-// flagship denoiser's, so a given rate frames identically on either method.
+// TestAutoFrameSizeMatchesFlagship pins that both methods, which share one auto
+// rule, frame a given rate identically.
 func TestAutoFrameSizeMatchesFlagship(t *testing.T) {
 	for _, sr := range []int{16000, 22050, 32000, 44100, 48000} {
 		g, err := New(Config{SampleRate: sr})

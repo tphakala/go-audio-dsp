@@ -39,3 +39,40 @@ func ExampleAnalyzer() {
 	fmt.Printf("processed %d frames\n", frames)
 	// Output: processed 43 frames
 }
+
+// Streaming resynthesis: analyze, leave the spectrum unchanged (a real consumer
+// would apply a per-bin gain here), and overlap-add it back. The first
+// FrameSize/HopSize-1 blocks are leading zeros and are discarded.
+func ExampleSynthesizer() {
+	const n, hop = 256, 64
+	an, err := stft.NewAnalyzer(stft.Config{FrameSize: n, HopSize: hop})
+	if err != nil {
+		panic(err)
+	}
+	syn, err := stft.NewSynthesizer(an)
+	if err != nil {
+		panic(err)
+	}
+	in := make([]float32, 0, 1024+n)
+	for i := range 1024 {
+		in = append(in, float32(i%50)/50)
+	}
+	an.Feed(make([]float32, n-hop), func([]complex64, []float32) {}) // preroll: no frame completes
+	out := make([]float32, 1024+n)
+	written, frame := 0, 0
+	an.Feed(append(in[:1024:1024], make([]float32, n)...), func(spec []complex64, _ []float32) {
+		syn.Add(spec)
+		if frame >= n/hop-1 {
+			written += syn.Finish(out[written:])
+		} else {
+			syn.Discard()
+		}
+		frame++
+	})
+	var maxErr float32
+	for i := range in {
+		maxErr = max(maxErr, max(out[i]-in[i], in[i]-out[i]))
+	}
+	fmt.Println("reconstructed:", written >= len(in), maxErr < 1e-4)
+	// Output: reconstructed: true true
+}

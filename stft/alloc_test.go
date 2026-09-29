@@ -46,3 +46,29 @@ func TestZeroAlloc(t *testing.T) {
 		t.Errorf("PowerInto allocated %v times, want 0", got)
 	}
 }
+
+func TestSynthesizerZeroAlloc(t *testing.T) {
+	const n, hop = 512, 128
+	a, err := NewAnalyzer(Config{FrameSize: n, HopSize: hop})
+	if err != nil {
+		t.Fatal(err)
+	}
+	syn, err := NewSynthesizer(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := testSignal(4096)
+	out := make([]float32, hop)
+	run := func() {
+		a.Feed(in, func(spec []complex64, _ []float32) {
+			syn.Add(spec)
+			syn.Finish(out)
+		})
+		a.Reset()
+		syn.Reset()
+	}
+	run() // warm up
+	if allocs := testing.AllocsPerRun(20, run); allocs != 0 {
+		t.Errorf("Synthesizer Add/Finish allocates %v per pass, want 0", allocs)
+	}
+}

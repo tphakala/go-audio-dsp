@@ -17,7 +17,8 @@ type Config struct {
 	// HopSize is the frame advance in samples, in [1, FrameSize]. 0 selects
 	// FrameSize/4 (75% overlap), or 1 when FrameSize is 2. Unlike a resynthesizing
 	// consumer, analysis does not require HopSize to divide FrameSize; overlap-add
-	// reconstruction does, and a consumer that resynthesizes enforces that itself.
+	// reconstruction needs the window's overlap sum to stay positive at every
+	// hop position, which NewSynthesizer checks.
 	HopSize int
 	// Window selects the built-in analysis window shape. Ignored when CustomWindow
 	// is non-nil. The zero value is Hann (periodic).

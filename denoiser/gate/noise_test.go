@@ -46,7 +46,7 @@ func TestLearnedFloorImmutableDuringStreaming(t *testing.T) {
 
 // TestSilentLearnedExcerptIsFinite pins the epsPower floor on the learned floor:
 // learning from digital silence and then processing silent frames must not divide
-// zero power by a zero floor (NaN). Removing the floor in LearnNoise/copyFloor
+// zero power by a zero floor (NaN). Removing the floor in LearnNoise/CopyFloor
 // yields non-finite output on the silent gap.
 func TestSilentLearnedExcerptIsFinite(t *testing.T) {
 	const sr, frame, hop = 48000, 256, 64
