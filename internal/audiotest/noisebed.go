@@ -38,6 +38,10 @@ func quietestSlice(x []float32, sr, n int) []float32 {
 	return x[best : best+n]
 }
 
+// minBedDB is the quietest noise bed, in dBFS RMS, the comparison accepts: the
+// lowest noise_floor afftdn takes.
+const minBedDB = -80.0
+
 // Bars are the margins, in dB, a method may trail afftdn on the mixed-noise A/B.
 type Bars struct {
 	// ReductionDB: noise-span reduction may be at most this far below afftdn's.
@@ -54,7 +58,7 @@ type Bars struct {
 // mix. Unlike RunCorpusAB the signal is known, so the comparison uses distance
 // metrics: noise-span reduction and the signal-span log-spectral distance and
 // segmental SNR against the clean bursts. It skips when no bed or ffmpeg is
-// present, and fails when a bar is missed. Beds shorter than 10 s are skipped.
+// present, and fails when a bar is missed. Beds shorter than 10 s, or whose quietest 10 s is below minBedDB, are skipped.
 func RunNoiseBedAB(t *testing.T, dir string, snrDB float64, levels []Level, bars Bars) {
 	t.Helper()
 	bin := FFmpegPath(t)
@@ -80,6 +84,12 @@ func RunNoiseBedAB(t *testing.T, dir string, snrDB float64, levels []Level, bars
 		}
 		bed = slices.Clone(bed)
 		AssertFinite(t, name, bed)
+		// Below afftdn's lowest noise_floor the reference does almost nothing, so
+		// every bar would pass without measuring anything.
+		if level := RMSDB(bed); level < minBedDB {
+			t.Logf("%s: quietest %d s is %.0f dBFS, below the %.0f dBFS afftdn can act on; skipping", name, synthSeconds, level, minBedDB)
+			continue
+		}
 		clip := MixBursts(sr, bed, RMSDB(bed)+snrDB)
 		measured++
 		segBefore := SegSNRDB(clip.Clean, clip.Mix, clip.SignalSpans, 960)
@@ -120,6 +130,6 @@ func RunNoiseBedAB(t *testing.T, dir string, snrDB float64, levels []Level, bars
 		}
 	}
 	if measured == 0 {
-		t.Errorf("noise beds in %s (%d file(s)) were all too short; the A/B compared nothing", dir, len(beds))
+		t.Errorf("noise beds in %s (%d file(s)) were all too short or too quiet; the A/B compared nothing", dir, len(beds))
 	}
 }
