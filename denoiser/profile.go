@@ -142,10 +142,10 @@ func (d *Denoiser) NoiseProfile() *NoiseProfile { return d.profile }
 
 // Tier 1 pre-scan constants (package-level in v1; see the design spec).
 const (
-	autoWindowSec   = 0.5  // length of the quiet window averaged into the profile
-	silencePower    = 1e-9 // block mean-square below this (-90 dBFS RMS) is digital silence
-	quietPercentile = 0.9  // the window is compared against this block-energy percentile
-	quietMarginDB   = 6.0  // and must sit at least this far below it
+	autoWindowSec   = 0.5                    // length of the quiet window averaged into the profile
+	silencePower    = dspshared.SilencePower // block mean-square below this (-90 dBFS RMS) is digital silence
+	quietPercentile = 0.9                    // the window is compared against this block-energy percentile
+	quietMarginDB   = 6.0                    // and must sit at least this far below it
 )
 
 // EstimateNoiseProfile scans a clip for its quietest autoWindowSec window and

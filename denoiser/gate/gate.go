@@ -2,11 +2,13 @@ package gate
 
 import (
 	"errors"
+	"math"
 
 	dsp "github.com/tphakala/go-audio-dsp"
 	"github.com/tphakala/go-audio-dsp/denoiser"
 	"github.com/tphakala/go-audio-dsp/internal/dspshared"
 	"github.com/tphakala/go-audio-dsp/stft"
+	"github.com/tphakala/simd/f32"
 )
 
 // epsPower floors every noise power estimate so SNR ratios stay finite. It is
@@ -262,6 +264,18 @@ func (g *Gate) prescan(x []float32) error {
 		return nil
 	case err != nil:
 		return err
+	}
+	// With no window free of digital silence the estimator falls back to one that
+	// holds silence, whose profile sits at or near the epsPower floor; a cap built
+	// from it would stop all gating. Check the window's hop blocks the way the
+	// estimator classifies them and keep the plain median instead.
+	info := p.Info()
+	start := int(math.Round(info.StartSec * float64(g.sampleRate)))
+	end := min(len(x), start+int(math.Round(info.DurationSec*float64(g.sampleRate))))
+	for b := start; b+g.hop <= end; b += g.hop {
+		if f32.SumOfSquares(x[b:b+g.hop])/float32(g.hop) < dspshared.SilencePower {
+			return nil
+		}
 	}
 	return g.setBlindCap(p.Spectrum())
 }

@@ -289,3 +289,39 @@ func TestBlindCapTransitions(t *testing.T) {
 		}
 	})
 }
+
+// TestDenoiseSkipsCapOnSilentWindow pins that Denoise keeps the plain blind
+// median when the clip has no window free of digital silence. The clip is 1 s of
+// zeros, then 0.4 s noise bursts separated by 0.05 s of zeros, so no 0.5 s run is
+// silence-free: the estimator falls back to the all-zero window and returns the
+// epsPower floor, and a cap built from it would stop all gating (no reduction at
+// all, where the plain median reduces the bursts by several dB).
+func TestDenoiseSkipsCapOnSilentWindow(t *testing.T) {
+	const sr, frame, hop = 48000, 1024, 256
+	burst := whiteNoise(sr*4/10, dbToLin(-30), 3)
+	gap := sr * 5 / 100
+	x := make([]float32, sr, sr+9*(len(burst)+gap))
+	for range 9 {
+		x = append(x, burst...)
+		x = append(x, make([]float32, gap)...)
+	}
+	prof, err := profileFor(t, sr, frame, hop, x)
+	if err != nil {
+		t.Fatalf("precondition: EstimateNoiseProfile: %v", err)
+	}
+	for k, v := range prof.Spectrum() {
+		if v != epsPower {
+			t.Fatalf("precondition: profile bin %d is %g, want the epsPower floor of a silent window", k, v)
+		}
+	}
+	cfg := Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Strength: denoiser.Medium}
+	got, err := Denoise(x, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertBitExact(t, "Denoise vs plain blind stream", got, streamAll(t, g, x))
+}
