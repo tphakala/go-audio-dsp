@@ -11,7 +11,8 @@
 // The per-bin gain is driven by an estimate of the noise power, which comes
 // from one of three sources: a profile measured from a caller-selected
 // noise-only excerpt (NoiseProfileFromSamples), a profile measured
-// automatically from the quietest part of a clip (EstimateNoiseProfile), or an
+// automatically from the quietest part of a clip (EstimateNoiseProfile, or
+// NoiseProfileEstimator for a clip fed in chunks), or an
 // adaptive minima-controlled tracker that runs when no profile is set. The
 // Light, Medium and Heavy strengths map onto the gain floor and aggressiveness,
 // and Params exposes every knob: the estimator, the residual gain floor,

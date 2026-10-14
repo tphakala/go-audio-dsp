@@ -15,7 +15,8 @@ type ProfileSource int
 const (
 	// ProfileSamples: measured from caller-supplied noise-only samples.
 	ProfileSamples ProfileSource = iota
-	// ProfileAuto: measured from the quietest window EstimateNoiseProfile found.
+	// ProfileAuto: measured from the quietest window EstimateNoiseProfile or
+	// NoiseProfileEstimator.Profile found.
 	ProfileAuto
 	// ProfileExternal: rebuilt from a saved spectrum with NewNoiseProfile.
 	ProfileExternal
@@ -39,7 +40,7 @@ func (s ProfileSource) String() string {
 type ProfileInfo struct {
 	Source ProfileSource
 	// StartSec and DurationSec locate the window used by EstimateNoiseProfile
-	// within the clip it scanned; both are 0 for ProfileSamples.
+	// or NoiseProfileEstimator.Profile within the clip it scanned; both are 0 for ProfileSamples.
 	StartSec, DurationSec float64
 }
 
@@ -156,64 +157,72 @@ const (
 // the adaptive tracker does as well). Clips shorter than about two windows
 // accept the quietest window unconditionally. Info() on the result reports
 // the window position. Returns ErrProfileTooShort for inputs shorter than one
-// frame.
+// frame. For a clip that arrives in chunks, or is held as int16, use
+// NewNoiseProfileEstimator, which returns the same result in bounded memory.
 func (d *Denoiser) EstimateNoiseProfile(x []float32) (*NoiseProfile, error) {
 	if len(x) < d.n {
 		return nil, ErrProfileTooShort
 	}
-	hop := d.hop
-	nb := len(x) / hop
-	energy := make([]float32, nb) // mean square per hop block
-	for b := range energy {
-		energy[b] = f32.SumOfSquares(x[b*hop:(b+1)*hop]) / float32(hop)
+	// With the whole clip in hand there is nothing to buffer: take the block
+	// energies and window selection from the estimator's shared code and read
+	// the window straight from x.
+	nb := len(x) / d.hop
+	e := d.newNoiseProfileEstimator(nb)
+	for b := range nb {
+		e.addBlock(f32.SumOfSquares(x[b*d.hop:(b+1)*d.hop]) / float32(d.hop))
 	}
-	w := max(1, int(math.Round(autoWindowSec*float64(d.sampleRate)/float64(hop))))
-	w = min(w, nb)
-
-	best, bestSum := quietestWindow(energy, w, true)
-	if best < 0 {
-		best, bestSum = quietestWindow(energy, w, false) // everything touches silence
-	}
-	if best < 0 {
-		// No finite window: a NaN or Inf sample poisons the running energy sum,
-		// so no window is ever selected. Fall back to adaptive tracking (which
-		// guards non-finite bins itself) rather than slicing at a negative index.
-		return nil, ErrNoQuietRegion
-	}
-
-	// Acceptance: enough unmasked blocks to compare against, and the window
-	// must be quietMarginDB below the quietPercentile block energy.
-	unmasked := make([]float32, 0, nb)
-	for _, e := range energy {
-		if e >= silencePower {
-			unmasked = append(unmasked, e)
-		}
-	}
-	if len(unmasked) >= 2*w {
-		slices.Sort(unmasked)
-		ref := unmasked[int(quietPercentile*float64(len(unmasked)-1))]
-		winMean := bestSum / float64(w)
-		if winMean > float64(ref)*math.Pow(10, -quietMarginDB/10) {
-			return nil, ErrNoQuietRegion
-		}
-	}
-
-	start := best * hop
-	end := min(len(x), start+w*hop)
-	if end-start < d.n { // window shorter than a frame (tiny clips): widen it
-		end = min(len(x), start+d.n)
-		start = max(0, end-d.n)
-	}
-	p, err := d.NoiseProfileFromSamples(x[start:end])
+	e.pos = len(x)
+	best, w, _, err := e.selectWindow()
 	if err != nil {
 		return nil, err
 	}
-	p.info = ProfileInfo{
-		Source:      ProfileAuto,
-		StartSec:    float64(start) / float64(d.sampleRate),
-		DurationSec: float64(end-start) / float64(d.sampleRate),
+	start, end := profileRange(best, w, d.hop, d.n, len(x))
+	return e.buildProfile(x[start:end], start, end)
+}
+
+// windowTracker finds the minimum-energy window of w blocks one block at a
+// time. The statements in push are the sliding-sum scan of quietestWindow, so
+// a stream of pushes and a whole-slice scan select identical windows.
+type windowTracker struct {
+	w           int
+	maskSilence bool
+	sum         float64
+	silent      int
+	best        int // start block of the best window so far, -1 if none
+	bestSum     float64
+}
+
+func newWindowTracker(w int, maskSilence bool) windowTracker {
+	return windowTracker{w: w, maskSilence: maskSilence, best: -1, bestSum: math.Inf(1)}
+}
+
+// reset returns the tracker to its initial state, keeping w and maskSilence.
+func (t *windowTracker) reset() {
+	*t = newWindowTracker(t.w, t.maskSilence)
+}
+
+// push accounts for the last element of energy (block len(energy)-1, with the
+// whole history before it) and reports whether it became the new best window.
+// Ties keep the earliest window; a NaN or Inf block poisons the running sum
+// for every later window.
+func (t *windowTracker) push(energy []float32) (improved bool) {
+	b := len(energy) - 1
+	e := energy[b]
+	t.sum += float64(e)
+	if e < silencePower {
+		t.silent++
 	}
-	return p, nil
+	if b >= t.w {
+		t.sum -= float64(energy[b-t.w])
+		if energy[b-t.w] < silencePower {
+			t.silent--
+		}
+	}
+	if b >= t.w-1 && (!t.maskSilence || t.silent == 0) && t.sum < t.bestSum {
+		t.bestSum, t.best = t.sum, b-t.w+1
+		return true
+	}
+	return false
 }
 
 // quietestWindow returns the start block and energy sum of the minimum-energy
@@ -221,23 +230,9 @@ func (d *Denoiser) EstimateNoiseProfile(x []float32) (*NoiseProfile, error) {
 // no digital-silence block, returning -1 if there is none. Ties go to the
 // earliest window.
 func quietestWindow(energy []float32, w int, maskSilence bool) (start int, energySum float64) {
-	best, bestSum := -1, math.Inf(1)
-	var sum float64
-	silent := 0
-	for b, e := range energy {
-		sum += float64(e)
-		if e < silencePower {
-			silent++
-		}
-		if b >= w {
-			sum -= float64(energy[b-w])
-			if energy[b-w] < silencePower {
-				silent--
-			}
-		}
-		if b >= w-1 && (!maskSilence || silent == 0) && sum < bestSum {
-			bestSum, best = sum, b-w+1
-		}
+	t := newWindowTracker(w, maskSilence)
+	for b := range energy {
+		t.push(energy[:b+1])
 	}
-	return best, bestSum
+	return t.best, t.bestSum
 }
