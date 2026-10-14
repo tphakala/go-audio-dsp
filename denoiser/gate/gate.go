@@ -273,10 +273,12 @@ func (g *Gate) prescan(x []float32) error {
 		return err
 	}
 	// With no window free of digital silence the estimator falls back to one
-	// that holds silence, whose profile sits at or near the epsPower floor; a
-	// cap built from it would stop all gating. Check the measured stretch's hop
-	// blocks against the estimator's silence threshold and keep the plain
-	// median instead.
+	// that holds silence, and a frame longer than the window can reach into
+	// silence too. Silence pulls the measured profile below the real noise (to
+	// the epsPower floor for an all-zero window, where a cap would stop all
+	// gating). Keep the plain median whenever any hop block of the measured
+	// stretch is below the estimator's silence threshold, however much of the
+	// stretch is real noise.
 	info := p.Info()
 	start := int(math.Round(info.StartSec * float64(g.sampleRate)))
 	end := min(len(x), start+int(math.Round(info.DurationSec*float64(g.sampleRate))))
