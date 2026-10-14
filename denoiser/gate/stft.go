@@ -45,10 +45,9 @@ func (g *Gate) pendingOutput(extra int) int {
 
 // feed pushes in through the analyzer and, for each frame that completes, updates
 // the blind floor (unless learned, flushing, or in the leading warm-up frames),
-// computes that frame's soft-gate
-// mask, and stores the frame's mask and spectrum in the smoothing rings. Once L
+// computes that frame's soft-gate mask, and stores the frame's mask and spectrum in the smoothing rings. Once L
 // frames of lookahead are buffered it produces the output for the L-delayed frame:
-// time- and frequency-smoothed gain, applied to that frame's spectrum, inverse
+// time-smoothed gain, applied to that frame's spectrum, inverse
 // transformed and overlap-added, with the finalized hop block written into out
 // (clipped to len(out); ProcessInto sizes out exactly, FlushInto clips the last
 // block). flushing freezes the blind floor. Returns samples written.
@@ -70,7 +69,7 @@ func (g *Gate) feed(in, out []float32, flushing bool) int {
 			return
 		}
 		gOut := f - int64(g.lookahead)
-		g.smoothInto(g.gain, f) // time smoothing over the ring, then frequency smoothing
+		g.smoothInto(g.gain, f) // time smoothing over the ring
 		row := g.specRow(gOut)
 		c64.MulReal(row, row, g.gain) // per-bin real gain; alias-safe (dst == a), scalar in simd (simd #259)
 		g.syn.Add(row)

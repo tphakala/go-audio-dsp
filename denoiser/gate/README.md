@@ -31,6 +31,10 @@ integral, and its noise tracker needs quiet gaps to open. This method is:
 - **Correct for gapless noise**: its blind floor is a per-bin rolling **median**,
   the right estimator for steady rain or cicada drone, where a minimum tracker
   never opens.
+  `Denoise` caps it at the clip's quietest-window level plus 3 dB, so continuous
+  song is not mistaken for noise when the clip has a usable quiet window; noise
+  elsewhere in the clip that sits more than a few dB above that window is reduced
+  less.
 
 It does not replace the flagship, which reduces broadband noise more
 aggressively.
@@ -56,10 +60,17 @@ if err != nil {
 // out has len(clip) samples, aligned with clip.
 ```
 
-With no excerpt, `Denoise` uses the blind rolling-median floor. Unlike the
-flagship it does not run a quietest-window pre-scan (its blind path is designed
-for gapless continuous noise), and audio passes through unchanged during a brief
-warm-up:
+With no excerpt, `Denoise` uses the blind rolling-median floor, bounded by a
+quietest-window pre-scan: it measures the clip's quietest 0.5 s window with the
+flagship's `EstimateNoiseProfile` and caps each bin's floor at that power plus
+3 dB, so continuous song that fills a bin cannot become the floor, while noise
+elsewhere in the clip that sits more than a few dB above that window is reduced
+less. The plain median is kept when the clip has about 1 s or more of non-silent
+audio and no distinctly quiet window, when the measured stretch holds digital
+silence (no 0.5 s window free of it exists, or a `FrameSize` longer than 0.5 s
+reaches into it), or when the clip is shorter than one frame; otherwise a clip
+with less non-silent audio takes its quietest window as is. Audio passes through
+unchanged during a brief warm-up at the start of the clip:
 
 ```go
 out, err := gate.Denoise(clip, gate.Config{SampleRate: 48000})
@@ -122,7 +133,7 @@ coarse aggressiveness dial shared with the flagship.
 `Config.Params` overrides every knob: the residual gain floor (`MaxAttenuationDB`;
 0 disables the gate, +Inf allows full gating), the gate threshold above the floor
 (`ThresholdDB`), the soft-knee width (`TransitionDB`), smoothing widths across
-frequency (`FreqSmoothBins`) and time (`TimeSmoothFrames`, which adds lookahead to
+frequency (`FreqSmoothBins`, applied to the per-bin SNR) and time (`TimeSmoothFrames`, which adds lookahead to
 `Latency()`), and the blind window (`FloorWindowSec`). `FrameSize` and `HopSize`
 default to the power of two nearest ~21.3 ms of audio and a quarter of that (75%
 overlap), matching the flagship.
@@ -132,12 +143,15 @@ overlap), matching the flagship.
 1. **Analysis**: a periodic Hann window and a real FFT per frame, at 75% overlap
    by default.
 2. **Noise floor**: a learned per-bin floor (`LearnNoise` / `SetNoiseFloor`), or
-   the blind per-bin rolling median otherwise.
-3. **Soft mask**: per bin, `power / noise-floor` -> log10 -> a sigmoid knee at
+   the blind per-bin rolling median otherwise (capped by a quiet-window
+   pre-scan in `Denoise`).
+3. **Soft mask**: per bin, `power / noise-floor`, smoothed across frequency
+   (fewer isolated musical-noise bins; done on the SNR so a strong narrowband
+   call is not averaged down by its closed neighbours, while one near
+   `ThresholdDB` still is) -> log10 -> a sigmoid knee at
    `ThresholdDB` of width `TransitionDB` -> a gain in the residual-gain range
-   `[gFloor, 1]`, where `gFloor` is set by `MaxAttenuationDB`. Optionally smoothed
-   across frequency (fewer isolated musical-noise bins) and time (the memoryless
-   sigmoid would otherwise flutter).
+   `[gFloor, 1]`, where `gFloor` is set by `MaxAttenuationDB`. Optionally
+   smoothed across time (the memoryless sigmoid would otherwise flutter).
 4. **Synthesis**: inverse FFT, synthesis window, and weighted overlap-add,
    normalized for exact reconstruction.
 
@@ -150,11 +164,15 @@ input sample are not themselves sanitized (garbage in, garbage out, localized).
 
 - **Framing**: unity-floor identity, latency accounting, exact flush drain, and
   bit-exact chunk invariance across arbitrary chunk splits.
-- **Mask**: a float64 scalar reference cross-checks the SIMD chain on both the
-  SIMD and pure-Go tiers; the gate attenuates noise while preserving a strong
-  tone.
+- **Mask**: a float64 scalar reference cross-checks the SIMD chain (including
+  the SNR smoothing) on both the SIMD and pure-Go tiers; the gate attenuates
+  noise while preserving a strong tone, including one centered exactly on a bin.
 - **Blind floor**: matches the learned mean-power floor on continuous noise
   (median-to-mean corrected) and ignores a sparse loud tone.
+  `Denoise` keeps continuous on-bin song that fills most of the median window
+  (the cap), caps nothing and equals the plain blind stream when a clip long
+  enough to be judged has no distinct quiet window or the clip is under one frame, and the capped path is chunk-invariant and
+  allocation-free.
 - **Zero-allocation** steady state and a gating benchmark.
 
 ```sh

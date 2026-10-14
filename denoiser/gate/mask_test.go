@@ -1,8 +1,10 @@
 package gate
 
 import (
+	"fmt"
 	"math"
 	"math/rand/v2"
+	"slices"
 	"testing"
 
 	"github.com/tphakala/go-audio-dsp/denoiser"
@@ -11,12 +13,17 @@ import (
 
 // TestGateAttenuatesNoiseKeepsTone pins the core gate mechanism: with a learned
 // floor it reduces the noise-only regions by at least MaxAttenuationDB-4 while
-// leaving a loud tone essentially untouched (within 1 dB). A broken sigmoid or
-// power ratio fails one side or the other. Frequency smoothing is disabled here so
-// the test isolates the gate: a centered gain average across bins deliberately
-// softens a single pure sine by a few dB (its worst case, since the tone's
-// neighbour bins are noise-only), which is the smoothing tradeoff exercised by
-// TestFreqSmoothingEngages, not a property of the gate itself.
+// leaving a loud tone essentially untouched (within 1 dB), at the tuned Medium
+// and Heavy params with frequency smoothing on. A broken sigmoid or power ratio
+// fails one side or the other.
+//
+// The tone is 3 kHz at FrameSize 1024 and 48 kHz, which falls exactly on bin 64.
+// That is the worst case for smoothing the gain across bins: the Hann-windowed
+// tone leaves bins 62 and 66 with no tone energy, so a gain box mean pulls the
+// open bins 63 to 65 down toward the closed neighbours (about 3 and 4 dB at
+// Medium and Heavy). Smoothing the per-bin SNR instead keeps the tone. A tone
+// half a bin off the grid loses well under 0.5 dB even with gain smoothing, so
+// the on-bin frequency is what makes this test able to fail.
 func TestGateAttenuatesNoiseKeepsTone(t *testing.T) {
 	const sr, frame, hop = 48000, 1024, 256
 	dur := 3 * sr
@@ -32,42 +39,39 @@ func TestGateAttenuatesNoiseKeepsTone(t *testing.T) {
 	noiseSpans := [][2]int{{sr / 4, 3 * sr / 4}, {2*sr + sr/4, 3*sr - sr/4}}
 	toneSpans := [][2]int{{sr + sr/4, 2*sr - sr/4}} // interior of the tone region, clear of edges
 
-	// Noise reduction with the tuned Medium params (frequency smoothing on).
-	full := ParamsFor(denoiser.Medium)
-	outFull, err := DenoiseWithNoise(clip, noise[:sr/2], Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Params: &full})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(outFull) != len(clip) {
-		t.Fatalf("length %d != %d", len(outFull), len(clip))
-	}
-	// Guard before the dB metrics: spanRMSDB propagates NaN, and reduction < want
-	// is false on a NaN operand, so a NaN-emitting regression would pass vacuously.
-	assertFinite(t, "outFull", outFull)
-	reduction := spanRMSDB(clip, noiseSpans) - spanRMSDB(outFull, noiseSpans)
+	for _, strength := range []denoiser.Strength{denoiser.Medium, denoiser.Heavy} {
+		t.Run(strength.String(), func(t *testing.T) {
+			p := ParamsFor(strength)
+			out, err := DenoiseWithNoise(clip, noise[:sr/2], Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Params: &p})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(out) != len(clip) {
+				t.Fatalf("length %d != %d", len(out), len(clip))
+			}
+			// Guard before the dB metrics: spanRMSDB propagates NaN, and reduction < want
+			// is false on a NaN operand, so a NaN-emitting regression would pass vacuously.
+			assertFinite(t, "out", out)
+			reduction := spanRMSDB(clip, noiseSpans) - spanRMSDB(out, noiseSpans)
+			toneChange := spanRMSDB(out, toneSpans) - spanRMSDB(clip, toneSpans)
 
-	// Tone preservation with the gate isolated from frequency smoothing.
-	iso := full
-	iso.FreqSmoothBins = 0
-	outIso, err := DenoiseWithNoise(clip, noise[:sr/2], Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Params: &iso})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertFinite(t, "outIso", outIso)
-	toneChange := spanRMSDB(outIso, toneSpans) - spanRMSDB(clip, toneSpans)
-
-	t.Logf("noise reduction %.1f dB (floor %g dB), tone-region level change %.2f dB", reduction, full.MaxAttenuationDB, toneChange)
-	if want := float64(full.MaxAttenuationDB) - 4; reduction < want {
-		t.Errorf("noise reduction %.1f dB < %.1f (MaxAttenuationDB-4)", reduction, want)
-	}
-	if math.Abs(toneChange) > 1.0 {
-		t.Errorf("tone-region level changed by %.2f dB (>1 dB); the gate is eating the tone", toneChange)
+			t.Logf("noise reduction %.1f dB (floor %g dB), tone-region level change %.2f dB", reduction, p.MaxAttenuationDB, toneChange)
+			if want := float64(p.MaxAttenuationDB) - 4; reduction < want {
+				t.Errorf("noise reduction %.1f dB < %.1f (MaxAttenuationDB-4)", reduction, want)
+			}
+			if math.Abs(toneChange) > 1.0 {
+				t.Errorf("tone-region level changed by %.2f dB (>1 dB); the gate is eating the tone", toneChange)
+			}
+		})
 	}
 }
 
 // TestFreqSmoothingEngages pins the frequency-smoothing pass: with R>0 a spike in
-// the gain spreads to its neighbours and the centre falls; with R==0 the pass is
-// an exact identity. A broken shifted Add leaves neighbours unmoved.
+// the per-bin SNR (the vector the pipeline smooths) spreads to its neighbours and
+// the centre falls; with R==0 the pass is an exact identity. A broken shifted Add
+// leaves neighbours unmoved. A second case drives computeMask itself: a 30 dB SNR
+// spike over a 0 dB floor opens its +-1 neighbours with R=2 and leaves them near
+// the 0 dB gain (just above gFloor) with R=0, which pins that the smoothing runs before the sigmoid.
 func TestFreqSmoothingEngages(t *testing.T) {
 	mkGate := func(fsb int) *Gate {
 		p := ParamsFor(denoiser.Medium)
@@ -106,6 +110,24 @@ func TestFreqSmoothingEngages(t *testing.T) {
 	if d2[c] >= s2[c] {
 		t.Errorf("FreqSmoothBins=5: the spike centre did not fall (%g -> %g)", s2[c], d2[c])
 	}
+
+	// Pipeline level: the smoothed quantity is the SNR, so the spike's neighbours open.
+	neighbourGain := func(g *Gate) (lo, hi float32) {
+		flat := slices.Repeat([]float32{1}, g.bins)
+		if err := g.SetNoiseFloor(flat); err != nil {
+			t.Fatal(err)
+		}
+		power := slices.Clone(flat)
+		power[g.bins/2] = 1000 // 30 dB over the floor
+		g.computeMask(power)
+		return g.mask[g.bins/2-1], g.mask[g.bins/2+1]
+	}
+	if lo, hi := neighbourGain(g2); lo <= 0.5 || hi <= 0.5 {
+		t.Errorf("R=2: the 30 dB spike left its neighbours closed (gain %g, %g), want > 0.5", lo, hi)
+	}
+	if lo, hi := neighbourGain(g0); lo > 0.35 || hi > 0.35 {
+		t.Errorf("R=0: neighbours of the spike opened (gain %g, %g, gFloor %g), want < 0.35", lo, hi, g0.gFloor)
+	}
 }
 
 // TestTimeSmoothingEngages pins the time-smoothing ring average: with L==0 the
@@ -115,7 +137,6 @@ func TestTimeSmoothingEngages(t *testing.T) {
 	mkGate := func(tsf int) *Gate {
 		p := ParamsFor(denoiser.Medium)
 		p.TimeSmoothFrames = tsf
-		p.FreqSmoothBins = 1 // isolate time smoothing
 		g, err := New(Config{SampleRate: 48000, FrameSize: 256, HopSize: 64, Params: &p})
 		if err != nil {
 			t.Fatal(err)
@@ -161,36 +182,54 @@ func TestTimeSmoothingEngages(t *testing.T) {
 // offset, or floor) exceeds it by orders of magnitude.
 const scalarParityTol = 2e-3
 
-// TestScalarReferenceParity pins the simd mask chain (Div, Log10Floored, Affine,
-// Sigmoid, Affine) to an independent float64 scalar of the same math, on both the
-// SIMD and pure-Go tiers (run under task test:noasm). A divergence between the
-// vectorized and scalar paths, or a mis-wired coefficient, turns it red.
+// TestScalarReferenceParity pins the simd mask chain (Div, SNR box mean,
+// Log10Floored, Affine, Sigmoid, Affine) to an independent float64 scalar of the
+// same math, on both the SIMD and pure-Go tiers (run under task test:noasm). It
+// runs with frequency smoothing off (FreqSmoothBins=1, R=0) and at Medium's R=2,
+// whose reference is the edge-aware mean of power/noise over [k-R, k+R] taken
+// before the log. A divergence between the vectorized and scalar paths, a
+// mis-wired coefficient, or smoothing applied after the knee turns it red.
 func TestScalarReferenceParity(t *testing.T) {
 	const sr, frame, hop = 48000, 256, 64
-	g, err := New(Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Strength: denoiser.Medium})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rng := rand.New(rand.NewPCG(7, 8))
-	power := make([]float32, g.bins)
-	noise := make([]float32, g.bins)
-	for k := range power {
-		power[k] = float32(math.Abs(rng.NormFloat64())) * float32(dbToLin(-30))
-		noise[k] = float32(math.Abs(rng.NormFloat64())+0.1) * float32(dbToLin(-40))
-	}
-	dspshared.CopyFloor(g.noiseBuf, noise)
-	g.noise = g.noiseBuf
-	g.learned = true
-	g.computeMask(power)
+	for _, fsb := range []int{1, ParamsFor(denoiser.Medium).FreqSmoothBins} {
+		t.Run(fmt.Sprintf("freqSmoothBins=%d", fsb), func(t *testing.T) {
+			p := ParamsFor(denoiser.Medium)
+			p.FreqSmoothBins = fsb
+			g, err := New(Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Params: &p})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rng := rand.New(rand.NewPCG(7, 8))
+			power := make([]float32, g.bins)
+			noise := make([]float32, g.bins)
+			for k := range power {
+				power[k] = float32(math.Abs(rng.NormFloat64())) * float32(dbToLin(-30))
+				noise[k] = float32(math.Abs(rng.NormFloat64())+0.1) * float32(dbToLin(-40))
+			}
+			dspshared.CopyFloor(g.noiseBuf, noise)
+			g.noise = g.noiseBuf
+			g.learned = true
+			g.computeMask(power)
 
-	for k := range power {
-		ratio := float64(power[k]) / float64(g.noiseBuf[k])
-		arg := float64(g.slope)*math.Log10(math.Max(ratio, 1e-20)) + float64(g.offset)
-		s := 1.0 / (1.0 + math.Exp(-arg))
-		want := (1-float64(g.gFloor))*s + float64(g.gFloor)
-		if d := math.Abs(float64(g.mask[k]) - want); d > scalarParityTol {
-			t.Errorf("bin %d: simd mask %g, scalar reference %g (diff %g > %g)", k, g.mask[k], want, d, scalarParityTol)
-		}
+			ratio := make([]float64, g.bins)
+			for k := range ratio {
+				ratio[k] = float64(power[k]) / float64(g.noiseBuf[k])
+			}
+			for k := range power {
+				lo, hi := max(0, k-g.freqR), min(g.bins-1, k+g.freqR)
+				var sum float64
+				for j := lo; j <= hi; j++ {
+					sum += ratio[j]
+				}
+				smoothed := sum / float64(hi-lo+1)
+				arg := float64(g.slope)*math.Log10(math.Max(smoothed, 1e-20)) + float64(g.offset)
+				s := 1.0 / (1.0 + math.Exp(-arg))
+				want := (1-float64(g.gFloor))*s + float64(g.gFloor)
+				if d := math.Abs(float64(g.mask[k]) - want); d > scalarParityTol {
+					t.Errorf("bin %d: simd mask %g, scalar reference %g (diff %g > %g)", k, g.mask[k], want, d, scalarParityTol)
+				}
+			}
+		})
 	}
 }
 

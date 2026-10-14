@@ -24,9 +24,12 @@ type Params struct {
 	TransitionDB float32
 	// FreqSmoothBins is the width (odd; an even value rounds up to the next odd
 	// width, since the half-width is FreqSmoothBins/2 and the box spans
-	// 2*half+1) of a centered moving average of the gain across bins; 0 or 1
+	// 2*half+1) of a centered moving average of the per-bin linear SNR (power
+	// over noise floor) across bins, taken before the sigmoid knee; 0 or 1
 	// disables it. Smoothing across frequency suppresses isolated musical-noise
-	// bins.
+	// bins, and smoothing the SNR rather than the gain keeps a narrowband call
+	// well above ThresholdDB from being averaged down by its closed neighbours (a
+	// call near the threshold is still pulled down).
 	FreqSmoothBins int
 	// TimeSmoothFrames is the width 2L+1 of a centered moving average of the gain
 	// across frames (odd; an even value rounds up to the next odd effective width,

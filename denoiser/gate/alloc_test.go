@@ -3,25 +3,31 @@
 package gate
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/tphakala/go-audio-dsp/denoiser"
 )
 
 // TestZeroAllocSteadyState pins that the hot path allocates nothing per call once
-// warmed, on both the blind and learned floors. Construction and LearnNoise may
+// warmed, on the blind, learned and capped floors. Construction and LearnNoise may
 // allocate; ProcessInto and FlushInto may not. Any per-frame make turns it red.
 // (Excluded under -race, which adds its own bookkeeping allocations.)
 func TestZeroAllocSteadyState(t *testing.T) {
 	const sr, frame, hop = 48000, 1024, 256
-	for _, learned := range []bool{false, true} {
+	for _, mode := range []string{modeBlind, modeLearned, modeCapped} {
 		p := ParamsFor(denoiser.Medium)
 		g, err := New(Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Params: &p})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if learned {
+		switch mode {
+		case modeLearned:
 			if err := g.LearnNoise(whiteNoise(frame*4, 0.1, 1)); err != nil {
+				t.Fatal(err)
+			}
+		case modeCapped:
+			if err := g.setBlindCap(slices.Repeat([]float32{1e-3}, g.bins)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -37,7 +43,7 @@ func TestZeroAllocSteadyState(t *testing.T) {
 				t.Fatal(err)
 			}
 		}); a != 0 {
-			t.Errorf("learned=%v: ProcessInto allocated %.1f objects/op, want 0", learned, a)
+			t.Errorf("%s: ProcessInto allocated %.1f objects/op, want 0", mode, a)
 		}
 
 		fb := make([]float32, g.Latency()+g.HopSize())
@@ -49,7 +55,7 @@ func TestZeroAllocSteadyState(t *testing.T) {
 				t.Fatal(err)
 			}
 		}); a != 0 {
-			t.Errorf("learned=%v: ProcessInto+FlushInto allocated %.1f objects/op, want 0", learned, a)
+			t.Errorf("%s: ProcessInto+FlushInto allocated %.1f objects/op, want 0", mode, a)
 		}
 	}
 }
