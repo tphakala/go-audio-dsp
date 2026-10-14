@@ -135,7 +135,7 @@ func ExampleNewNoiseProfile() {
 }
 
 // ExampleDenoiser_NewNoiseProfileEstimator measures a noise profile from a
-// 16-bit clip that is read in chunks and never held as float32 or in full:
+// 16-bit clip kept in memory as int16, with no full-clip float32 copy:
 // the estimator finds the quiet stretch, then the same chunk loop denoises.
 func ExampleDenoiser_NewNoiseProfileEstimator() {
 	const sr, chunk = 48000, 4800
