@@ -122,7 +122,7 @@ coarse aggressiveness dial shared with the flagship.
 `Config.Params` overrides every knob: the residual gain floor (`MaxAttenuationDB`;
 0 disables the gate, +Inf allows full gating), the gate threshold above the floor
 (`ThresholdDB`), the soft-knee width (`TransitionDB`), smoothing widths across
-frequency (`FreqSmoothBins`) and time (`TimeSmoothFrames`, which adds lookahead to
+frequency (`FreqSmoothBins`, applied to the per-bin SNR) and time (`TimeSmoothFrames`, which adds lookahead to
 `Latency()`), and the blind window (`FloorWindowSec`). `FrameSize` and `HopSize`
 default to the power of two nearest ~21.3 ms of audio and a quarter of that (75%
 overlap), matching the flagship.
@@ -133,11 +133,12 @@ overlap), matching the flagship.
    by default.
 2. **Noise floor**: a learned per-bin floor (`LearnNoise` / `SetNoiseFloor`), or
    the blind per-bin rolling median otherwise.
-3. **Soft mask**: per bin, `power / noise-floor` -> log10 -> a sigmoid knee at
+3. **Soft mask**: per bin, `power / noise-floor`, smoothed across frequency
+   (fewer isolated musical-noise bins; done on the SNR so a narrowband call is
+   not averaged down by its closed neighbours) -> log10 -> a sigmoid knee at
    `ThresholdDB` of width `TransitionDB` -> a gain in the residual-gain range
-   `[gFloor, 1]`, where `gFloor` is set by `MaxAttenuationDB`. Optionally smoothed
-   across frequency (fewer isolated musical-noise bins) and time (the memoryless
-   sigmoid would otherwise flutter).
+   `[gFloor, 1]`, where `gFloor` is set by `MaxAttenuationDB`. Optionally
+   smoothed across time (the memoryless sigmoid would otherwise flutter).
 4. **Synthesis**: inverse FFT, synthesis window, and weighted overlap-add,
    normalized for exact reconstruction.
 
@@ -150,9 +151,9 @@ input sample are not themselves sanitized (garbage in, garbage out, localized).
 
 - **Framing**: unity-floor identity, latency accounting, exact flush drain, and
   bit-exact chunk invariance across arbitrary chunk splits.
-- **Mask**: a float64 scalar reference cross-checks the SIMD chain on both the
-  SIMD and pure-Go tiers; the gate attenuates noise while preserving a strong
-  tone.
+- **Mask**: a float64 scalar reference cross-checks the SIMD chain (including
+  the SNR smoothing) on both the SIMD and pure-Go tiers; the gate attenuates
+  noise while preserving a strong tone, including one centered exactly on a bin.
 - **Blind floor**: matches the learned mean-power floor on continuous noise
   (median-to-mean corrected) and ignores a sparse loud tone.
 - **Zero-allocation** steady state and a gating benchmark.

@@ -22,7 +22,7 @@ type Gate struct {
 	ovl        int // n/hop: frames overlapping any sample
 	bins       int // n/2+1
 	lookahead  int // L = TimeSmoothFrames/2: frames of time-smoothing lookahead
-	freqR      int // R = FreqSmoothBins/2: frequency-smoothing half-width
+	freqR      int // R = FreqSmoothBins/2: SNR frequency-smoothing half-width
 	warm       int // ovl-1+L: frames whose output block is discarded (leading zeros + lookahead priming)
 
 	plan     *stft.Plan        // whole-clip transform for the learned floor; built lazily on first LearnNoise, nil until then
@@ -39,9 +39,8 @@ type Gate struct {
 	tracker  *floorTracker
 
 	// per-frame scratch (allocated in New, never in the hot path)
-	ratio    []float32   // power ratio -> log ratio -> knee argument, in place
-	mask     []float32   // raw sigmoid mask -> per-frame gain in [gFloor, 1]
-	acc      []float32   // time-smoothed gain accumulator
+	ratio    []float32   // smoothed power ratio -> log ratio -> knee argument, in place
+	mask     []float32   // raw ratio staging, then sigmoid mask -> per-frame gain in [gFloor, 1]
 	tmp      []float32   // frequency-smoothing accumulator
 	invCount []float32   // 1 / (bins in the frequency box at k), for edge-aware averaging
 	gain     []float32   // final per-bin gain for the output frame
@@ -106,7 +105,6 @@ func New(cfg Config) (*Gate, error) {
 	g.noiseBuf = make([]float32, bins)
 	g.ratio = make([]float32, bins)
 	g.mask = make([]float32, bins)
-	g.acc = make([]float32, bins)
 	g.tmp = make([]float32, bins)
 	g.gain = make([]float32, bins)
 	g.zeros = make([]float32, g.hop)

@@ -14,8 +14,9 @@
 // per-bin soft mask is derived from how far the bin's power sits above an
 // estimated per-bin noise floor (a smooth sigmoid knee around ThresholdDB, of
 // width TransitionDB, mapped into a residual gain bounded below by the
-// MaxAttenuationDB floor); the mask is
-// smoothed across frequency and, optionally, time; and the frame is
+// MaxAttenuationDB floor); the per-bin SNR is smoothed across frequency before
+// that knee, so a narrowband call is not averaged down by its closed neighbours,
+// and the resulting mask is optionally smoothed across time; and the frame is
 // resynthesized by overlap-add. The whole per-bin apply path is elementwise, so
 // it takes github.com/tphakala/simd's AVX or NEON tiers where available and a
 // portable Go fallback elsewhere, with no scalar transcendental in the hot loop.
