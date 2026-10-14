@@ -6,6 +6,7 @@ import (
 	"math/rand"
 
 	"github.com/tphakala/go-audio-dsp/denoiser"
+	"github.com/tphakala/go-audio-dsp/pcm"
 )
 
 // rms returns the root-mean-square level of x.
@@ -131,4 +132,65 @@ func ExampleNewNoiseProfile() {
 	// measured source: samples
 	// restored source: external
 	// bins:            513
+}
+
+// ExampleDenoiser_NewNoiseProfileEstimator measures a noise profile from a
+// 16-bit clip kept in memory as int16, with no full-clip float32 copy:
+// the estimator finds the quiet stretch, then the same chunk loop denoises.
+func ExampleDenoiser_NewNoiseProfileEstimator() {
+	const sr, chunk = 48000, 4800
+	// 4 s of loud 1 kHz tone and noise with a quiet stretch in [2 s, 3 s).
+	clip := make([]int16, 4*sr)
+	rng := rand.New(rand.NewSource(3))
+	for i := range clip {
+		v := 300 * rng.NormFloat64()
+		if i < 2*sr || i >= 3*sr {
+			v += 6000 * math.Sin(2*math.Pi*1000*float64(i)/sr)
+		}
+		clip[i] = int16(v)
+	}
+
+	d, err := denoiser.New(denoiser.Config{SampleRate: sr})
+	if err != nil {
+		panic(err)
+	}
+	est := d.NewNoiseProfileEstimator()
+	for rest := clip; len(rest) > 0; {
+		n := min(chunk, len(rest))
+		est.AddInt16(rest[:n]) // the caller's buffer may be reused right away
+		rest = rest[n:]
+	}
+	prof, err := est.Profile()
+	if err != nil {
+		panic(err)
+	}
+	info := prof.Info()
+	fmt.Println("source:", info.Source)
+	fmt.Println("window inside the quiet stretch:", info.StartSec >= 2 && info.StartSec+info.DurationSec <= 3)
+
+	if err := d.SetNoiseProfile(prof); err != nil {
+		panic(err)
+	}
+	in := make([]float32, chunk)
+	out := make([]float32, d.MaxOutputLen(chunk))
+	total := 0
+	for rest := clip; len(rest) > 0; {
+		n := min(chunk, len(rest))
+		pcm.Int16ToFloat32(in[:n], rest[:n])
+		got, err := d.ProcessInto(in[:n], out)
+		if err != nil {
+			panic(err)
+		}
+		total += got
+		rest = rest[n:]
+	}
+	got, err := d.FlushInto(out)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("samples out == samples in:", total+got == len(clip))
+	// Output:
+	// source: auto
+	// window inside the quiet stretch: true
+	// samples out == samples in: true
 }
