@@ -226,15 +226,20 @@ func (g *Gate) FlushInto(out []float32) (int, error) {
 	return written, nil
 }
 
-// Denoise gates a whole clip held in memory with the blind noise-floor estimator,
-// streamed to completion. Before streaming it measures the clip's quietest window
-// (the flagship's EstimateNoiseProfile) and caps each bin's rolling-median floor
-// at that window's power plus prescanCapDB, so song that fills a bin for most of
-// the median window cannot become the floor. When a clip of about 1 s or more has
-// no distinctly quiet window, or the clip is shorter than one frame, the floor is
-// the plain blind median; between those lengths the quietest window is taken as
-// is. When a noise-only excerpt is known, DenoiseWithNoise or DenoiseWithFloor is
-// still the better choice. The result has len(x) samples aligned with x.
+// Denoise gates a whole clip held in memory with the blind noise-floor
+// estimator, streamed to completion. Before streaming it measures the clip's
+// quietest window (the flagship's EstimateNoiseProfile) and caps each bin's
+// rolling-median floor at that window's power plus prescanCapDB, so song that
+// fills a bin for most of the median window cannot become the floor, while
+// noise elsewhere in the clip that sits more than a few dB above that window is
+// reduced less. The floor is the plain blind median when the clip has about 1 s
+// or more of non-silent audio and no distinctly quiet window, when the measured
+// stretch holds digital silence (no 0.5 s window free of it exists, or a
+// FrameSize longer than 0.5 s reaches into it), or when the clip is shorter
+// than one frame; otherwise a clip with less non-silent audio takes its
+// quietest window as is. When a noise-only excerpt is known, DenoiseWithNoise
+// or DenoiseWithFloor is still the better choice. The result has len(x) samples
+// aligned with x.
 func Denoise(x []float32, cfg Config) ([]float32, error) {
 	g, err := New(cfg)
 	if err != nil {
@@ -246,13 +251,15 @@ func Denoise(x []float32, cfg Config) ([]float32, error) {
 	return g.denoiseAll(x)
 }
 
-// prescan measures x's quietest window with the flagship estimator, at the gate's
-// resolved frame geometry so both sides share one power scale, and caps the blind
-// floor with it. ErrNoQuietRegion (a clip of about 1 s or more with no distinct
-// quiet window) or ErrProfileTooShort (under one frame) leaves the plain blind
-// tracker in place. Any other error is unexpected (denoiser.New resolves the
-// same geometry the gate already accepted) and is returned rather than silently
-// dropping the cap.
+// prescan measures x's quietest window with the flagship estimator, at the
+// gate's resolved frame geometry so both sides share one power scale, and caps
+// the blind floor with it. ErrNoQuietRegion (about 1 s or more of non-silent
+// audio with no distinct quiet window), ErrProfileTooShort (under one frame),
+// or a measured stretch that holds a digital-silence block (no 0.5 s window
+// free of silence exists, or a FrameSize longer than 0.5 s reaches into it)
+// leaves the plain blind tracker in place. Any other error is unexpected
+// (denoiser.New resolves the same geometry the gate already accepted) and is
+// returned rather than silently dropping the cap.
 func (g *Gate) prescan(x []float32) error {
 	d, err := denoiser.New(denoiser.Config{SampleRate: g.sampleRate, FrameSize: g.n, HopSize: g.hop})
 	if err != nil {
@@ -265,10 +272,11 @@ func (g *Gate) prescan(x []float32) error {
 	case err != nil:
 		return err
 	}
-	// With no window free of digital silence the estimator falls back to one that
-	// holds silence, whose profile sits at or near the epsPower floor; a cap built
-	// from it would stop all gating. Check the window's hop blocks the way the
-	// estimator classifies them and keep the plain median instead.
+	// With no window free of digital silence the estimator falls back to one
+	// that holds silence, whose profile sits at or near the epsPower floor; a
+	// cap built from it would stop all gating. Check the measured stretch's hop
+	// blocks against the estimator's silence threshold and keep the plain
+	// median instead.
 	info := p.Info()
 	start := int(math.Round(info.StartSec * float64(g.sampleRate)))
 	end := min(len(x), start+int(math.Round(info.DurationSec*float64(g.sampleRate))))

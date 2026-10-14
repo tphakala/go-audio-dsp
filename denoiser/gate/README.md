@@ -31,8 +31,10 @@ integral, and its noise tracker needs quiet gaps to open. This method is:
 - **Correct for gapless noise**: its blind floor is a per-bin rolling **median**,
   the right estimator for steady rain or cicada drone, where a minimum tracker
   never opens.
-  `Denoise` bounds it with a quiet-window cap so continuous song is not mistaken
-  for noise.
+  `Denoise` caps it at the clip's quietest-window level plus 3 dB, so continuous
+  song is not mistaken for noise when the clip has a usable quiet window; noise
+  elsewhere in the clip that sits more than a few dB above that window is reduced
+  less.
 
 It does not replace the flagship, which reduces broadband noise more
 aggressively.
@@ -61,10 +63,14 @@ if err != nil {
 With no excerpt, `Denoise` uses the blind rolling-median floor, bounded by a
 quietest-window pre-scan: it measures the clip's quietest 0.5 s window with the
 flagship's `EstimateNoiseProfile` and caps each bin's floor at that power plus
-3 dB, so continuous song that fills a bin cannot become the floor. A clip of about
-1 s or more with no distinctly quiet window, or one shorter than one frame, keeps
-the plain median; a clip in between takes its quietest window as is. Audio
-passes through unchanged during a brief warm-up at the start of the clip:
+3 dB, so continuous song that fills a bin cannot become the floor, while noise
+elsewhere in the clip that sits more than a few dB above that window is reduced
+less. The plain median is kept when the clip has about 1 s or more of non-silent
+audio and no distinctly quiet window, when the measured stretch holds digital
+silence (no 0.5 s window free of it exists, or a `FrameSize` longer than 0.5 s
+reaches into it), or when the clip is shorter than one frame; otherwise a clip
+with less non-silent audio takes its quietest window as is. Audio passes through
+unchanged during a brief warm-up at the start of the clip:
 
 ```go
 out, err := gate.Denoise(clip, gate.Config{SampleRate: 48000})
@@ -140,8 +146,9 @@ overlap), matching the flagship.
    the blind per-bin rolling median otherwise (capped by a quiet-window
    pre-scan in `Denoise`).
 3. **Soft mask**: per bin, `power / noise-floor`, smoothed across frequency
-   (fewer isolated musical-noise bins; done on the SNR so a narrowband call is
-   not averaged down by its closed neighbours) -> log10 -> a sigmoid knee at
+   (fewer isolated musical-noise bins; done on the SNR so a strong narrowband
+   call is not averaged down by its closed neighbours, while one near
+   `ThresholdDB` still is) -> log10 -> a sigmoid knee at
    `ThresholdDB` of width `TransitionDB` -> a gain in the residual-gain range
    `[gFloor, 1]`, where `gFloor` is set by `MaxAttenuationDB`. Optionally
    smoothed across time (the memoryless sigmoid would otherwise flutter).

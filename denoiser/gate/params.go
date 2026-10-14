@@ -28,7 +28,8 @@ type Params struct {
 	// over noise floor) across bins, taken before the sigmoid knee; 0 or 1
 	// disables it. Smoothing across frequency suppresses isolated musical-noise
 	// bins, and smoothing the SNR rather than the gain keeps a narrowband call
-	// from being averaged down by its closed neighbours.
+	// well above ThresholdDB from being averaged down by its closed neighbours (a
+	// call near the threshold is still pulled down).
 	FreqSmoothBins int
 	// TimeSmoothFrames is the width 2L+1 of a centered moving average of the gain
 	// across frames (odd; an even value rounds up to the next odd effective width,

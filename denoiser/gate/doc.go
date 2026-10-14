@@ -15,31 +15,36 @@
 // estimated per-bin noise floor (a smooth sigmoid knee around ThresholdDB, of
 // width TransitionDB, mapped into a residual gain bounded below by the
 // MaxAttenuationDB floor); the per-bin SNR is smoothed across frequency before
-// that knee, so a narrowband call is not averaged down by its closed neighbours,
-// and the resulting mask is optionally smoothed across time; and the frame is
-// resynthesized by overlap-add. The whole per-bin apply path is elementwise, so
-// it takes github.com/tphakala/simd's AVX or NEON tiers where available and a
-// portable Go fallback elsewhere, with no scalar transcendental in the hot loop.
-// This is the concrete difference from the flagship, whose per-bin gain is a
-// scalar float64 loop through the exponential integral: the gate is, by
-// construction, lighter and faster on low-power hosts and gentle on tonal song.
-// It does not replace the flagship.
+// that knee, so a strong narrowband call is not averaged down by its closed
+// neighbours (one near ThresholdDB still is), and the resulting mask is
+// optionally smoothed across time; and the frame is resynthesized by
+// overlap-add. The whole per-bin apply path is elementwise, so it takes
+// github.com/tphakala/simd's AVX or NEON tiers where available and a portable
+// Go fallback elsewhere, with no scalar transcendental in the hot loop. This is
+// the concrete difference from the flagship, whose per-bin gain is a scalar
+// float64 loop through the exponential integral: the gate is, by construction,
+// lighter and faster on low-power hosts and gentle on tonal song. It does not
+// replace the flagship.
 //
-// Noise floor. Two estimators feed the mask. The primary path is a learned floor
-// measured from a noise-only excerpt (LearnNoise, satisfying the
-// denoiser.NoiseLearner capability) or set directly (SetNoiseFloor); this is the
-// path the method is tuned for. When no floor is learned, a blind fallback
-// tracks a per-bin rolling median of log-power over a short window, which is the
-// right estimator for gapless continuous noise (a minimum tracker would never
-// open on steady rain or cicada drone). The blind estimator keeps a small
-// sliding histogram per bin (about 170 KB of state at the 1024/256 default), and
-// passes audio through unchanged during its brief warm-up. Denoise, which holds
-// the whole clip, additionally caps that median per bin at the clip's quietest
-// 0.5 s window (the flagship's EstimateNoiseProfile) plus 3 dB, so continuous
-// song that fills a bin for most of the median window cannot become the floor;
-// a clip of about 1 s or more with no distinctly quiet window keeps the plain
-// median (a shorter clip takes its quietest window as is). Streaming and
-// the learned-floor paths are unchanged.
+// Noise floor. Two estimators feed the mask. The primary path is a learned
+// floor measured from a noise-only excerpt (LearnNoise, satisfying the
+// denoiser.NoiseLearner capability) or set directly (SetNoiseFloor); this is
+// the path the method is tuned for. When no floor is learned, a blind fallback
+// tracks a per-bin rolling median of log-power over a short window, which is
+// the right estimator for gapless continuous noise (a minimum tracker would
+// never open on steady rain or cicada drone). The blind estimator keeps a small
+// sliding histogram per bin (about 170 KB of state at the 1024/256 default),
+// and passes audio through unchanged during its brief warm-up. Denoise, which
+// holds the whole clip, additionally caps that median per bin at the clip's
+// quietest 0.5 s window (the flagship's EstimateNoiseProfile) plus 3 dB, so
+// continuous song that fills a bin for most of the median window cannot become
+// the floor, while noise elsewhere in the clip that sits more than a few dB
+// above that window is reduced less. The plain median is kept when the clip has
+// about 1 s or more of non-silent audio and no distinctly quiet window, when
+// the measured stretch holds digital silence (no 0.5 s window free of it
+// exists, or a FrameSize longer than 0.5 s reaches into it), or when the clip
+// is shorter than one frame. Streaming and the learned-floor paths are not
+// capped.
 //
 // A Gate streams: call Process (or ProcessInto) with consecutive chunks of any
 // size and Flush (or FlushInto) at the end. Denoise, DenoiseWithNoise and
