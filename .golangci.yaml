@@ -6,7 +6,7 @@
 #     not fire here regardless.
 #   - modernization is enforced by the rules/*.go ruleguard matchers and the
 #     standalone `modernize` analyzer rather than a golangci linter; both run
-#     clean here. Toolchain baseline: Go 1.27, golangci-lint v2.13.2.
+#     clean here. Toolchain baseline: Go 1.27, golangci-lint v2.14.0.
 version: "2"
 output:
   sort-order:
