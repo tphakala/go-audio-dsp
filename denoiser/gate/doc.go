@@ -33,7 +33,13 @@
 // right estimator for gapless continuous noise (a minimum tracker would never
 // open on steady rain or cicada drone). The blind estimator keeps a small
 // sliding histogram per bin (about 170 KB of state at the 1024/256 default), and
-// passes audio through unchanged during its brief warm-up.
+// passes audio through unchanged during its brief warm-up. Denoise, which holds
+// the whole clip, additionally caps that median per bin at the clip's quietest
+// 0.5 s window (the flagship's EstimateNoiseProfile) plus 3 dB, so continuous
+// song that fills a bin for most of the median window cannot become the floor;
+// a clip of about 1 s or more with no distinctly quiet window keeps the plain
+// median (a shorter clip takes its quietest window as is). Streaming and
+// the learned-floor paths are unchanged.
 //
 // A Gate streams: call Process (or ProcessInto) with consecutive chunks of any
 // size and Flush (or FlushInto) at the end. Denoise, DenoiseWithNoise and

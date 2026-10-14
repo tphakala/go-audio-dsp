@@ -31,6 +31,8 @@ integral, and its noise tracker needs quiet gaps to open. This method is:
 - **Correct for gapless noise**: its blind floor is a per-bin rolling **median**,
   the right estimator for steady rain or cicada drone, where a minimum tracker
   never opens.
+  `Denoise` bounds it with a quiet-window cap so continuous song is not mistaken
+  for noise.
 
 It does not replace the flagship, which reduces broadband noise more
 aggressively.
@@ -56,10 +58,13 @@ if err != nil {
 // out has len(clip) samples, aligned with clip.
 ```
 
-With no excerpt, `Denoise` uses the blind rolling-median floor. Unlike the
-flagship it does not run a quietest-window pre-scan (its blind path is designed
-for gapless continuous noise), and audio passes through unchanged during a brief
-warm-up:
+With no excerpt, `Denoise` uses the blind rolling-median floor, bounded by a
+quietest-window pre-scan: it measures the clip's quietest 0.5 s window with the
+flagship's `EstimateNoiseProfile` and caps each bin's floor at that power plus
+3 dB, so continuous song that fills a bin cannot become the floor. A clip of about
+1 s or more with no distinctly quiet window, or one shorter than one frame, keeps
+the plain median; a clip in between takes its quietest window as is. Audio
+passes through unchanged during a brief warm-up at the start of the clip:
 
 ```go
 out, err := gate.Denoise(clip, gate.Config{SampleRate: 48000})
@@ -132,7 +137,8 @@ overlap), matching the flagship.
 1. **Analysis**: a periodic Hann window and a real FFT per frame, at 75% overlap
    by default.
 2. **Noise floor**: a learned per-bin floor (`LearnNoise` / `SetNoiseFloor`), or
-   the blind per-bin rolling median otherwise.
+   the blind per-bin rolling median otherwise (capped by a quiet-window
+   pre-scan in `Denoise`).
 3. **Soft mask**: per bin, `power / noise-floor`, smoothed across frequency
    (fewer isolated musical-noise bins; done on the SNR so a narrowband call is
    not averaged down by its closed neighbours) -> log10 -> a sigmoid knee at
@@ -156,6 +162,10 @@ input sample are not themselves sanitized (garbage in, garbage out, localized).
   noise while preserving a strong tone, including one centered exactly on a bin.
 - **Blind floor**: matches the learned mean-power floor on continuous noise
   (median-to-mean corrected) and ignores a sparse loud tone.
+  `Denoise` keeps continuous on-bin song that fills most of the median window
+  (the cap), caps nothing and equals the plain blind stream when a clip long
+  enough to be judged has no distinct quiet window or the clip is under one frame, and the capped path is chunk-invariant and
+  allocation-free.
 - **Zero-allocation** steady state and a gating benchmark.
 
 ```sh

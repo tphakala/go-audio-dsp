@@ -1,7 +1,10 @@
 package gate
 
 import (
+	"errors"
+
 	dsp "github.com/tphakala/go-audio-dsp"
+	"github.com/tphakala/go-audio-dsp/denoiser"
 	"github.com/tphakala/go-audio-dsp/internal/dspshared"
 	"github.com/tphakala/go-audio-dsp/stft"
 )
@@ -9,6 +12,15 @@ import (
 // epsPower floors every noise power estimate so SNR ratios stay finite. It is
 // shared with the flagship denoiser.
 const epsPower = dspshared.EpsPower
+
+// prescanCapDB bounds Denoise's blind floor at the pre-scan's quiet-window
+// power plus this margin. Measured on a real 48 kHz field-recording corpus
+// (dense dawn chorus, owls, a long night excerpt) against ffmpeg afftdn with a
+// 3 dB bar: 0 dB kept song but lost too much reduction on non-stationary noise
+// the median tracks (8.4 dB vs afftdn 12.0 at Medium), 6 dB let the median
+// eat dense song again (3.3 dB drop at Heavy), 3 dB kept every clip inside
+// both bars.
+const prescanCapDB = 3
 
 // Gate is a streaming single-channel spectral soft-gate denoiser. Create one with
 // New, then call Process (or ProcessInto) with consecutive chunks and Flush at the
@@ -55,7 +67,7 @@ type Gate struct {
 // New returns a Gate for cfg. Until LearnNoise or SetNoiseFloor is called the
 // noise floor is estimated blind: a per-bin rolling median that needs about
 // Params.FloorWindowSec/4 of audio before it engages (audio passes through
-// unchanged until then).
+// unchanged until then). Denoise additionally caps that blind floor; see Denoise.
 func New(cfg Config) (*Gate, error) {
 	rc, p, err := cfg.resolve()
 	if err != nil {
@@ -121,10 +133,12 @@ func New(cfg Config) (*Gate, error) {
 	return g, nil
 }
 
-// initNoiseSource points the noise slot at the blind tracker (the default until
-// LearnNoise or SetNoiseFloor supplies a fixed floor).
+// initNoiseSource points the noise slot at the plain blind tracker (the default
+// until LearnNoise or SetNoiseFloor supplies a fixed floor), dropping any
+// Denoise pre-scan cap.
 func (g *Gate) initNoiseSource() {
 	g.learned = false
+	g.tracker.setUpper(nil)
 	g.tracker.reset()
 	g.noise = g.tracker.noise
 }
@@ -211,17 +225,63 @@ func (g *Gate) FlushInto(out []float32) (int, error) {
 }
 
 // Denoise gates a whole clip held in memory with the blind noise-floor estimator,
-// streamed to completion. For a clip with no noise-only lead-in, prefer
-// DenoiseWithNoise or DenoiseWithFloor: unlike the flagship's Denoise, the gate
-// does not run a quietest-window pre-scan (its blind path is a rolling median
-// designed for gapless continuous noise). The result has len(x) samples aligned
-// with x.
+// streamed to completion. Before streaming it measures the clip's quietest window
+// (the flagship's EstimateNoiseProfile) and caps each bin's rolling-median floor
+// at that window's power plus prescanCapDB, so song that fills a bin for most of
+// the median window cannot become the floor. When a clip of about 1 s or more has
+// no distinctly quiet window, or the clip is shorter than one frame, the floor is
+// the plain blind median; between those lengths the quietest window is taken as
+// is. When a noise-only excerpt is known, DenoiseWithNoise or DenoiseWithFloor is
+// still the better choice. The result has len(x) samples aligned with x.
 func Denoise(x []float32, cfg Config) ([]float32, error) {
 	g, err := New(cfg)
 	if err != nil {
 		return nil, err
 	}
+	if err := g.prescan(x); err != nil {
+		return nil, err
+	}
 	return g.denoiseAll(x)
+}
+
+// prescan measures x's quietest window with the flagship estimator, at the gate's
+// resolved frame geometry so both sides share one power scale, and caps the blind
+// floor with it. ErrNoQuietRegion (a clip of about 1 s or more with no distinct
+// quiet window) or ErrProfileTooShort (under one frame) leaves the plain blind
+// tracker in place. Any other error is unexpected (denoiser.New resolves the
+// same geometry the gate already accepted) and is returned rather than silently
+// dropping the cap.
+func (g *Gate) prescan(x []float32) error {
+	d, err := denoiser.New(denoiser.Config{SampleRate: g.sampleRate, FrameSize: g.n, HopSize: g.hop})
+	if err != nil {
+		return err
+	}
+	p, err := d.EstimateNoiseProfile(x)
+	switch {
+	case errors.Is(err, denoiser.ErrNoQuietRegion), errors.Is(err, denoiser.ErrProfileTooShort):
+		return nil
+	case err != nil:
+		return err
+	}
+	return g.setBlindCap(p.Spectrum())
+}
+
+// setBlindCap caps each bin's blind floor at power * 10^(prescanCapDB/10), via
+// the tracker's upper bound. power must have FrameSize/2+1 values already floored
+// (NoiseProfile.Spectrum is), else ErrFloorMismatch; it is not floored again after
+// scaling, because that would turn an overflowed +Inf into a near-zero cap.
+func (g *Gate) setBlindCap(power []float32) error {
+	if len(power) != g.bins {
+		return ErrFloorMismatch
+	}
+	a := dsp.FactorFromDB(prescanCapDB)
+	f := float32(a * a) // power ratio is the amplitude factor squared
+	upper := make([]float32, g.bins)
+	for k, v := range power {
+		upper[k] = v * f
+	}
+	g.tracker.setUpper(upper)
+	return nil
 }
 
 // DenoiseWithNoise gates a whole clip using a floor learned from the given

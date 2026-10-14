@@ -42,7 +42,10 @@ const (
 // of window samples strictly below it, so push adjusts those counts in O(1) and
 // publish rebalances the median in O(1) amortized rather than rescanning the
 // histogram. All state is allocated up front; push and publish allocate nothing
-// and are chunk-independent.
+// and are chunk-independent. An optional per-bin upper bound (setUpper, used by
+// Denoise's quiet-window pre-scan) clamps the published floor, so the median stays
+// the estimator for gapless noise while continuous song cannot raise the floor
+// above that bound.
 type floorTracker struct {
 	bins, nb, window, every int
 	ring                    []uint8   // window*bins: the quantized bucket per (ring slot, bin)
@@ -50,6 +53,7 @@ type floorTracker struct {
 	level                   []float32 // nb: bucket-centre power * (1/ln2), precomputed
 	logp                    []float32 // bins: log10(power) scratch for one push
 	noise                   []float32 // bins: the published floor the Gate reads
+	upper                   []float32 // bins: optional upper bound on noise; nil when unbounded
 
 	med   []int // bins: current per-bin median bucket
 	below []int // bins: count of window samples strictly below med[k] (== sum of hist[k][0..med[k]-1])
@@ -178,5 +182,18 @@ func (t *floorTracker) publish() {
 		}
 		t.med[k], t.below[k] = m, below
 		t.noise[k] = max(t.level[m], epsPower)
+		if t.upper != nil {
+			t.noise[k] = min(t.noise[k], t.upper[k])
+		}
+	}
+}
+
+// setUpper bounds the published floor per bin from above (nil removes the bound)
+// and applies it to the floor already published. reset keeps the bound: its
+// epsPower floor already sits below any bound built from a floored spectrum.
+func (t *floorTracker) setUpper(upper []float32) {
+	t.upper = upper
+	for k, u := range upper {
+		t.noise[k] = min(t.noise[k], u)
 	}
 }

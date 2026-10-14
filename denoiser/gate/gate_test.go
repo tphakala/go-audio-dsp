@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"math/rand/v2"
+	"slices"
 	"testing"
 
 	dsp "github.com/tphakala/go-audio-dsp"
@@ -12,6 +13,13 @@ import (
 )
 
 // --- test helpers ---
+
+// Floor modes the stream tests run through.
+const (
+	modeBlind   = "blind"
+	modeLearned = "learned"
+	modeCapped  = "capped"
+)
 
 func dbToLin(db float64) float64 { return math.Pow(10, db/20) }
 
@@ -76,6 +84,20 @@ func assertFinite(t *testing.T, name string, x []float32) {
 	}
 }
 
+// assertBitExact fails at the first sample where got differs from want, or on a
+// length mismatch.
+func assertBitExact(t *testing.T, what string, got, want []float32) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s: length %d != %d", what, len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("%s: differs at %d: %g vs %g", what, i, got[i], want[i])
+		}
+	}
+}
+
 // streamAll runs x through g and flushes, returning one exact-length result.
 func streamAll(t *testing.T, g *Gate, x []float32) []float32 {
 	t.Helper()
@@ -92,18 +114,17 @@ func streamAll(t *testing.T, g *Gate, x []float32) []float32 {
 }
 
 // runStream feeds x through a fresh Gate in the given repeating chunk sizes and
-// returns the concatenated Process + Flush output. A non-nil learn excerpt selects
-// the learned path; nil leaves the blind tracker active.
-func runStream(t *testing.T, cfg Config, learn, x []float32, chunks []int) []float32 {
+// returns the concatenated Process + Flush output. A non-nil setup configures the
+// fresh Gate first (for example a learned floor); nil leaves the blind tracker
+// active.
+func runStream(t *testing.T, cfg Config, setup func(*Gate), x []float32, chunks []int) []float32 {
 	t.Helper()
 	g, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if learn != nil {
-		if err := g.LearnNoise(learn); err != nil {
-			t.Fatalf("LearnNoise: %v", err)
-		}
+	if setup != nil {
+		setup(g)
 	}
 	out := make([]float32, 0, len(x)+g.FrameSize())
 	buf := make([]float32, len(x)+g.HopSize())
@@ -214,7 +235,7 @@ func TestFlushDrainsExactly(t *testing.T) {
 }
 
 // TestStreamChunkInvarianceBitExact pins that the output does not depend on how the
-// input was split across ProcessInto calls, on both the blind and learned paths.
+// input was split across ProcessInto calls, on the blind, learned and capped paths.
 // A chunk-dependent smoother (e.g. a running sum instead of the per-frame ring
 // recompute) would diverge.
 func TestStreamChunkInvarianceBitExact(t *testing.T) {
@@ -227,19 +248,45 @@ func TestStreamChunkInvarianceBitExact(t *testing.T) {
 	noise := whiteNoise(frame*8, dbToLin(-30), 5)
 	cfg := Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Strength: denoiser.Medium}
 	shuffled := []int{1, 7, 100, 999, 64, 256, 3000, 5, 128}
-	for _, learned := range []bool{false, true} {
-		var noiseArg []float32
-		if learned {
-			noiseArg = noise
-		}
-		ref := runStream(t, cfg, noiseArg, x, []int{len(x)})
-		got := runStream(t, cfg, noiseArg, x, shuffled)
-		if len(got) != len(ref) {
-			t.Fatalf("learned=%v: chunked length %d != single-shot %d", learned, len(got), len(ref))
-		}
-		for i := range ref {
-			if got[i] != ref[i] {
-				t.Fatalf("learned=%v: chunked output differs at %d: %g vs %g", learned, i, got[i], ref[i])
+
+	// The capped mode applies Denoise's blind-floor cap, taken here from the
+	// learned floor of the noise excerpt.
+	probe, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := probe.LearnNoise(noise); err != nil {
+		t.Fatal(err)
+	}
+	capSpec := probe.NoiseFloor()
+
+	modes := []struct {
+		name  string
+		setup func(*Gate)
+	}{
+		{modeBlind, nil},
+		{modeLearned, func(g *Gate) {
+			if err := g.LearnNoise(noise); err != nil {
+				t.Fatalf("LearnNoise: %v", err)
+			}
+		}},
+		{modeCapped, func(g *Gate) {
+			if err := g.setBlindCap(capSpec); err != nil {
+				t.Fatalf("setBlindCap: %v", err)
+			}
+		}},
+	}
+	var blind []float32
+	for _, m := range modes {
+		ref := runStream(t, cfg, m.setup, x, []int{len(x)})
+		got := runStream(t, cfg, m.setup, x, shuffled)
+		assertBitExact(t, m.name+": chunked vs single-shot", got, ref)
+		switch m.name {
+		case modeBlind:
+			blind = ref
+		case modeCapped:
+			if slices.Equal(ref, blind) {
+				t.Fatal("capped output equals blind output; the cap is not exercised")
 			}
 		}
 	}
