@@ -325,3 +325,51 @@ func TestDenoiseSkipsCapOnSilentWindow(t *testing.T) {
 	}
 	assertBitExact(t, "Denoise vs plain blind stream", got, streamAll(t, g, x))
 }
+
+// TestDenoiseSkipsCapWhenWideFrameReachesSilence pins the FrameSize case of the
+// silence rule. At 48 kHz with FrameSize 32768 and hop 8192 the 0.5 s window is
+// three hop blocks, shorter than one frame, so the estimator measures a whole
+// frame from the window start. The clip puts the quietest three blocks right
+// before one block of digital silence: the window itself is silence-free, but
+// the measured frame reaches into the silent block, so Denoise must keep the
+// plain blind median. A silence check limited to the 0.5 s window would cap.
+func TestDenoiseSkipsCapWhenWideFrameReachesSilence(t *testing.T) {
+	const sr, frame, hop = 48000, 32768, 8192
+	loud := whiteNoise(32*hop, dbToLin(-30), 21)
+	quiet := whiteNoise(3*hop, dbToLin(-50), 22)
+	x := make([]float32, 0, 36*hop)
+	x = append(x, loud[:12*hop]...)
+	x = append(x, quiet...)
+	x = append(x, make([]float32, hop)...)
+	x = append(x, loud[12*hop:32*hop]...)
+
+	prof, err := profileFor(t, sr, frame, hop, x)
+	if err != nil {
+		t.Fatalf("precondition: EstimateNoiseProfile: %v", err)
+	}
+	info := prof.Info()
+	if start, n := int(math.Round(info.StartSec*sr)), int(math.Round(info.DurationSec*sr)); start != 12*hop || n != frame {
+		t.Fatalf("precondition: measured stretch [%d, +%d), want the quiet blocks widened to one frame [%d, +%d)", start, n, 12*hop, frame)
+	}
+	cfg := Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Strength: denoiser.Medium}
+	capped, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := capped.setBlindCap(prof.Spectrum()); err != nil {
+		t.Fatal(err)
+	}
+	plain, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := streamAll(t, plain, x)
+	if slices.Equal(streamAll(t, capped, x), want) {
+		t.Fatal("precondition: the cap changed nothing, so this test cannot tell a skipped cap from an applied one")
+	}
+	got, err := Denoise(x, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertBitExact(t, "Denoise vs plain blind stream", got, want)
+}
