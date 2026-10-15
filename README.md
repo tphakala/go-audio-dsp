@@ -18,7 +18,7 @@ via [`github.com/tphakala/simd`](https://github.com/tphakala/simd).
 | [`stft`](stft/) | beta | Shared short-time Fourier analysis layer (framing, analysis windows, padding convention, per-frame real transform): a whole-clip `Plan`, a streaming `Analyzer`, and its overlap-add `Synthesizer`; the denoiser, spectrogram, and mel blocks are built on them. |
 | [`spectrogram`](spectrogram/) | beta | Numeric magnitude, power, or dB spectrogram matrix over the shared STFT core, as a whole-clip matrix or an incremental streaming column source. Native replacement for the sox / ffmpeg spectrogram subprocess. |
 | [`mel`](mel/) | beta | Per-frame (log-)mel spectrogram columns over the shared STFT core (whole-clip `Extractor` or streaming source); pure DSP, leaving per-model normalization, frame stacking, and tensor layout to the consumer. |
-| [`pcm`](pcm/) | stable | int16 <-> float32 conversion at the chain edges (the transport/processing boundary), plus an in-place saturating int16 gain (`ScaleInt16`). |
+| [`pcm`](pcm/) | stable | int16 <-> float32 conversion at the chain edges (the transport/processing boundary), plus saturating int16 gain in place (`ScaleInt16`) and between byte buffers (`ScaleBytes`), and a read-only byte decoder (`BytesToInt16`). |
 
 The root package defines the streaming `Processor` contract the streaming blocks
 (denoiser, denoiser/gate, equalizer, gain) share, so a consumer can chain them

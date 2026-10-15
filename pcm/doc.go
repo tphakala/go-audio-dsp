@@ -9,7 +9,9 @@
 // the backing array with no copy and hands it to the SIMD int16<->float32
 // kernels from github.com/tphakala/simd. Big-endian hosts take a scalar
 // byte-swap path with identical numeric results; there InPlaceInt16 uses a
-// scratch buffer.
+// scratch buffer. BytesToInt16 is the read-only decoder: it fills a caller's
+// []int16 without ever writing the source bytes, so a reader can walk a large
+// byte buffer through a small scratch on any host.
 //
 // The int16<->float32 scaling is 1/32768 forward and 32768 back. int16 is
 // exactly representable in float32 and 32768 is a power of two, so the pair is a
@@ -19,5 +21,8 @@
 //
 // ScaleInt16 applies a gain to int16 samples in place with that same
 // round-to-even, saturating convention, for callers that scale on the int16
-// transport side without converting to float32.
+// transport side without converting to float32. ScaleBytes is the byte form: it
+// scales from one []byte into another (or into itself), so a caller can gain a
+// chunk of a read-only source into a reusable scratch with no extra copy. Both
+// allocate nothing.
 package pcm

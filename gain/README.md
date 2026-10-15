@@ -24,6 +24,8 @@ n, err := g.ProcessInto(in, out) // n == len(in); out may be exactly in
 // int16 transport path, saturating (a boost never wraps):
 g.ApplyInt16(samples)     // []int16, in place
 err = g.ApplyBytes(buf)   // little-endian int16 in []byte, in place
+err = g.ApplyBytesTo(dst, src) // out of place: src untouched, dst >= len(src)
+scaled, err := g.AppliedBytes(src) // scaled copy; src itself (no copy) at exactly 0 dB
 ```
 
 ## Notes
@@ -31,6 +33,10 @@ err = g.ApplyBytes(buf)   // little-endian int16 in []byte, in place
 - `ProcessInto` does not clamp the float32 output: a boost can push samples past
   [-1, 1], which the true-peak stage or the int16 edge bounds. `ApplyInt16` and
   `ApplyBytes` saturate to the int16 range.
+- `AppliedBytes` returns `src` itself when the float32 factor is exactly 1 (0 dB), so do not
+  write to its result unless you own `src`. `ApplyBytesTo` still copies at unity
+  when `dst` and `src` differ, so `dst` always holds the result. An odd byte
+  length returns `ErrOddByteLength` on every byte path, at 0 dB too.
 - int16 rounding is round-to-nearest, ties to even, matching the `pcm` package.
   Because the factor and product are held in float32, an unsaturated result can
   differ from a float64 round-half-away implementation by at most one LSB on a

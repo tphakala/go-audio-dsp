@@ -76,6 +76,29 @@ func BytesToFloat32(dst []float32, src []byte) (int, error) {
 	return bytesToFloat32LE(dst, src), nil
 }
 
+// BytesToInt16 decodes interleaved little-endian int16 PCM from src into dst
+// without writing src. len(src) must be even (two bytes per sample); it decodes
+// min(len(dst), len(src)/2) samples and returns that count, so a shorter dst
+// yields a partial decode rather than an error. It is the read-only counterpart
+// of InPlaceInt16: a reader can walk a byte buffer in bounded chunks through a
+// small dst without the whole-buffer scratch and write-back InPlaceInt16 makes
+// on big-endian hosts. dst and src must not overlap.
+func BytesToInt16(dst []int16, src []byte) (int, error) {
+	if len(src)%2 != 0 {
+		return 0, ErrOddByteLength
+	}
+	n := min(len(dst), len(src)/2)
+	if n == 0 {
+		return 0, nil
+	}
+	if canReinterpretInt16 {
+		copy(dst[:n], bytesAsInt16(src[:2*n]))
+		return n, nil
+	}
+	bytesToInt16LE(dst[:n], src[:2*n])
+	return n, nil
+}
+
 // Float32ToBytes encodes float32 PCM (nominal [-1, 1]) from src into dst as
 // interleaved little-endian int16, scaling by 32768 with round-to-even and
 // saturation. len(dst) must be even; it encodes min(len(dst)/2, len(src))

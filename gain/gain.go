@@ -82,12 +82,44 @@ func (g *Gain) ApplyInt16(s []int16) {
 
 // ApplyBytes scales interleaved little-endian int16 PCM carried as bytes in
 // place. len(b) must be even (two bytes per sample); otherwise ErrOddByteLength
-// is returned and b is left untouched. On little-endian hosts the scale is
-// zero-copy. Rounding and saturation are as in ApplyInt16.
+// is returned and b is left untouched. It allocates nothing on any host.
+// Rounding and saturation are as in ApplyInt16.
 func (g *Gain) ApplyBytes(b []byte) error {
-	if len(b)%2 != 0 {
+	return g.ApplyBytesTo(b, b)
+}
+
+// ApplyBytesTo scales interleaved little-endian int16 PCM bytes from src into
+// dst, leaving src untouched unless dst aliases it. Use it to scale a chunk of a
+// read-only source into a reusable scratch with no extra copy. len(src) must be
+// even (ErrOddByteLength) and len(dst) >= len(src) (ErrBufferTooSmall); on
+// either error nothing is written, at any gain. dst always holds the full result,
+// including at 0 dB, where src is copied. dst may be exactly src; a shifted
+// overlap is not supported. Rounding and saturation are as in ApplyInt16.
+func (g *Gain) ApplyBytesTo(dst, src []byte) error {
+	if len(src)%2 != 0 {
 		return ErrOddByteLength
 	}
-	pcm.InPlaceInt16(b, func(s []int16) { pcm.ScaleInt16(s, g.factor) })
-	return nil
+	if len(dst) < len(src) {
+		return ErrBufferTooSmall
+	}
+	_, err := pcm.ScaleBytes(dst[:len(src)], src, g.factor)
+	return err
+}
+
+// AppliedBytes returns src scaled by the gain. When the float32 linear factor is
+// exactly 1 (0 dB, or a gain so small its factor rounds to 1) it returns src
+// itself, with no allocation and no copy, since scaling would not change a
+// sample; the caller must not write to the result unless it owns src. Otherwise it returns a new
+// slice and src is untouched. An odd len(src) returns ErrOddByteLength, at 0 dB
+// too. Rounding and saturation are as in ApplyInt16.
+func (g *Gain) AppliedBytes(src []byte) ([]byte, error) {
+	if len(src)%2 != 0 {
+		return nil, ErrOddByteLength
+	}
+	if g.factor == 1 {
+		return src, nil
+	}
+	out := make([]byte, len(src))
+	_, _ = pcm.ScaleBytes(out, src, g.factor) // the length was validated above
+	return out, nil
 }

@@ -11,7 +11,9 @@
 //
 // ProcessInto is the float32 chain path and does not clamp its output: a boost
 // can push samples outside [-1, 1], which the true-peak stage or the int16 edge
-// is expected to bound. ApplyInt16 and ApplyBytes are the transport-form paths;
+// is expected to bound. ApplyInt16 and ApplyBytes are the transport-form paths
+// (in place); ApplyBytesTo scales out of place into a caller's buffer, and
+// AppliedBytes returns a scaled copy, or the source itself at exactly 0 dB;
 // they round to nearest (ties to even) and saturate to the int16 range so a
 // boost never wraps. Rounding matches the pcm package; because the factor and
 // the product are held in float32, an unsaturated result may differ by at most
