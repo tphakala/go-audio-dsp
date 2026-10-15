@@ -106,9 +106,10 @@ func (g *Gain) ApplyBytesTo(dst, src []byte) error {
 	return err
 }
 
-// AppliedBytes returns src scaled by the gain. When the linear factor is exactly
-// 1 (0 dB) it returns src itself, with no allocation and no copy, so the caller
-// must not write to the result unless it owns src. Otherwise it returns a new
+// AppliedBytes returns src scaled by the gain. When the float32 linear factor is
+// exactly 1 (0 dB, or a gain so small its factor rounds to 1) it returns src
+// itself, with no allocation and no copy, since scaling would not change a
+// sample; the caller must not write to the result unless it owns src. Otherwise it returns a new
 // slice and src is untouched. An odd len(src) returns ErrOddByteLength, at 0 dB
 // too. Rounding and saturation are as in ApplyInt16.
 func (g *Gain) AppliedBytes(src []byte) ([]byte, error) {
