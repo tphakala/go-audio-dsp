@@ -36,30 +36,23 @@ var (
 	relGateEnergyFactor = float32(math.Pow(10, relativeGateLU/10))
 )
 
-// biquadState is a stateful second-order section in float32. Coefficients are
-// computed in float64 (see kWeightingStages) and stored here as float32; the
-// per-sample recurrence runs in float32, which stays within ~0.001 LU of the
-// float64 result even for low-frequency, long-duration signals.
-type biquadState struct {
-	b0, b1, b2, a1, a2 float32
-	x1, x2, y1, y2     float32
-}
+// kCascadeSections is the K-weighting cascade length: the high shelf and the
+// RLB high pass of BS.1770-4.
+const kCascadeSections = 2
 
-func newBiquadState(c biquad) biquadState {
-	return biquadState{
-		b0: float32(c.b0), b1: float32(c.b1), b2: float32(c.b2),
-		a1: float32(c.a1), a2: float32(c.a2),
+// kweightCoeffs lays the two K-weighting stages out as simd BiquadCascade
+// coefficients, [b0 b1 b2 a1 a2] per section. They are computed in float64 (see
+// kWeightingStages) and stored as float32; the recurrence runs in float32, which
+// stays within ~0.001 LU of the float64 result even for low-frequency,
+// long-duration signals.
+func kweightCoeffs(s1, s2 biquad) [kCascadeSections * 5]float32 {
+	var k [kCascadeSections * 5]float32
+	for i, c := range [kCascadeSections]biquad{s1, s2} {
+		k[i*5], k[i*5+1], k[i*5+2], k[i*5+3], k[i*5+4] =
+			float32(c.b0), float32(c.b1), float32(c.b2), float32(c.a1), float32(c.a2)
 	}
+	return k
 }
-
-func (s *biquadState) process(x float32) float32 {
-	y := s.b0*x + s.b1*s.x1 + s.b2*s.x2 - s.a1*s.y1 - s.a2*s.y2
-	s.x2, s.x1 = s.x1, x
-	s.y2, s.y1 = s.y1, y
-	return y
-}
-
-func (s *biquadState) resetState() { s.x1, s.x2, s.y1, s.y2 = 0, 0, 0, 0 }
 
 // Meter accumulates K-weighted energy from interleaved PCM and computes the
 // BS.1770-4 gated integrated loudness. Feed all samples with AddFloat64/Float32/
@@ -72,8 +65,8 @@ type Meter struct {
 	weights      []float32
 	subBlockSize int // samples per channel in a 100 ms sub-block
 
-	stage1 []biquadState // per channel
-	stage2 []biquadState // per channel
+	kCoeffs [kCascadeSections * 5]float32   // K-weighting cascade coefficients, shared by every channel
+	kState  [][kCascadeSections * 4]float32 // per channel: [x1 x2 y1 y2] of each section
 
 	accum    [][]float32 // per-channel K-weighted samples for the current sub-block
 	accumLen int         // frames filled in the current sub-block
@@ -112,16 +105,14 @@ func NewMeter(sampleRate, channels int) *Meter {
 		channels:     channels,
 		weights:      channelWeights(channels),
 		subBlockSize: subBlockSamples(sampleRate),
-		stage1:       make([]biquadState, channels),
-		stage2:       make([]biquadState, channels),
+		kCoeffs:      kweightCoeffs(s1, s2),
+		kState:       make([][kCascadeSections * 4]float32, channels),
 		accum:        make([][]float32, channels),
 		subEnergy:    make([][]float32, channels),
 		tp:           make([]truePeakChannel, channels),
 		tpSig:        make([]float32, tapsPerPhase-1+tpChunk),
 	}
 	for c := range channels {
-		m.stage1[c] = newBiquadState(s1)
-		m.stage2[c] = newBiquadState(s2)
 		m.accum[c] = make([]float32, m.subBlockSize)
 	}
 	return m
@@ -134,8 +125,7 @@ func NewMeter(sampleRate, channels int) *Meter {
 // count are unchanged.
 func (m *Meter) Reset() {
 	for c := range m.channels {
-		m.stage1[c].resetState()
-		m.stage2[c].resetState()
+		m.kState[c] = [kCascadeSections * 4]float32{}
 		m.subEnergy[c] = m.subEnergy[c][:0]
 		m.tp[c] = truePeakChannel{}
 	}
@@ -163,8 +153,7 @@ type sample interface{ ~int16 | ~float32 | ~float64 }
 // addSamples is the one feed loop behind the three Add* entry points: scale is
 // 1/32768 for int16 and 1 (an exact float32 multiply) otherwise. Frames are
 // consumed in runs that end at sub-block boundaries, and each channel's K-weighting
-// cascade runs over its run with the filter state held in locals (see kweightRun),
-// so the recurrence does not round-trip through memory on every sample.
+// cascade runs over its run with the filter state held in locals (see kweightRun).
 func addSamples[T sample](m *Meter, interleaved []T, scale float32) {
 	stride := m.channels
 	frames := len(interleaved) / stride
@@ -174,7 +163,7 @@ func addSamples[T sample](m *Meter, interleaved []T, scale float32) {
 	for i := 0; i < frames; {
 		n := min(frames-i, m.subBlockSize-m.accumLen)
 		for c := range stride {
-			kweightRun(&m.stage1[c], &m.stage2[c], m.accum[c][m.accumLen:m.accumLen+n], interleaved[i*stride+c:], stride, scale)
+			kweightRun(m.kCoeffs[:], m.kState[c][:], m.accum[c][m.accumLen:m.accumLen+n], interleaved[i*stride+c:], stride, scale)
 		}
 		i += n
 		m.accumLen += n
@@ -197,16 +186,16 @@ func addSamples[T sample](m *Meter, interleaved []T, scale float32) {
 	}
 }
 
-// kweightRun runs len(dst) samples of one channel, read from src at the given
-// interleave stride, through the two K-weighting stages and stores the weighted
-// samples in dst. The stages run on local copies of their state, written back at
-// the end; the arithmetic is identical to calling process per sample.
-func kweightRun[T sample](s1, s2 *biquadState, dst []float32, src []T, stride int, scale float32) {
-	a, b := *s1, *s2
+// kweightRun converts len(dst) samples of one channel, read from src at the given
+// interleave stride, to scaled float32 and filters them in place through the two
+// K-weighting stages with the carried state. The simd cascade rounds every product
+// and sum to float32 separately, so the result does not depend on how a stream is
+// split into calls or on the architecture.
+func kweightRun[T sample](coeffs, state, dst []float32, src []T, stride int, scale float32) {
 	for j := range dst {
-		dst[j] = b.process(a.process(float32(src[j*stride]) * scale))
+		dst[j] = float32(src[j*stride]) * scale
 	}
-	*s1, *s2 = a, b
+	simdf32.BiquadCascade(dst, dst, coeffs, state)
 }
 
 // tpChunkStart copies channel c's carried-over history into the shared true-peak
