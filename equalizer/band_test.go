@@ -133,12 +133,12 @@ func TestFilterTypeUses(t *testing.T) {
 				want  bool
 			}{
 				{"Q", breakQ, tc.typ.UsesQ(), tc.q},
-				{"WidthHz", breakWidth, tc.typ.UsesWidth(), tc.width},
-				{"GainDB", breakGain, tc.typ.UsesGain(), tc.gain},
+				{"Width", breakWidth, tc.typ.UsesWidth(), tc.width},
+				{"Gain", breakGain, tc.typ.UsesGain(), tc.gain},
 			} {
 				_, err := newCoeffs(probe.band, rate)
 				if rejected := errors.Is(err, dsp.ErrInvalidConfig); rejected != probe.want {
-					t.Errorf("%s: newCoeffs rejects a broken %s = %v, want %v", tc.typ, probe.field, rejected, probe.want)
+					t.Errorf("%s: newCoeffs rejects a broken %s field = %v, want %v", tc.typ, probe.field, rejected, probe.want)
 				}
 				if probe.uses != probe.want {
 					t.Errorf("%s: Uses%s() = %v, want %v", tc.typ, probe.field, probe.uses, probe.want)
