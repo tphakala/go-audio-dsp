@@ -73,3 +73,18 @@ func TestInPlaceInt16MisalignedZeroAlloc(t *testing.T) {
 		t.Errorf("InPlaceInt16 on a misaligned buffer allocated %v times, want 0", a)
 	}
 }
+
+func TestZeroAllocByteScaling(t *testing.T) {
+	src := make([]byte, 4096)
+	dst := make([]byte, 4096)
+	i16 := make([]int16, 2048)
+	bothPaths(t, func(t *testing.T) {
+		t.Helper()
+		if a := testing.AllocsPerRun(50, func() { _, _ = ScaleBytes(dst, src, 2) }); a != 0 {
+			t.Errorf("ScaleBytes allocated %v times, want 0", a)
+		}
+		if a := testing.AllocsPerRun(50, func() { _, _ = BytesToInt16(i16, src) }); a != 0 {
+			t.Errorf("BytesToInt16 allocated %v times, want 0", a)
+		}
+	})
+}
