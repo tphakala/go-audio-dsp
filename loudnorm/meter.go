@@ -244,7 +244,7 @@ func (m *Meter) IntegratedLoudness() float64 { return m.loudnessAtGain(0) }
 // loudnessAtGain returns the gated integrated loudness the measured signal would
 // have after a gain of gainDB, from the stored block energies and without reading
 // any audio. The K-weighting filter is linear, so each block energy scales by
-// 10^(gainDB/10); the gates do not scale with it, which is what makes loudness
+// 10^(gainDB/10); the absolute gate is a fixed level and the relative gate follows the scaled mean, which is what makes loudness
 // non-linear in gain: a boost lifts blocks over the absolute gate, an attenuation
 // drops them under it. At 0 dB it is IntegratedLoudness exactly.
 func (m *Meter) loudnessAtGain(gainDB float64) float64 {
