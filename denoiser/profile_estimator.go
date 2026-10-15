@@ -3,6 +3,7 @@ package denoiser
 import (
 	"errors"
 	"math"
+	"math/bits"
 	"slices"
 
 	"github.com/tphakala/go-audio-dsp/pcm"
@@ -269,10 +270,61 @@ func (e *NoiseProfileEstimator) accepts(w int, bestSum float64) bool {
 	if len(e.sorted) < 2*w {
 		return true
 	}
-	slices.Sort(e.sorted)
-	ref := e.sorted[int(quietPercentile*float64(len(e.sorted)-1))]
+	ref := selectNth(e.sorted, int(quietPercentile*float64(len(e.sorted)-1)))
 	winMean := bestSum / float64(w)
 	return winMean <= float64(ref)*math.Pow(10, -quietMarginDB/10)
+}
+
+// selectNth returns the value that sorted order puts at index k of a, reordering a
+// in the process. It is an introselect: quickselect on a median-of-three pivot
+// with a Hoare partition, falling back to a sort of the remaining range after
+// 2*log2(n) rounds so adversarial or pathological (sorted, repeated) input stays
+// O(n log n). On a long clip the full sort of the block energies was about 45% of
+// EstimateNoiseProfile. k must be in [0, len(a)).
+func selectNth(a []float32, k int) float32 {
+	lo, hi := 0, len(a)-1
+	for budget := 2 * bits.Len(uint(len(a))); lo < hi; budget-- {
+		if budget == 0 {
+			slices.Sort(a[lo : hi+1])
+			break
+		}
+		mid := lo + (hi-lo)/2
+		// Order a[lo] <= a[mid] <= a[hi]; the median sits at mid.
+		if a[mid] < a[lo] {
+			a[mid], a[lo] = a[lo], a[mid]
+		}
+		if a[hi] < a[lo] {
+			a[hi], a[lo] = a[lo], a[hi]
+		}
+		if a[hi] < a[mid] {
+			a[hi], a[mid] = a[mid], a[hi]
+		}
+		pivot := a[mid]
+		i, j := lo, hi
+		for i <= j {
+			for a[i] < pivot {
+				i++
+			}
+			for pivot < a[j] {
+				j--
+			}
+			if i <= j {
+				a[i], a[j] = a[j], a[i]
+				i++
+				j--
+			}
+		}
+		// Now a[lo..j] <= pivot <= a[i..hi], and anything between j and i equals it.
+		switch {
+		case k <= j:
+			hi = j
+		case k >= i:
+			lo = i
+		default:
+			return a[k]
+		}
+	}
+	return a[k]
 }
 
 // profileRange returns the sample range [start, end) measured for a window of
