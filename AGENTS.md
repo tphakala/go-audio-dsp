@@ -82,6 +82,7 @@ Unit tests run without external tools; the oracle tests skip when ffmpeg is not 
 - **Allocation tests.** `testing.AllocsPerRun` guards steady-state paths; they carry `//go:build !race` because the race detector allocates. A change on a hot path keeps them at zero.
 - **Reference oracles.** `loudnorm` is checked against ffmpeg `ebur128`, `denoiser` against `afftdn`, `mel` against librosa golden data. Tolerances are stated in the test; tighten them when the implementation improves, do not loosen them to make a change pass without explaining why in the PR.
 - **Corpus A/B.** `task ab` runs `denoiser` and `denoiser/gate` against `afftdn` on real clips in `testdata/corpus/` and recorded noise beds in `testdata/noisebed/`. Both directories are local only and gitignored; the tests skip without them.
+- **Loudness corpus.** `task ab:loudnorm` runs `loudnorm.PlanBytes` against ffmpeg `loudnorm` on real clips in `loudnorm/testdata/corpus/` (or `LOUDNORM_CORPUS_DIR`), gitignored and local only; the test skips without the corpus or ffmpeg.
 - **Scalar path.** `task test:noasm` (`SIMD_DISABLE=all`, `-count=1` because the variable is read at init) runs the pure-Go kernels.
 - **Benchmarks.** `bench_test.go` per package and `BenchmarkChain` in the root. Back a performance claim with benchstat output from `-count` runs, and check arm64 on real hardware rather than under emulation.
 

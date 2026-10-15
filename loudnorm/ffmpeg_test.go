@@ -92,7 +92,7 @@ func ffmpegEBUR128(t *testing.T, samples []float64, sampleRate, channels int) (i
 func parseFloatOrInf(t *testing.T, s string) float64 {
 	t.Helper()
 	switch s {
-	case "-inf":
+	case ffNegInf:
 		return math.Inf(-1)
 	case "inf":
 		return math.Inf(1)
