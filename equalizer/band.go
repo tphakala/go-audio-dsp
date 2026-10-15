@@ -53,14 +53,20 @@ func (t FilterType) String() string {
 
 func (t FilterType) valid() bool { return t >= LowPass && t <= Peaking }
 
-// usesWidth reports whether the type takes its bandwidth from WidthHz (in Hz)
-// rather than from Q.
-func (t FilterType) usesWidth() bool {
+// UsesWidth reports whether the type takes its bandwidth from Band.WidthHz (in
+// Hz) rather than from Band.Q. It is false for an unknown type.
+func (t FilterType) UsesWidth() bool {
 	return t == BandPass || t == BandReject || t == Peaking
 }
 
-// usesGain reports whether the type applies GainDB.
-func (t FilterType) usesGain() bool {
+// UsesQ reports whether the type takes its bandwidth from Band.Q rather than
+// from Band.WidthHz. It is false for an unknown type, so for every type exactly
+// one of UsesQ and UsesWidth is true when the type is valid.
+func (t FilterType) UsesQ() bool { return t.valid() && !t.UsesWidth() }
+
+// UsesGain reports whether the type applies Band.GainDB. It is false for an
+// unknown type.
+func (t FilterType) UsesGain() bool {
 	return t == Peaking || t == LowShelf || t == HighShelf
 }
 

@@ -36,7 +36,7 @@ n, err := e.ProcessInto(in, out) // n == len(in); out may be exactly in
 | `GainDB` | Peaking, LowShelf, HighShelf |
 | `Passes` | any (cascades that many identical sections; 0 means 1) |
 
-A field a type does not use is ignored. `Frequency` must be in `(0, SampleRate/2)`;
+A field a type does not use is ignored. `FilterType.UsesQ`, `UsesWidth` and `UsesGain` report which fields a type reads, so a caller mapping its own settings onto `Band` need not keep a copy of that table. `Frequency` must be in `(0, SampleRate/2)`;
 a `WidthHz` so wide that the lower band edge reaches 0 Hz is rejected rather than
 clamped. Parameters that would produce non-finite or unstable coefficients (for
 example a filter placed too close to Nyquist) are rejected at construction.
