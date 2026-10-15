@@ -62,3 +62,18 @@ func BenchmarkPlanBytes(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkMeterBedWithBurst is a field-recording shape: a quiet noise bed with
+// one loud burst early, so most chunks sit well under the running true peak.
+func BenchmarkMeterBedWithBurst(b *testing.B) {
+	pcm := sineInt16(-45, 3000, 30, 48000)
+	copy(pcm[48000:], sineInt16(-6, 1000, 1, 48000))
+	m := NewMeter(48000, 1)
+	b.SetBytes(int64(len(pcm) * 2))
+	for b.Loop() {
+		m.Reset()
+		m.AddInt16(pcm)
+		_ = m.IntegratedLoudness()
+		_ = m.TruePeakDBTP()
+	}
+}

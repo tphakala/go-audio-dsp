@@ -52,6 +52,24 @@ var tpKernelsRev = func() [][]float32 {
 	return ks
 }()
 
+// tpGain bounds how much the interpolation filter can amplify a signal: the
+// largest sum of absolute coefficients over the polyphase branches, so every
+// oversampled output y satisfies |y| <= tpGain * max|input in its window| in
+// exact arithmetic. The small relative margin covers the float32 rounding of the
+// 32-term dot products (about 32 * 6e-8 = 2e-6), so a chunk skipped on this bound
+// could not have raised the peak.
+var tpGain = func() float32 {
+	var worst float64
+	for p := range oversample {
+		var l1 float64
+		for t := range tapsPerPhase {
+			l1 += math.Abs(tpCoef[p][t])
+		}
+		worst = max(worst, l1)
+	}
+	return float32(worst * (1 + 1e-5))
+}()
+
 func buildTruePeakKernel() [oversample][tapsPerPhase]float64 {
 	proto := make([]float64, protoLen)
 	center := float64(protoLen-1) / 2.0
@@ -128,17 +146,26 @@ func absF32(x float32) float32 {
 // batch processes one sub-chunk of raw samples. sig is [history | new samples]
 // with len(sig) == tapsPerPhase-1+n. It updates maxAbs with both the raw sample
 // peak and the 4x-oversampled peak (the max across all polyphase branches,
-// computed in one fused SIMD pass with no output materialization), then stores
+// computed in one fused SIMD pass with no output materialization, and skipped
+// for a chunk whose filter-gain bound cannot beat the running peak), then stores
 // the last tapsPerPhase-1 samples as history for the next batch.
 func (t *truePeakChannel) batch(sig []float32) {
 	// Raw sample peak (vectorized), so the estimate never under-reports the input.
-	if pk := simdf32.MaxAbs(sig[tapsPerPhase-1:]); pk > t.maxAbs {
+	// The history part is already counted, so scanning all of sig changes nothing
+	// and yields the window maximum the skip test below needs.
+	pk := simdf32.MaxAbs(sig)
+	if pk > t.maxAbs {
 		t.maxAbs = pk
 	}
 	// Oversampled peak: the max across all 4 polyphase branches in one fused pass
-	// (dedicated SIMD kernel, no output materialization, signal read once).
-	if pk := simdf32.ConvolveValidMaxAbsMulti(sig, tpKernelsRev); pk > t.maxAbs {
-		t.maxAbs = pk
+	// (dedicated SIMD kernel, no output materialization, signal read once). Skipped
+	// when the filter's gain bound shows this chunk cannot beat the running peak,
+	// which is most chunks of a quiet bed under an earlier loud event; the result
+	// is unchanged because a skipped chunk could not have raised maxAbs.
+	if pk*tpGain > t.maxAbs {
+		if op := simdf32.ConvolveValidMaxAbsMulti(sig, tpKernelsRev); op > t.maxAbs {
+			t.maxAbs = op
+		}
 	}
 	copy(t.hist[:], sig[len(sig)-(tapsPerPhase-1):])
 }
