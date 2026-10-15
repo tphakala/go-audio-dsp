@@ -569,8 +569,8 @@ func TestPlanBytesGateSolveClamped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !plan.Clamped || plan.GainDB != 10 || plan.PlannedGainDB <= 10 {
-		t.Errorf("plan %+v, want a clamp to 10 dB", plan)
+	if !plan.Clamped || plan.GainDB != 10 || plan.PlannedGainDB <= plan.Result.GainDB+1 {
+		t.Errorf("plan %+v, want a clamp to 10 dB of a gain the gate correction raised above the linear one", plan)
 	}
 }
 
@@ -640,5 +640,100 @@ func TestNormalizeInt16QuietBedLandsOnTarget(t *testing.T) {
 	}
 	if math.Abs(res.OutputLUFS-got.IntegratedLUFS) > 0.1 {
 		t.Errorf("Result.OutputLUFS %.2f, measured %.2f", res.OutputLUFS, got.IntegratedLUFS)
+	}
+}
+
+// TestPlanBytesCorrectsAttenuationAcrossTheGate pins the attenuation side of the
+// gate correction: at a -69 LUFS target the cut drops the quiet bulk of a clip
+// under the absolute gate, so the linear plan leaves it too loud.
+func TestPlanBytesCorrectsAttenuationAcrossTheGate(t *testing.T) {
+	pcm := sineInt16(-60.5, 1000, 18, planTestRate)
+	pcm = append(pcm, sineInt16(-54, 1000, 2, planTestRate)...)
+	opts := planOpts(planTestRate, 1, false)
+	opts.TargetLUFS = -69
+	plan, err := PlanBytes(t.Context(), bytesLE(pcm), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.PlannedGainDB >= plan.Result.GainDB-2 || plan.Clamped || plan.PeakLimited {
+		t.Fatalf("plan %+v, want a deeper cut than the linear gain", plan)
+	}
+	out := slices.Clone(pcm)
+	pcmScale(t, out, plan.GainDB)
+	got, err := MeasureInt16(out, planTestRate, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(got.IntegratedLUFS-(-69)) > 0.5 {
+		t.Errorf("cut by %.2f dB leaves the clip at %.2f LUFS, want -69 +/-0.5", plan.GainDB, got.IntegratedLUFS)
+	}
+}
+
+// TestPlanBytesFallbackReportsPeakLimit pins Plan.PeakLimited on the gate fallback
+// path: a sub-gate clip with one sharp sample is lifted into the true-peak
+// ceiling, which Result (the pass-one plan) cannot report.
+func TestPlanBytesFallbackReportsPeakLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		spike int16
+		want  bool
+	}{{"flat bed", 0, false}, {"sharp sample", 20, true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			pcm := quietBedWithBurst(20, 0.3, -90, 1)
+			if tc.spike != 0 {
+				pcm[len(pcm)/2+50] = tc.spike
+			}
+			plan, err := PlanBytes(t.Context(), bytesLE(pcm), planOpts(planTestRate, 1, true))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !plan.GateLifted || plan.Result.PeakLimited || plan.PeakLimited != tc.want {
+				t.Fatalf("plan %+v, want GateLifted with PeakLimited %v and Result.PeakLimited false", plan, tc.want)
+			}
+		})
+	}
+}
+
+// TestSolveGateAwareGainDBConverges runs the solver over a grid of quiet beds under
+// a call and checks, on the block energies, that the solved gain leaves under
+// 0.05 dB of correction unless the ceiling limits it, and is never worse than the
+// linear gain it started from.
+func TestSolveGateAwareGainDBConverges(t *testing.T) {
+	opts := planOpts(planTestRate, 1, false).Options
+	checked := 0
+	for _, secs := range []float64{6, 20} {
+		for _, burst := range []float64{-70, -65, -60, -55, -50} {
+			for _, bed := range []int{2, 5, 8, 12, 24} {
+				m := NewMeter(planTestRate, 1)
+				m.AddInt16(quietBedWithBurst(secs, 1.5, burst, bed))
+				start := PlanGain(result(m), opts)
+				if math.IsInf(start.Input.IntegratedLUFS, -1) {
+					continue
+				}
+				residual := func(g float64) float64 {
+					return math.Abs(PlanGain(Measurement{IntegratedLUFS: m.loudnessAtGain(g), TruePeakDBTP: m.TruePeakDBTP() + g}, opts).GainDB)
+				}
+				got, limited := solveGateAwareGainDB(m, start.GainDB, opts)
+				if r := residual(got); r > residual(start.GainDB) || (r > 0.05 && !limited) {
+					t.Errorf("secs %v burst %v bed %d: solved %.3f dB leaves %.3f dB (start %.3f dB left %.3f dB), limited %v", secs, burst, bed, got, r, start.GainDB, residual(start.GainDB), limited)
+				}
+				checked++
+			}
+		}
+	}
+	if checked < 30 {
+		t.Fatalf("only %d fixtures measured", checked)
+	}
+}
+
+// TestSolveGateAwareGainDBSilence pins the exit on a trial with no finite
+// loudness: a silent clip keeps the gain it was given and reports no peak limit.
+func TestSolveGateAwareGainDBSilence(t *testing.T) {
+	m := NewMeter(planTestRate, 1)
+	m.AddInt16(make([]int16, 2*planTestRate))
+	for _, planned := range []float64{0, 12} {
+		if got, limited := solveGateAwareGainDB(m, planned, planOpts(planTestRate, 1, false).Options); got != planned || limited {
+			t.Errorf("silent clip planned %v: got (%v, %v), want the gain unchanged and not limited", planned, got, limited)
+		}
 	}
 }
