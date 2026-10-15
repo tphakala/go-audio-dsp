@@ -146,86 +146,67 @@ func (m *Meter) Reset() {
 // length must be a multiple of the channel count; any trailing partial frame is
 // ignored. Samples are narrowed to float32 internally (lossless for audio in
 // [-1, 1]).
-func (m *Meter) AddFloat64(interleaved []float64) {
-	frames := len(interleaved) / m.channels
-	if frames == 0 {
-		return
-	}
-	for i := range frames {
-		base := i * m.channels
-		for c := range m.channels {
-			m.kweight(c, float32(interleaved[base+c]))
-		}
-		m.advanceFrame()
-	}
-	for c := range m.channels {
-		for pos := 0; pos < frames; pos += tpChunk {
-			n := min(tpChunk, frames-pos)
-			dst := m.tpChunkStart(c, n)
-			for i := range n {
-				dst[i] = float32(interleaved[(pos+i)*m.channels+c])
-			}
-			m.tpChunkEnd(c, n)
-		}
-	}
-}
+func (m *Meter) AddFloat64(interleaved []float64) { addSamples(m, interleaved, 1) }
 
 // AddFloat32 feeds interleaved float32 samples, the native BirdNET-Go format.
-func (m *Meter) AddFloat32(interleaved []float32) {
-	frames := len(interleaved) / m.channels
-	if frames == 0 {
-		return
-	}
-	for i := range frames {
-		base := i * m.channels
-		for c := range m.channels {
-			m.kweight(c, interleaved[base+c])
-		}
-		m.advanceFrame()
-	}
-	for c := range m.channels {
-		for pos := 0; pos < frames; pos += tpChunk {
-			n := min(tpChunk, frames-pos)
-			dst := m.tpChunkStart(c, n)
-			for i := range n {
-				dst[i] = interleaved[(pos+i)*m.channels+c]
-			}
-			m.tpChunkEnd(c, n)
-		}
-	}
-}
+func (m *Meter) AddFloat32(interleaved []float32) { addSamples(m, interleaved, 1) }
 
 // AddInt16 feeds interleaved 16-bit PCM, converting inline with the 1/32768
 // convention (exact in float32, a power of two).
-func (m *Meter) AddInt16(interleaved []int16) {
-	const scale = float32(1.0 / 32768.0)
-	frames := len(interleaved) / m.channels
+func (m *Meter) AddInt16(interleaved []int16) { addSamples(m, interleaved, 1.0/32768.0) }
+
+// sample is the set of PCM sample types the meter accepts. Each underlying type
+// gets its own instantiation, so the conversions below compile to straight-line
+// code rather than dictionary calls.
+type sample interface{ ~int16 | ~float32 | ~float64 }
+
+// addSamples is the one feed loop behind the three Add* entry points: scale is
+// 1/32768 for int16 and 1 (an exact float32 multiply) otherwise. Frames are
+// consumed in runs that end at sub-block boundaries, and each channel's K-weighting
+// cascade runs over its run with the filter state held in locals (see kweightRun),
+// so the recurrence does not round-trip through memory on every sample.
+func addSamples[T sample](m *Meter, interleaved []T, scale float32) {
+	stride := m.channels
+	frames := len(interleaved) / stride
 	if frames == 0 {
 		return
 	}
-	for i := range frames {
-		base := i * m.channels
-		for c := range m.channels {
-			m.kweight(c, float32(interleaved[base+c])*scale)
+	for i := 0; i < frames; {
+		n := min(frames-i, m.subBlockSize-m.accumLen)
+		for c := range stride {
+			kweightRun(&m.stage1[c], &m.stage2[c], m.accum[c][m.accumLen:m.accumLen+n], interleaved[i*stride+c:], stride, scale)
 		}
-		m.advanceFrame()
+		i += n
+		m.accumLen += n
+		if m.accumLen == m.subBlockSize {
+			for c := range stride {
+				m.subEnergy[c] = append(m.subEnergy[c], simdf32.SumOfSquares(m.accum[c]))
+			}
+			m.accumLen = 0
+		}
 	}
-	for c := range m.channels {
+	for c := range stride {
 		for pos := 0; pos < frames; pos += tpChunk {
 			n := min(tpChunk, frames-pos)
 			dst := m.tpChunkStart(c, n)
 			for i := range n {
-				dst[i] = float32(interleaved[(pos+i)*m.channels+c]) * scale
+				dst[i] = float32(interleaved[(pos+i)*stride+c]) * scale
 			}
 			m.tpChunkEnd(c, n)
 		}
 	}
 }
 
-// kweight runs one sample of channel c through the K-weighting cascade, storing
-// the weighted result in the current sub-block accumulator.
-func (m *Meter) kweight(c int, x float32) {
-	m.accum[c][m.accumLen] = m.stage2[c].process(m.stage1[c].process(x))
+// kweightRun runs len(dst) samples of one channel, read from src at the given
+// interleave stride, through the two K-weighting stages and stores the weighted
+// samples in dst. The stages run on local copies of their state, written back at
+// the end; the arithmetic is identical to calling process per sample.
+func kweightRun[T sample](s1, s2 *biquadState, dst []float32, src []T, stride int, scale float32) {
+	a, b := *s1, *s2
+	for j := range dst {
+		dst[j] = b.process(a.process(float32(src[j*stride]) * scale))
+	}
+	*s1, *s2 = a, b
 }
 
 // tpChunkStart copies channel c's carried-over history into the shared true-peak
@@ -238,17 +219,6 @@ func (m *Meter) tpChunkStart(c, n int) []float32 {
 // tpChunkEnd runs the fused oversampling peak detection over the filled buffer.
 func (m *Meter) tpChunkEnd(c, n int) {
 	m.tp[c].batch(m.tpSig[:tapsPerPhase-1+n])
-}
-
-// advanceFrame closes the current sub-block when it fills, recording its energy.
-func (m *Meter) advanceFrame() {
-	m.accumLen++
-	if m.accumLen == m.subBlockSize {
-		for c := range m.channels {
-			m.subEnergy[c] = append(m.subEnergy[c], simdf32.SumOfSquares(m.accum[c]))
-		}
-		m.accumLen = 0
-	}
 }
 
 // blockEnergies returns the per-gating-block weighted mean-square energy z_j
