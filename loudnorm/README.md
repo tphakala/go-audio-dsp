@@ -100,7 +100,7 @@ result equals a one-shot measurement exactly. `ctx` is checked between chunks
 (about 4 ms of work each on a Raspberry Pi 5) and its error is returned as is.
 Measured on a Raspberry Pi 5, a 5-minute 48 kHz mono clip plans in about 0.8 s,
 or 1.7 s when the gate fallback re-measures. `MeasureBytes` uses the same
-read-only chunked decode. Loudness gating is not linear in gain: a boost lifts quiet blocks from under the -70 LUFS absolute gate to over it. `PlanBytes` solves the gain from the measured block energies, with no further pass over the audio, so a quiet bed under a call lands on the target instead of several LU below it. `PlanClampedGainBytes` is gone: use `PlanBytes` with
+read-only chunked decode. Loudness gating is not linear in gain: a boost lifts quiet blocks from under the -70 LUFS absolute gate to over it. `PlanBytes` and the `Normalize` functions solve the gain from the measured block energies with no further pass over the audio, so a quiet bed under a call lands on the target instead of several LU below it; a clip the gate fallback lifts is re-measured instead. `PlanClampedGainBytes` is gone: use `PlanBytes` with
 `GateFallback: false`.
 
 ## Performance
