@@ -35,7 +35,7 @@ func newCoeffs(b Band, sampleRate int) (coeffs, error) {
 	if !(b.Frequency > 0 && b.Frequency < nyquist) {
 		return coeffs{}, fmt.Errorf("%w: Frequency must be in (0, %g), got %g", ErrInvalidConfig, nyquist, b.Frequency)
 	}
-	if b.Type.usesGain() && (math.IsNaN(b.GainDB) || math.IsInf(b.GainDB, 0)) {
+	if b.Type.UsesGain() && (math.IsNaN(b.GainDB) || math.IsInf(b.GainDB, 0)) {
 		return coeffs{}, fmt.Errorf("%w: GainDB must be finite, got %g", ErrInvalidConfig, b.GainDB)
 	}
 
@@ -49,7 +49,7 @@ func newCoeffs(b Band, sampleRate int) (coeffs, error) {
 	}
 
 	a := 1.0
-	if b.Type.usesGain() {
+	if b.Type.UsesGain() {
 		a = math.Pow(10, b.GainDB/40)
 	}
 
@@ -103,7 +103,7 @@ func newCoeffs(b Band, sampleRate int) (coeffs, error) {
 // alpha returns the RBJ intermediate alpha, from Q for the Q-parameterized types
 // and from WidthHz (converted to octaves) for the width-parameterized types.
 func (b Band) alpha(w0, sw float64) (float64, error) {
-	if b.Type.usesWidth() {
+	if b.Type.UsesWidth() {
 		if !(b.WidthHz > 0) {
 			return 0, fmt.Errorf("%w: WidthHz must be > 0 for a %s filter, got %g", ErrInvalidConfig, b.Type, b.WidthHz)
 		}

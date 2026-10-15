@@ -98,3 +98,60 @@ func TestPassesZeroMeansOne(t *testing.T) {
 		}
 	}
 }
+
+// TestFilterTypeUses pins the exported Uses* methods to what newCoeffs actually
+// reads: a field is used exactly when breaking it makes a valid band fail.
+func TestFilterTypeUses(t *testing.T) {
+	const rate = 48000
+	cases := []struct {
+		typ            FilterType
+		width, q, gain bool
+	}{
+		{LowPass, false, true, false},
+		{HighPass, false, true, false},
+		{AllPass, false, true, false},
+		{BandPass, true, false, false},
+		{BandReject, true, false, false},
+		{LowShelf, false, true, true},
+		{HighShelf, false, true, true},
+		{Peaking, true, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.typ.String(), func(t *testing.T) {
+			good := Band{Type: tc.typ, Frequency: 1000, Q: 0.7, WidthHz: 200, GainDB: 3}
+			if _, err := newCoeffs(good, rate); err != nil {
+				t.Fatalf("baseline band rejected: %v", err)
+			}
+			breakQ, breakWidth, breakGain := good, good, good
+			breakQ.Q = 0
+			breakWidth.WidthHz = 0
+			breakGain.GainDB = math.NaN()
+			for _, probe := range []struct {
+				field string
+				band  Band
+				uses  bool
+				want  bool
+			}{
+				{"Q", breakQ, tc.typ.UsesQ(), tc.q},
+				{"Width", breakWidth, tc.typ.UsesWidth(), tc.width},
+				{"Gain", breakGain, tc.typ.UsesGain(), tc.gain},
+			} {
+				_, err := newCoeffs(probe.band, rate)
+				if rejected := errors.Is(err, dsp.ErrInvalidConfig); rejected != probe.want {
+					t.Errorf("%s: newCoeffs rejects a broken %s field = %v, want %v", tc.typ, probe.field, rejected, probe.want)
+				}
+				if probe.uses != probe.want {
+					t.Errorf("%s: Uses%s() = %v, want %v", tc.typ, probe.field, probe.uses, probe.want)
+				}
+			}
+		})
+	}
+}
+
+func TestFilterTypeUsesUnknown(t *testing.T) {
+	for _, typ := range []FilterType{0, -1, Peaking + 1} {
+		if typ.UsesQ() || typ.UsesWidth() || typ.UsesGain() {
+			t.Errorf("%v: unknown type reports a used field", typ)
+		}
+	}
+}

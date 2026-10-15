@@ -41,6 +41,8 @@ a `WidthHz` so wide that the lower band edge reaches 0 Hz is rejected rather tha
 clamped. Parameters that would produce non-finite or unstable coefficients (for
 example a filter placed too close to Nyquist) are rejected at construction.
 
+`FilterType.UsesQ`, `UsesWidth` and `UsesGain` report which fields a type reads, so a caller mapping its own settings onto `Band` need not keep a copy of this table.
+
 ## Frequency response
 
 `Response` returns the magnitude (dB) and phase (rad) at each requested
