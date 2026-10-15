@@ -132,8 +132,9 @@ length, so memory does not scale with input size.
 2. **Gated integrated loudness**: 400 ms blocks at 75% overlap, absolute gate at
    -70 LUFS and relative gate at -10 LU below the gated mean.
 3. **True peak** via 4x Kaiser-windowed polyphase oversampling, in dBTP.
-4. **Linear gain** `target - measured`, reduced if needed to keep the true peak
-   at or below the ceiling.
+4. **Linear gain** `target - measured`, corrected for quiet blocks the boost lifts
+   over the absolute gate and reduced if needed to keep the true peak at or below
+   the ceiling.
 
 ## Correctness
 
