@@ -60,8 +60,8 @@ func (t FilterType) UsesWidth() bool {
 }
 
 // UsesQ reports whether the type takes its bandwidth from Band.Q rather than
-// from Band.WidthHz. It is false for an unknown type, so for every type exactly
-// one of UsesQ and UsesWidth is true when the type is valid.
+// from Band.WidthHz. Every valid type uses exactly one of the two; an unknown
+// type uses neither.
 func (t FilterType) UsesQ() bool { return t.valid() && !t.UsesWidth() }
 
 // UsesGain reports whether the type applies Band.GainDB. It is false for an
