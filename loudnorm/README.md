@@ -54,6 +54,12 @@ opts.TargetLUFS = -16 // louder target for streaming/playback
 _, err := loudnorm.NormalizeFloat32(pcmFloat32, opts)
 ```
 
+`loudnorm.AbsoluteGateLUFS` (-70) and `loudnorm.MinSampleRate` (8000) are
+exported, and `loudnorm.ValidateTargets(targetLUFS, truePeakDBTP)` applies the
+same target and ceiling rules as the options validation, returning
+`ErrTargetOutOfRange` or `ErrCeilingInvalid`, so a caller can tell a bad target
+from an unmeasurable clip.
+
 Measurement only (no modification):
 
 ```go

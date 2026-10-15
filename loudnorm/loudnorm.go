@@ -247,12 +247,31 @@ func ClampGainDB(gainDB, maxAbsDB float64) (clamped float64, limited bool) {
 // error otherwise.
 func validateDims(sampleRate, channels, n int) error {
 	switch {
-	case sampleRate < minSampleRate:
-		return fmt.Errorf("%w: %d Hz, minimum is %d Hz (K-weighting is undefined below it)", ErrSampleRateTooLow, sampleRate, minSampleRate)
+	case sampleRate < MinSampleRate:
+		return fmt.Errorf("%w: %d Hz, minimum is %d Hz (K-weighting is undefined below it)", ErrSampleRateTooLow, sampleRate, MinSampleRate)
 	case channels <= 0:
 		return fmt.Errorf("%w: channels must be positive, got %d", ErrInvalidChannels, channels)
 	case n%channels != 0:
 		return fmt.Errorf("%w: sample count %d is not a multiple of channels %d", ErrLengthNotMultiple, n, channels)
+	}
+	return nil
+}
+
+// ValidateTargets reports whether a target loudness and true-peak ceiling are
+// usable: the target must be finite and in (AbsoluteGateLUFS, 0), the ceiling
+// finite and <= 0. The error wraps ErrTargetOutOfRange or ErrCeilingInvalid.
+// Options.validate applies the same rules, so a caller can tell a bad target
+// from an unmeasurable clip without duplicating them.
+func ValidateTargets(targetLUFS, truePeakDBTP float64) error {
+	switch {
+	case math.IsNaN(targetLUFS) || math.IsInf(targetLUFS, 0):
+		return fmt.Errorf("%w: target loudness must be finite, got %v", ErrTargetOutOfRange, targetLUFS)
+	case targetLUFS >= 0 || targetLUFS <= AbsoluteGateLUFS:
+		return fmt.Errorf("%w: %.2f LUFS not in (%.0f, 0)", ErrTargetOutOfRange, targetLUFS, AbsoluteGateLUFS)
+	case math.IsNaN(truePeakDBTP) || math.IsInf(truePeakDBTP, 0):
+		return fmt.Errorf("%w: true-peak ceiling must be finite, got %v", ErrCeilingInvalid, truePeakDBTP)
+	case truePeakDBTP > 0:
+		return fmt.Errorf("%w: %.2f dBTP must be <= 0", ErrCeilingInvalid, truePeakDBTP)
 	}
 	return nil
 }
@@ -263,15 +282,5 @@ func (o Options) validate(n int) error {
 	if err := validateDims(o.SampleRate, o.Channels, n); err != nil {
 		return err
 	}
-	switch {
-	case math.IsNaN(o.TargetLUFS) || math.IsInf(o.TargetLUFS, 0):
-		return fmt.Errorf("%w: target loudness must be finite, got %v", ErrTargetOutOfRange, o.TargetLUFS)
-	case o.TargetLUFS >= 0 || o.TargetLUFS <= absoluteGateLUFS:
-		return fmt.Errorf("%w: %.2f LUFS not in (%.0f, 0)", ErrTargetOutOfRange, o.TargetLUFS, absoluteGateLUFS)
-	case math.IsNaN(o.TruePeakDBTP) || math.IsInf(o.TruePeakDBTP, 0):
-		return fmt.Errorf("%w: true-peak ceiling must be finite, got %v", ErrCeilingInvalid, o.TruePeakDBTP)
-	case o.TruePeakDBTP > 0:
-		return fmt.Errorf("%w: %.2f dBTP must be <= 0", ErrCeilingInvalid, o.TruePeakDBTP)
-	}
-	return nil
+	return ValidateTargets(o.TargetLUFS, o.TruePeakDBTP)
 }
