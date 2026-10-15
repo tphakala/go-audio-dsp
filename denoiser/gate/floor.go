@@ -52,6 +52,7 @@ type floorTracker struct {
 	hist                    []uint16  // bins*nb: per-bin bucket counts over the window
 	level                   []float32 // nb: bucket-centre power * (1/ln2), precomputed
 	logp                    []float32 // bins: log10(power) scratch for one push
+	bkt                     []uint8   // bins: quantized bucket scratch for one push
 	noise                   []float32 // bins: the published floor the Gate reads
 	upper                   []float32 // bins: optional upper bound on noise; nil when unbounded
 
@@ -76,6 +77,7 @@ func newFloorTracker(bins, window, every int) *floorTracker {
 		hist:   make([]uint16, bins*floorBuckets),
 		level:  make([]float32, floorBuckets),
 		logp:   make([]float32, bins),
+		bkt:    make([]uint8, bins),
 		noise:  make([]float32, bins),
 		med:    make([]int, bins),
 		below:  make([]int, bins),
@@ -108,19 +110,16 @@ func (t *floorTracker) push(power []float32) {
 	f32.Log10Floored(t.logp, power, epsPower) // one SIMD pass; floors at epsPower (no -Inf)
 	full := t.filled == t.window
 	base := t.head * t.bins
+	// One SIMD pass quantizes every bin. A NaN or +Inf power (log10 gives NaN / +Inf)
+	// lands in bucket 0 rather than being skipped. Skipping while still advancing
+	// head would leave this bin's ring slot holding a stale bucket; window frames
+	// later the eviction would decrement a count that was never incremented and
+	// underflow the uint16, corrupting the bin's median. Coercing keeps
+	// sum(hist)==filled per bin. The scratch is separate from the ring because the
+	// evicted bucket is read from the ring slot before it is overwritten.
+	f32.Float32ToUint8Bucket(t.bkt, t.logp, floorQuantScale, floorQuantOffset, t.nb)
 	for k := range t.bins {
-		lp := t.logp[k]
-		var b int
-		// A NaN or +Inf power (log10 gives NaN / +Inf) is coerced to bucket 0 rather
-		// than skipped. Skipping while still advancing head would leave this bin's
-		// ring slot holding a stale bucket; window frames later the eviction would
-		// decrement a count that was never incremented and underflow the uint16,
-		// corrupting the bin's median. Coercing keeps sum(hist)==filled per bin.
-		if lp != lp || math.IsInf(float64(lp), 1) {
-			b = 0
-		} else {
-			b = min(max(int(float64(lp)*floorQuantScale+floorQuantOffset), 0), t.nb-1)
-		}
+		b := int(t.bkt[k])
 		// Keep below[k] == sum(hist[k][0..med[k]-1]) as the window slides. med[k] is
 		// frozen here (only publish moves it), so a bucket entering or leaving strictly
 		// below the frozen median shifts the count by one; publish then rebalances the
