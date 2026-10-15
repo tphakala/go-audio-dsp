@@ -239,18 +239,31 @@ func (m *Meter) blockEnergies() []float32 {
 // or entirely below the absolute gate (silence). Per-block energies are
 // computed in float32; the gate sums accumulate in float64 so precision holds
 // on very long inputs, with the final dB conversion in float64.
-func (m *Meter) IntegratedLoudness() float64 {
+func (m *Meter) IntegratedLoudness() float64 { return m.loudnessAtGain(0) }
+
+// loudnessAtGain returns the gated integrated loudness the measured signal would
+// have after a gain of gainDB, from the stored block energies and without reading
+// any audio. The K-weighting filter is linear, so each block energy scales by
+// 10^(gainDB/10); the gates do not scale with it, which is what makes loudness
+// non-linear in gain: a boost lifts blocks over the absolute gate, an attenuation
+// drops them under it. At 0 dB it is IntegratedLoudness exactly.
+func (m *Meter) loudnessAtGain(gainDB float64) float64 {
 	z := m.blockEnergies()
 	if len(z) == 0 {
 		return math.Inf(-1)
 	}
+	scale := 1.0
+	if gainDB != 0 {
+		scale = math.Pow(10, gainDB/10)
+	}
+	absGate := float64(absGateEnergy)
 
 	// Absolute gate at -70 LUFS (z > absGateEnergy).
 	var sumAbs float64
 	var cntAbs int
 	for _, zj := range z {
-		if zj > absGateEnergy {
-			sumAbs += float64(zj)
+		if e := float64(zj) * scale; e > absGate {
+			sumAbs += e
 			cntAbs++
 		}
 	}
@@ -263,8 +276,8 @@ func (m *Meter) IntegratedLoudness() float64 {
 	var sumRel float64
 	var cntRel int
 	for _, zj := range z {
-		if zj > absGateEnergy && float64(zj) > relGate {
-			sumRel += float64(zj)
+		if e := float64(zj) * scale; e > absGate && e > relGate {
+			sumRel += e
 			cntRel++
 		}
 	}

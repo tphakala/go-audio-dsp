@@ -46,6 +46,11 @@ type Plan struct {
 	// GateLifted reports whether the clip sat under the absolute gate and the
 	// gate fallback (and its refinement) decided PlannedGainDB.
 	GateLifted bool
+	// PeakLimited reports whether the true-peak ceiling limited PlannedGainDB. It
+	// is Result.PeakLimited for the pass-one plan, and the final pass's verdict
+	// when a refinement (the gate fallback or the gate-crossing correction)
+	// replaced it, which Result does not carry.
+	PeakLimited bool
 	// Clamped reports whether the clamp changed the gain.
 	Clamped bool
 }
@@ -74,6 +79,13 @@ type Plan struct {
 // somewhere audible. A clip that is still under the gate after the lift keeps
 // the conservative lift. Plan.GateLifted reports the fallback. This extra pass
 // runs only for sub-gate clips.
+//
+// Loudness gating is not linear in gain either: a boost can lift quiet blocks
+// from under the absolute gate to over it, and the boosted clip is then quieter
+// than the unboosted measurement plus the gain says. When the planned boost would
+// do that, the gain is corrected from the block energies of the one measuring pass,
+// so a clip with a quiet bed under a call lands on the target instead of several
+// LU below it, at no extra pass over the audio.
 //
 // Plan.PlannedGainDB is the gain before the clamp and Plan.GainDB the gain to
 // apply; Plan.Result.OutputLUFS and TargetGainDB project the pre-fallback,
@@ -112,9 +124,10 @@ func PlanBytes(ctx context.Context, b []byte, opts PlanOptions) (Plan, error) {
 
 	plan := Plan{Result: PlanGain(meas, opts.Options)}
 	planned := plan.Result.GainDB
+	plan.PeakLimited = plan.Result.PeakLimited
 	if opts.GateFallback {
 		if lift, ok := GateFallbackGainDB(meas, opts.TargetLUFS, opts.TruePeakDBTP); ok {
-			refined, err := refineLiftedGainDB(ctx, m, b, lift, opts.Options)
+			refined, limited, err := refineLiftedGainDB(ctx, m, b, lift, opts.Options)
 			if err != nil {
 				return Plan{}, err
 			}
@@ -124,8 +137,12 @@ func PlanBytes(ctx context.Context, b []byte, opts PlanOptions) (Plan, error) {
 			// which point it can be measured: add the refinement from that real
 			// measurement so a very quiet clip lands on target.
 			planned = lift + refined
+			plan.PeakLimited = limited
 			plan.GateLifted = true
 		}
+	}
+	if !plan.GateLifted && m != nil {
+		planned, plan.PeakLimited = solveGateAwareGainDB(m, planned, plan.PeakLimited, opts.Options)
 	}
 	plan.PlannedGainDB = planned
 	plan.GainDB, plan.Clamped = ClampGainDB(planned, opts.MaxGainDB)
@@ -179,19 +196,58 @@ func GateFallbackGainDB(meas Measurement, targetLUFS, truePeakDBTP float64) (gai
 // clip.
 //
 // Once the clip is measurable a normal PlanGain finishes the job, landing it on
-// the target and respecting the true-peak ceiling. A clip still under the gate
-// after the lift yields 0, leaving the conservative lift as the final answer
-// rather than guessing. The only error is the context's.
-func refineLiftedGainDB(ctx context.Context, m *Meter, b []byte, liftDB float64, opts Options) (float64, error) {
+// the target and respecting the true-peak ceiling; peakLimited reports whether
+// the ceiling limited it. A clip still under the gate after the lift yields 0,
+// leaving the conservative lift as the final answer rather than guessing. The only
+// error is the context's.
+func refineLiftedGainDB(ctx context.Context, m *Meter, b []byte, liftDB float64, opts Options) (gainDB float64, peakLimited bool, err error) {
 	m.Reset()
 	if err := feedBytes(ctx, m, b, opts.Channels, float32(dsp.FactorFromDB(liftDB))); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	lifted := result(m)
 	if math.IsInf(lifted.IntegratedLUFS, -1) {
-		return 0, nil
+		return 0, false, nil
 	}
-	return PlanGain(lifted, opts).GainDB, nil
+	res := PlanGain(lifted, opts)
+	return res.GainDB, res.PeakLimited, nil
+}
+
+// gateSolveIters bounds the iterations of solveGateAwareGainDB. Each step costs
+// one pass over the block energies, no audio, and lands within a fraction of a dB
+// of the target, so the bound is only a backstop.
+const gateSolveIters = 8
+
+// gateSolveTolDB is the correction under which solveGateAwareGainDB stops: below
+// it the plan is as accurate as the meter.
+const gateSolveTolDB = 0.005
+
+// solveGateAwareGainDB corrects a planned gain for loudness gating. PlanGain
+// assumes loudness moves one for one with gain, but the gates are fixed levels: a
+// boost lifts quiet blocks from under the -70 LUFS absolute gate to over it, which
+// adds them to the integrated loudness, and the boosted clip lands under the
+// target (4 to 7 LU on a quiet bed under a call; ffmpeg loudnorm does the same).
+// An attenuation drops blocks under the gate the same way. m holds the
+// measurement of the unscaled clip and planned the gain PlanGain chose for it.
+//
+// The loudness at a trial gain follows from the stored block energies
+// (loudnessAtGain) and the true peak from the measured one plus the gain, so each
+// iteration re-plans with PlanGain on the loudness and peak the clip would have at
+// the current gain and adds the correction, until it is below gateSolveTolDB or
+// gateSolveIters have run. A clip no block of which crosses a gate needs no
+// correction and keeps planned unchanged. limited reports whether the true-peak
+// ceiling limited the final plan, starting from peakLimited.
+func solveGateAwareGainDB(m *Meter, planned float64, peakLimited bool, opts Options) (gainDB float64, limited bool) {
+	peak := m.TruePeakDBTP()
+	for range gateSolveIters {
+		res := PlanGain(Measurement{IntegratedLUFS: m.loudnessAtGain(planned), TruePeakDBTP: peak + planned}, opts)
+		peakLimited = res.PeakLimited
+		if math.Abs(res.GainDB) < gateSolveTolDB {
+			break
+		}
+		planned += res.GainDB
+	}
+	return planned, peakLimited
 }
 
 // feedBytes feeds m the little-endian int16 PCM in b, scaled by factor, without

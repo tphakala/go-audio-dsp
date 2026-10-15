@@ -289,7 +289,7 @@ func boundOf(p Plan) string {
 		return "gate-lift"
 	case p.Clamped:
 		return "clamp"
-	case p.Result.PeakLimited:
+	case p.PeakLimited:
 		return "peak"
 	case math.IsInf(p.Result.Input.IntegratedLUFS, -1):
 		return "silent"

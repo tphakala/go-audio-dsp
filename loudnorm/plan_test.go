@@ -471,3 +471,135 @@ func TestMeasureBytesFrameWiderThanChunk(t *testing.T) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
 }
+
+// quietBedWithBurst is a bed of +/-2 LSB noise (about -89 LUFS, under the absolute
+// gate) with a short tone burst in the middle. Planned from its measurement, which
+// sees only the burst blocks, the gain lifts the whole bed above the gate.
+func quietBedWithBurst(seconds, burstSeconds, burstDBFS float64, bedLSB int) []int16 {
+	r := rand.New(rand.NewPCG(7, 11))
+	n := int(seconds * planTestRate)
+	pcm := make([]int16, n)
+	for i := range pcm {
+		pcm[i] = int16(r.IntN(2*bedLSB+1) - bedLSB)
+	}
+	tone := sineInt16(burstDBFS, 1000, burstSeconds, planTestRate)
+	copy(pcm[n/2:], tone)
+	return pcm
+}
+
+// TestPlanBytesAccountsForBlocksLiftedAcrossTheGate pins that a boost which lifts
+// quiet blocks over the absolute gate is planned from the loudness the boosted clip
+// will really have. Gating is not linear in gain: planning target - I from the
+// unboosted measurement left such a clip about 20 LU under the target.
+func TestPlanBytesAccountsForBlocksLiftedAcrossTheGate(t *testing.T) {
+	pcm := quietBedWithBurst(20, 2, -60, 8)
+	b := bytesLE(pcm)
+	plan, err := PlanBytes(t.Context(), b, planOpts(planTestRate, 1, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.PeakLimited || plan.Clamped || plan.GateLifted {
+		t.Fatalf("fixture must be unbound, got %+v", plan)
+	}
+	g, err := gain.New(plan.GainDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := slices.Clone(b)
+	if err := g.ApplyBytes(out); err != nil {
+		t.Fatal(err)
+	}
+	got, err := MeasureBytes(out, planTestRate, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(got.IntegratedLUFS-(-23)) > 0.5 {
+		t.Errorf("planned gain %.2f dB leaves the clip at %.2f LUFS, want -23 +/-0.5", plan.GainDB, got.IntegratedLUFS)
+	}
+	if got.TruePeakDBTP > -2+0.1 {
+		t.Errorf("true peak %.2f dBTP above the -2 ceiling", got.TruePeakDBTP)
+	}
+}
+
+// TestLoudnessAtGainMatchesScaledMeasurement checks the block-energy solver
+// against measuring the actually scaled audio, across a boost that lifts the bed
+// over the absolute gate, no change, and an attenuation.
+func TestLoudnessAtGainMatchesScaledMeasurement(t *testing.T) {
+	pcm := quietBedWithBurst(20, 2, -60, 8)
+	m := NewMeter(planTestRate, 1)
+	m.AddInt16(pcm)
+	if got, want := m.loudnessAtGain(0), m.IntegratedLoudness(); got != want {
+		t.Fatalf("loudnessAtGain(0) = %v, IntegratedLoudness = %v", got, want)
+	}
+	for _, g := range []float64{-6, 10, 25, 33, 41} {
+		scaled := slices.Clone(pcm)
+		pcmScale(t, scaled, g)
+		want, err := MeasureInt16(scaled, planTestRate, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := m.loudnessAtGain(g); math.Abs(got-want.IntegratedLUFS) > 0.1 { // the scaled clip is rounded to int16, which a +/-8 LSB bed feels
+			t.Errorf("gain %+.0f dB: block energies give %.3f LUFS, measuring the scaled clip %.3f", g, got, want.IntegratedLUFS)
+		}
+	}
+}
+
+// pcmScale applies gainDB to pcm the way gain.ApplyBytes does.
+func pcmScale(t *testing.T, pcm []int16, gainDB float64) {
+	t.Helper()
+	g, err := gain.New(gainDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := bytesLE(pcm)
+	if err := g.ApplyBytes(b); err != nil {
+		t.Fatal(err)
+	}
+	for i := range pcm {
+		pcm[i] = int16(uint16(b[2*i]) | uint16(b[2*i+1])<<8)
+	}
+}
+
+// TestPlanBytesGateSolveClamped pins that a boost the clamp cuts anyway
+// still reports the clamp and applies the clamped gain.
+func TestPlanBytesGateSolveClamped(t *testing.T) {
+	opts := planOpts(planTestRate, 1, false)
+	opts.MaxGainDB = 10
+	plan, err := PlanBytes(t.Context(), bytesLE(quietBedWithBurst(20, 2, -60, 8)), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Clamped || plan.GainDB != 10 || plan.PlannedGainDB <= 10 {
+		t.Errorf("plan %+v, want a clamp to 10 dB", plan)
+	}
+}
+
+// TestPlanBytesReportsPeakLimitFromRefinement pins Plan.PeakLimited for a clip the
+// pass-one plan leaves unlimited but the gate-crossing correction pushes into the
+// true-peak ceiling: Result.PeakLimited stays false, Plan.PeakLimited reports it.
+func TestPlanBytesReportsPeakLimitFromRefinement(t *testing.T) {
+	pcm := quietBedWithBurst(20, 2, -60, 8)
+	pcm[len(pcm)/2+100] = 200 // a click about -44 dBFS: headroom for +42 dB, not for the corrected gain
+	plan, err := PlanBytes(t.Context(), bytesLE(pcm), planOpts(planTestRate, 1, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Result.PeakLimited || !plan.PeakLimited || plan.PlannedGainDB <= plan.Result.GainDB {
+		t.Errorf("plan %+v, want a refined gain above the pass-one gain, limited by the peak", plan)
+	}
+	g, err := gain.New(plan.GainDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := bytesLE(pcm)
+	if err := g.ApplyBytes(out); err != nil {
+		t.Fatal(err)
+	}
+	got, err := MeasureBytes(out, planTestRate, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.TruePeakDBTP > -2+0.1 {
+		t.Errorf("true peak %.2f dBTP above the -2 ceiling", got.TruePeakDBTP)
+	}
+}
