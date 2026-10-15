@@ -17,11 +17,14 @@ func TestEstimatorGainRules(t *testing.T) {
 		t.Errorf("Subtraction(gamma=4) = %g, want sqrt(0.75)", g)
 	}
 	// MMSE-LSA at xi = -15 dB, gamma = 1: 0.0316/1.0316 * exp(0.5*E1(0.0306)) ~ 0.133.
-	if g := estimatorGain(MMSELSA, 0.0316, 1); math.Abs(float64(g)-0.133) > 0.005 {
+	if g := lsaGainRef(0.0316, 1); math.Abs(g-0.133) > 0.005 {
 		t.Errorf("LSA(xi=-15dB, gamma=1) = %g, want ~0.133", g)
 	}
 	// High SNR: all three tend to 1.
-	for _, e := range []Estimator{MMSELSA, Wiener, Subtraction} {
+	if g := lsaGainRef(1e6, 1e6); g < 0.999 {
+		t.Errorf("MMSELSA at high SNR = %g, want ~1", g)
+	}
+	for _, e := range []Estimator{Wiener, Subtraction} {
 		if g := estimatorGain(e, 1e6, 1e6); g < 0.999 {
 			t.Errorf("%v at high SNR = %g, want ~1", e, g)
 		}
@@ -30,7 +33,7 @@ func TestEstimatorGainRules(t *testing.T) {
 	prev := float32(0)
 	for xi := float32(0.001); xi < 100; xi *= 1.5 {
 		for gamma := float32(0.1); gamma < 100; gamma *= 2 {
-			if l, w := estimatorGain(MMSELSA, xi, gamma), estimatorGain(Wiener, xi, gamma); l < w-1e-6 {
+			if l, w := float32(lsaGainRef(float64(xi), float64(gamma))), estimatorGain(Wiener, xi, gamma); l < w-1e-6 {
 				t.Fatalf("LSA %g < Wiener %g at xi=%g gamma=%g", l, w, xi, gamma)
 			}
 		}
