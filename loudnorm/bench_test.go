@@ -41,3 +41,24 @@ func BenchmarkNormalizeInt16Mono48k(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkPlanBytes plans a 5-minute 48 kHz mono clip (28.8 MB of int16 bytes),
+// the shape of a long field recording. The sub-gate case pays the second,
+// scaled measurement pass of the gate fallback.
+func BenchmarkPlanBytes(b *testing.B) {
+	for _, c := range []struct {
+		name string
+		dbfs float64
+	}{{"measurable", -30}, {"gate-lifted", -80}} {
+		b.Run(c.name, func(b *testing.B) {
+			pcm := bytesLE(sineInt16(c.dbfs, 1000, 300, 48000))
+			opts := PlanOptions{Options: DefaultOptions(), MaxGainDB: 60, GateFallback: true}
+			b.SetBytes(int64(len(pcm)))
+			for b.Loop() {
+				if _, err := PlanBytes(b.Context(), pcm, opts); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
