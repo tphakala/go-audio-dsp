@@ -726,8 +726,8 @@ func TestSolveGateAwareGainDBConverges(t *testing.T) {
 	}
 }
 
-// TestSolveGateAwareGainDBSilence pins the exit on a trial with no finite
-// loudness: a silent clip keeps the gain it was given and reports no peak limit.
+// TestSolveGateAwareGainDBSilence pins that a silent clip keeps the gain it was
+// given and reports no peak limit.
 func TestSolveGateAwareGainDBSilence(t *testing.T) {
 	m := NewMeter(planTestRate, 1)
 	m.AddInt16(make([]int16, 2*planTestRate))
