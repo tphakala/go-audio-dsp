@@ -16,6 +16,12 @@ const epsPower = dspshared.EpsPower
 const (
 	lsaVMin = 1e-6
 	lsaVMax = 100
+
+	// lsaVUnity is where the MMSE-LSA correction exp(0.5*E1(v)) is exactly 1 in
+	// float32: E1(16) is about 7e-9, so 1+0.5*E1 rounds to 1.0 (float32 spacing at
+	// 1 is 1.2e-7) and the gain is just w. The bound is conservative: the correction
+	// already rounds to 1 from about v = 14.
+	lsaVUnity = 16
 )
 
 // gainState carries the per-bin gain parameters and the decision-directed
@@ -94,6 +100,9 @@ func estimatorGain(est Estimator, xi, gamma float32) float32 {
 		w := xi / (1 + xi)
 		v := float64(w * gamma)
 		v = min(max(v, lsaVMin), lsaVMax)
+		if v >= lsaVUnity {
+			return w // the correction is exactly 1 here, skip both exponentials
+		}
 		return w * float32(math.Exp(0.5*expint1(v)))
 	}
 }
