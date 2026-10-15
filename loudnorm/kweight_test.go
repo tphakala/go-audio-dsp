@@ -89,7 +89,7 @@ func kweightOracle(coeffs, state, x []float32) []float32 {
 		for s := range kCascadeSections {
 			b0, b1, b2, a1, a2 := coeffs[s*5], coeffs[s*5+1], coeffs[s*5+2], coeffs[s*5+3], coeffs[s*5+4]
 			st := state[s*4 : s*4+4] // x1 x2 y1 y2
-			y := float32(float32(float32(float32(float32(b0*v)+float32(b1*st[0]))+float32(b2*st[1]))-float32(a1*st[2]))-float32(a2*st[3]))
+			y := float32(float32(float32(float32(float32(b0*v)+float32(b1*st[0]))+float32(b2*st[1]))-float32(a1*st[2])) - float32(a2*st[3]))
 			st[1], st[0] = st[0], v
 			st[3], st[2] = st[2], y
 			v = y
