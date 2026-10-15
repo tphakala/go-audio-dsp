@@ -79,6 +79,30 @@ lufs := meter.IntegratedLoudness()
 tp := meter.TruePeakDBTP()
 ```
 
+## Planning a gain from bytes
+
+A caller that applies the gain itself (for example while encoding) plans it
+with `PlanBytes`, which measures int16 PCM carried as bytes, plans, optionally
+lifts a clip the absolute gate leaves unmeasured, and clamps:
+
+```go
+plan, err := loudnorm.PlanBytes(ctx, pcmBytes, loudnorm.PlanOptions{
+	Options:      loudnorm.Options{SampleRate: 48000, Channels: 1, TargetLUFS: -23, TruePeakDBTP: -2},
+	MaxGainDB:    60,
+	GateFallback: true,
+})
+// plan.GainDB is the gain to apply; plan.PlannedGainDB the gain before the clamp;
+// plan.GateLifted and plan.Clamped report what decided it.
+```
+
+The input is only read, in whole-frame chunks, so nothing is copied and the
+result equals a one-shot measurement exactly. `ctx` is checked between chunks
+(about 4 ms of work each on a Raspberry Pi 5) and its error is returned as is.
+Measured on a Raspberry Pi 5, a 5-minute 48 kHz mono clip plans in about 0.8 s,
+or 1.7 s when the gate fallback re-measures. `MeasureBytes` uses the same
+read-only chunked decode. `PlanClampedGainBytes` is gone: use `PlanBytes` with
+`GateFallback: false`.
+
 ## Performance
 
 Measurement and normalization are allocation-free in steady state. The

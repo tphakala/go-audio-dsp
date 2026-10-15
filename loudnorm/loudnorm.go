@@ -74,8 +74,8 @@ const (
 // dB: a clip is amplified or attenuated toward its target loudness by no more
 // than this magnitude. It stops a near-silent clip from being lifted into loud
 // broadband static and a very hot clip from being driven toward digital
-// silence. Callers pass it (or their own ceiling) to ClampGainDB and
-// PlanClampedGainBytes.
+// silence. Callers pass it (or their own ceiling) to ClampGainDB, or set it as
+// PlanOptions.MaxGainDB.
 const DefaultMaxGainDB = 30.0
 
 // Options configures normalization. Use DefaultOptions and override as needed.
