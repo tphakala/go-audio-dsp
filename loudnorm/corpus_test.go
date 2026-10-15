@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"math"
 	"os"
 	"os/exec"
@@ -225,8 +227,11 @@ func loadCorpus(t *testing.T, ffmpeg string) []corpusCase {
 	t.Helper()
 	dir := corpusDir()
 	entries, err := os.ReadDir(dir)
-	if err != nil {
+	if errors.Is(err, fs.ErrNotExist) {
 		t.Skipf("no corpus at %s (set LOUDNORM_CORPUS_DIR): %v", dir, err)
+	}
+	if err != nil {
+		t.Fatalf("reading corpus %s: %v", dir, err)
 	}
 	var names []string
 	for _, e := range entries {
@@ -242,6 +247,7 @@ func loadCorpus(t *testing.T, ffmpeg string) []corpusCase {
 	var cases []corpusCase
 	for _, name := range names {
 		out, err := exec.CommandContext(t.Context(), ffmpeg, "-hide_banner", "-v", "error", "-i", filepath.Join(dir, name), //nolint:gosec // G204: test-controlled
+			"-t", strconv.Itoa(corpusClipSecs*corpusClipsPerWV), // only the first clips are used
 			"-f", "s16le", "-acodec", "pcm_s16le", "-ar", strconv.Itoa(corpusRate), "-ac", "1", "-").Output()
 		if err != nil || len(out) == 0 {
 			t.Fatalf("decoding %s: %v", name, err)
