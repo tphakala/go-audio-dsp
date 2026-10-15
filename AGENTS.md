@@ -24,6 +24,7 @@ Packages:
 | `stft` | beta | Shared STFT layer: whole-clip `Plan`, streaming `Analyzer`, overlap-add `Synthesizer`, windows |
 | `spectrogram` | beta | Magnitude, power or dB spectrogram matrix, whole clip or streaming columns |
 | `mel` | beta | Per-frame (log-)mel columns; normalization, stacking and tensor layout are the consumer's job |
+| `octave` | beta | Streaming 1/3-octave band level meter (a meter, not a `Processor`): ISO 266 / IEC 61260-1 bands, mean square per period, built on `equalizer` BandPass filters |
 | `internal/dspshared` | | Helpers shared by `denoiser` and `denoiser/gate` (floor guard, geometry defaults, emission arithmetic) so a fix lands once |
 | `internal/audiotest` | | Test-only: synthetic signals, metrics, ffmpeg `afftdn` A/B harness, noise-bed mixing |
 | `rules` | | gocritic ruleguard matchers (build tag `ruleguard`, lint-only) |

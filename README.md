@@ -11,6 +11,7 @@ via [`github.com/tphakala/simd`](https://github.com/tphakala/simd).
 | Package | Status | What it does |
 | ------- | ------ | ------------ |
 | [`loudnorm`](loudnorm/) | stable | EBU R 128 / ITU-R BS.1770-4 loudness normalization of in-memory PCM (LUFS measurement, true-peak limiting, linear gain). |
+| [`octave`](octave/) | beta | Streaming 1/3-octave band level meter (ISO 266 / IEC 61260-1 bands, mean square per period). |
 | [`denoiser`](denoiser/) | beta | Spectral audio denoiser (STFT, measured or adaptive noise profile, Wiener / MMSE-LSA gain, overlap-add reconstruction). Replaces ffmpeg `afftdn` on the BirdNET-Go clip path. |
 | [`denoiser/gate`](denoiser/gate/) | beta | Spectral soft-gate waveform denoiser: a lighter second denoise method for the clip/export path that suppresses continuous background noise (wind, rain, hum, cicadas) while preserving bird song. |
 | [`equalizer`](equalizer/) | beta | RBJ biquad filter chain (low/high/all-pass, band-pass, notch, shelves, peaking) as a streaming block, with frequency-response output for a UI curve. |
@@ -36,7 +37,7 @@ Import the package you need:
 import "github.com/tphakala/go-audio-dsp/loudnorm"
 ```
 
-See each package's README for usage: [`loudnorm`](loudnorm/README.md), [`denoiser`](denoiser/README.md), [`denoiser/gate`](denoiser/gate/README.md), [`equalizer`](equalizer/README.md), [`gain`](gain/README.md) and [`mel`](mel/README.md). A runnable end-to-end chain is in [`examples/streaming`](examples/streaming/).
+See each package's README for usage: [`loudnorm`](loudnorm/README.md), [`denoiser`](denoiser/README.md), [`denoiser/gate`](denoiser/gate/README.md), [`equalizer`](equalizer/README.md), [`gain`](gain/README.md) and [`mel`](mel/README.md) and [`octave`](octave/README.md). A runnable end-to-end chain is in [`examples/streaming`](examples/streaming/).
 
 ## Design goals
 
