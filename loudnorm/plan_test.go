@@ -603,3 +603,42 @@ func TestPlanBytesReportsPeakLimitFromRefinement(t *testing.T) {
 		t.Errorf("true peak %.2f dBTP above the -2 ceiling", got.TruePeakDBTP)
 	}
 }
+
+// TestNormalizeInt16QuietBedLandsOnTarget pins that the in-place Normalize path
+// solves the gain through the loudness gates like PlanBytes: a quiet bed under a
+// call lands on the target, and Result reports the loudness the clip really has.
+func TestNormalizeInt16QuietBedLandsOnTarget(t *testing.T) {
+	pcm := quietBedWithBurst(20, 2, -60, 8)
+	want, err := PlanBytes(t.Context(), bytesLE(pcm), planOpts(planTestRate, 1, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f32 := make([]float32, len(pcm))
+	for i, v := range pcm {
+		f32[i] = float32(v) / 32768
+	}
+	resF, err := NormalizeFloat32(f32, Options{SampleRate: planTestRate, Channels: 1, TargetLUFS: -23, TruePeakDBTP: -2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(resF.GainDB-want.GainDB) > 1e-3 {
+		t.Errorf("NormalizeFloat32 applied %.3f dB, PlanBytes plans %.3f dB", resF.GainDB, want.GainDB)
+	}
+	res, err := NormalizeInt16(pcm, Options{SampleRate: planTestRate, Channels: 1, TargetLUFS: -23, TruePeakDBTP: -2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(res.GainDB-want.GainDB) > 1e-9 {
+		t.Errorf("NormalizeInt16 applied %.3f dB, PlanBytes plans %.3f dB", res.GainDB, want.GainDB)
+	}
+	got, err := MeasureInt16(pcm, planTestRate, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(got.IntegratedLUFS-(-23)) > 0.5 {
+		t.Errorf("normalized clip measures %.2f LUFS, want -23 +/-0.5", got.IntegratedLUFS)
+	}
+	if math.Abs(res.OutputLUFS-got.IntegratedLUFS) > 0.1 {
+		t.Errorf("Result.OutputLUFS %.2f, measured %.2f", res.OutputLUFS, got.IntegratedLUFS)
+	}
+}
