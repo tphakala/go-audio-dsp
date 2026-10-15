@@ -700,7 +700,7 @@ func TestPlanBytesFallbackReportsPeakLimit(t *testing.T) {
 // linear gain it started from.
 func TestSolveGateAwareGainDBConverges(t *testing.T) {
 	opts := planOpts(planTestRate, 1, false).Options
-	checked := 0
+	checked, corrected := 0, 0
 	for _, secs := range []float64{6, 20} {
 		for _, burst := range []float64{-70, -65, -60, -55, -50} {
 			for _, bed := range []int{2, 5, 8, 12, 24} {
@@ -718,11 +718,17 @@ func TestSolveGateAwareGainDBConverges(t *testing.T) {
 					t.Errorf("secs %v burst %v bed %d: solved %.3f dB leaves %.3f dB (start %.3f dB left %.3f dB), limited %v", secs, burst, bed, got, r, start.GainDB, residual(start.GainDB), limited)
 				}
 				checked++
+				if residual(start.GainDB) > 0.05 {
+					corrected++
+				}
 			}
 		}
 	}
 	if checked < 30 {
 		t.Fatalf("only %d fixtures measured", checked)
+	}
+	if corrected < 10 {
+		t.Fatalf("only %d of %d fixtures needed a correction, the grid would pass with a solver that returns its start", corrected, checked)
 	}
 }
 
