@@ -737,3 +737,29 @@ func TestSolveGateAwareGainDBSilence(t *testing.T) {
 		}
 	}
 }
+
+// TestNormalizeInt16ReportsGateSolvePeakLimit pins Result.PeakLimited from the gate
+// solve: the clip's linear plan is unlimited, the corrected gain reaches the
+// true-peak ceiling, and Normalize reports it as PlanBytes does, with Input and
+// TargetGainDB left at the pass-one values.
+func TestNormalizeInt16ReportsGateSolvePeakLimit(t *testing.T) {
+	pcm := quietBedWithBurst(20, 2, -60, 8)
+	pcm[len(pcm)/2+100] = 200
+	want, err := PlanBytes(t.Context(), bytesLE(pcm), planOpts(planTestRate, 1, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want.Result.PeakLimited || !want.PeakLimited {
+		t.Fatalf("fixture must be limited only after the gate correction, got %+v", want)
+	}
+	res, err := NormalizeInt16(pcm, Options{SampleRate: planTestRate, Channels: 1, TargetLUFS: -23, TruePeakDBTP: -2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.PeakLimited || math.Abs(res.GainDB-want.GainDB) > 1e-9 {
+		t.Errorf("Normalize result %+v, want PeakLimited with the gain %.3f dB PlanBytes plans", res, want.GainDB)
+	}
+	if res.Input != want.Result.Input || res.TargetGainDB != want.Result.TargetGainDB {
+		t.Errorf("Input %+v and TargetGainDB %.3f changed, want the pass-one %+v and %.3f", res.Input, res.TargetGainDB, want.Result.Input, want.Result.TargetGainDB)
+	}
+}
