@@ -110,7 +110,7 @@ type Measurement struct {
 // Result describes the outcome of a normalization.
 type Result struct {
 	Input        Measurement // pass-one measurement of the original buffer
-	TargetGainDB float64     // gain needed to reach TargetLUFS, before peak limiting
+	TargetGainDB float64     // gain needed to reach TargetLUFS, before the gate correction and peak limiting
 	GainDB       float64     // gain actually applied
 	PeakLimited  bool        // true if the true-peak ceiling reduced the gain
 	OutputLUFS   float64     // estimated loudness after normalization (-Inf for silence)
@@ -139,7 +139,9 @@ func MeasureInt16(pcm []int16, sampleRate, channels int) (Measurement, error) {
 }
 
 // NormalizeFloat32 normalizes interleaved float32 PCM in place and returns the
-// outcome. Silent input is left untouched (GainDB = 0).
+// outcome. The gain is solved through the loudness gates, as PlanBytes does, so a
+// quiet bed under a call lands on the target. Silent input is left untouched
+// (GainDB = 0).
 func NormalizeFloat32(pcm []float32, opts Options) (Result, error) {
 	if err := opts.validate(len(pcm)); err != nil {
 		return Result{}, err
@@ -147,7 +149,7 @@ func NormalizeFloat32(pcm []float32, opts Options) (Result, error) {
 	m := acquireMeter(opts.SampleRate, opts.Channels)
 	defer releaseMeter(m)
 	m.AddFloat32(pcm)
-	res := PlanGain(result(m), opts)
+	res := planGated(m, opts)
 	if res.GainDB != 0 {
 		applyGainFloat32(pcm, dsp.FactorFromDB(res.GainDB))
 	}
@@ -155,8 +157,9 @@ func NormalizeFloat32(pcm []float32, opts Options) (Result, error) {
 }
 
 // NormalizeInt16 normalizes interleaved 16-bit PCM in place and returns the
-// outcome. Gain is applied with rounding and saturation so a boost never wraps.
-// Silent input is left untouched (GainDB = 0).
+// outcome. The gain is solved through the loudness gates, as PlanBytes does, so a
+// quiet bed under a call lands on the target. Gain is applied with rounding and
+// saturation so a boost never wraps. Silent input is left untouched (GainDB = 0).
 func NormalizeInt16(pcm []int16, opts Options) (Result, error) {
 	if err := opts.validate(len(pcm)); err != nil {
 		return Result{}, err
@@ -164,11 +167,25 @@ func NormalizeInt16(pcm []int16, opts Options) (Result, error) {
 	m := acquireMeter(opts.SampleRate, opts.Channels)
 	defer releaseMeter(m)
 	m.AddInt16(pcm)
-	res := PlanGain(result(m), opts)
+	res := planGated(m, opts)
 	if res.GainDB != 0 {
 		applyGainInt16(pcm, dsp.FactorFromDB(res.GainDB))
 	}
 	return res, nil
+}
+
+// planGated is PlanGain on the meter's measurement with the gain solved through
+// the loudness gates (solveGateAwareGainDB): a boost that lifts quiet blocks over
+// the absolute gate would otherwise leave the clip under the target. GainDB and
+// PeakLimited are the solved gain and its verdict, OutputLUFS is the loudness the
+// clip has at that gain, and Input and TargetGainDB stay the pass-one values.
+func planGated(m *Meter, opts Options) Result {
+	res := PlanGain(result(m), opts)
+	if res.GainDB != 0 {
+		res.GainDB, res.PeakLimited = solveGateAwareGainDB(m, res.GainDB, opts)
+		res.OutputLUFS = m.loudnessAtGain(res.GainDB)
+	}
+	return res
 }
 
 // result reads the final measurement from a fully-fed meter.
@@ -184,11 +201,14 @@ func result(m *Meter) Measurement {
 // full Result: the target gain (target minus measured loudness), the gain
 // actually applied after true-peak limiting, and the projected output loudness.
 //
-// The Normalize* helpers call this internally. Callers that want to apply the
-// gain themselves (for example while encoding, to avoid a second buffer pass)
-// can measure with Measure* and plan here. opts is not validated against a
-// buffer length, so callers that bypass Normalize* should ensure SampleRate,
-// Channels, TargetLUFS and TruePeakDBTP are sane.
+// The gain is linear in the measurement: it does not account for loudness gating
+// lifting quiet blocks over the absolute gate, which leaves a clip with a quiet bed
+// under a call short of the target. The Normalize* helpers and PlanBytes solve the
+// gain through the gates instead; a caller that applies the gain itself (for
+// example while encoding, to avoid a second buffer pass) should plan with
+// PlanBytes. opts is not validated against a buffer length, so callers that call
+// PlanGain directly should ensure SampleRate, Channels, TargetLUFS and
+// TruePeakDBTP are sane.
 func PlanGain(meas Measurement, opts Options) Result {
 	res := Result{Input: meas, OutputLUFS: math.Inf(-1)}
 	if math.IsInf(meas.IntegratedLUFS, -1) {
