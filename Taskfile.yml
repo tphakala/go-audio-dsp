@@ -47,6 +47,11 @@ tasks:
     cmds:
       - go test -run 'TestCorpusAgainstAfftdn|TestNoiseBedAgainstAfftdn' -v -count=1 ./denoiser ./denoiser/gate
 
+  ab:loudnorm:
+    desc: Corpus comparison of loudnorm.PlanBytes against ffmpeg loudnorm (needs loudnorm/testdata/corpus/*.wav or LOUDNORM_CORPUS_DIR, and ffmpeg)
+    cmds:
+      - go test -run 'TestCorpusAgainstFFmpegLoudnorm' -v -count=1 ./loudnorm
+
   vet:
     desc: Run go vet for amd64 and arm64
     cmds:
