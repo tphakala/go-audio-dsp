@@ -36,9 +36,9 @@ func noisyTone(seconds int) []float32 {
 }
 
 // Denoise a whole clip held in memory. It measures the noise profile from the
-// clip's quietest window and falls back to an adaptive tracker when there is no
-// distinct quiet region, so the caller supplies nothing but the audio and a
-// sample rate.
+// clip's quietest window and falls back to an adaptive tracker when it finds no
+// usable quiet window (none distinctly quiet, or the quietest holds digital
+// silence), so the caller supplies nothing but the audio and a sample rate.
 func Example() {
 	x := noisyTone(1)
 

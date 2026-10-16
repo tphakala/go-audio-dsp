@@ -197,14 +197,18 @@ func (e *NoiseProfileEstimator) setCandidate(c *candidate, best int) {
 
 // Profile returns the noise profile of everything added so far, with the
 // contract of Denoiser.EstimateNoiseProfile: ErrProfileTooShort below one
-// frame, ErrNoQuietRegion when no window is distinctly quiet. It does not
-// change the estimator, so it may be called repeatedly and between Add calls.
+// frame, ErrNoQuietRegion when no usable quiet window exists (see
+// EstimateNoiseProfile). It does not change the estimator, so it may be called
+// repeatedly and between Add calls.
 func (e *NoiseProfileEstimator) Profile() (*NoiseProfile, error) {
 	best, w, ci, err := e.selectWindow()
 	if err != nil {
 		return nil, err
 	}
-	start, end := profileRange(best, w, e.hop, e.n, e.pos)
+	start, end, err := e.measuredRange(best, w)
+	if err != nil {
+		return nil, err
+	}
 	samples, err := e.windowSamples(start, end, ci)
 	if err != nil {
 		return nil, err
@@ -327,10 +331,28 @@ func selectNth(a []float32, k int) float32 {
 	return a[k]
 }
 
+// measuredRange returns the sample range [start, end) measured for the window
+// of w blocks starting at block best, or ErrNoQuietRegion when a block in it is
+// digital silence. The range is cut at the last whole hop block, so it lies on
+// the hop grid and every block in it has a recorded energy. The window can be
+// silence-free while widening it to one frame reaches a silent block, and a
+// silent block drags the measured profile below the real noise (to the power
+// floor for an all-zero range), so the range is checked, not only the window.
+func (e *NoiseProfileEstimator) measuredRange(best, w int) (start, end int, err error) {
+	start, end = profileRange(best, w, e.hop, e.n, len(e.energy)*e.hop)
+	for _, v := range e.energy[start/e.hop : end/e.hop] {
+		if v < silencePower {
+			return 0, 0, ErrNoQuietRegion
+		}
+	}
+	return start, end, nil
+}
+
 // profileRange returns the sample range [start, end) measured for a window of
 // w blocks starting at block best in a clip of total samples: the window
 // itself, widened to one frame when it is shorter (frames longer than the
-// window).
+// window). Callers pass a total that is a whole number of hop blocks, which
+// keeps start and end on the hop grid.
 func profileRange(best, w, hop, frame, total int) (start, end int) {
 	start = best * hop
 	end = min(total, start+w*hop)

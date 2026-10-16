@@ -26,8 +26,9 @@ go get github.com/tphakala/go-audio-dsp
 
 The simplest path denoises a clip already in memory. `Denoise` measures the
 noise profile from the clip's quietest window and falls back to an adaptive
-tracker when there is no distinct quiet region, so it needs nothing but the
-audio and a sample rate:
+tracker when it finds no usable quiet window (none distinctly quiet, or the
+quietest holds digital silence), so it needs nothing but the audio and a sample
+rate:
 
 ```go
 import "github.com/tphakala/go-audio-dsp/denoiser"

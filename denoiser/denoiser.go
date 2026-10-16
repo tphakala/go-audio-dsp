@@ -128,8 +128,9 @@ func (d *Denoiser) FlushInto(out []float32) (int, error) { return d.st.FlushInto
 
 // Denoise denoises a whole clip held in memory: it measures the noise profile
 // from the clip's quietest window (EstimateNoiseProfile), falling back to
-// adaptive tracking when no distinct quiet region exists, then runs the stream
-// to completion. The result has len(x) samples aligned with x.
+// adaptive tracking when it finds no usable quiet window (none distinctly
+// quiet, or the quietest holds digital silence), then runs the stream to
+// completion. The result has len(x) samples aligned with x.
 func Denoise(x []float32, cfg Config) ([]float32, error) {
 	d, err := New(cfg)
 	if err != nil {

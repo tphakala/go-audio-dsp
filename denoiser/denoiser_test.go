@@ -2,8 +2,10 @@ package denoiser
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/rand/v2"
+	"slices"
 	"testing"
 )
 
@@ -319,5 +321,32 @@ func TestDenoiseFallbacksAndErrors(t *testing.T) {
 	}
 	if y, err := DenoiseWithProfile(x, nil, Config{SampleRate: sr}); err != nil || len(y) != len(x) {
 		t.Errorf("nil profile (adaptive): len %d err %v", len(y), err)
+	}
+}
+
+// TestDenoiseUsesAdaptiveWhenQuietWindowHoldsSilence pins that a clip whose
+// every quiet window holds digital silence is denoised with the adaptive
+// tracker, not with a profile measured from silence (which sits at the power
+// floor and leaves the clip unchanged).
+func TestDenoiseUsesAdaptiveWhenQuietWindowHoldsSilence(t *testing.T) {
+	for _, sr := range []int{16000, 48000, 192000} {
+		t.Run(fmt.Sprintf("%d", sr), func(t *testing.T) {
+			x := mostlySilentClip(sr)
+			cfg := Config{SampleRate: sr}
+			adaptive, err := DenoiseWithProfile(x, nil, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if slices.Equal(adaptive, x) {
+				t.Fatal("precondition: adaptive tracking leaves the clip unchanged, so the test cannot tell it from an epsPower profile")
+			}
+			got, err := Denoise(x, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, adaptive) {
+				t.Fatal("Denoise differs from adaptive tracking")
+			}
+		})
 	}
 }

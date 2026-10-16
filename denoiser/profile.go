@@ -150,14 +150,17 @@ const (
 
 // EstimateNoiseProfile scans a clip for its quietest autoWindowSec window and
 // measures the noise profile there (Tier 1, zero-click). Blocks of digital
-// silence (zero padding) are skipped when anything else exists. The window is
-// accepted only if the clip has dynamic range: its mean energy must be at
-// least quietMarginDB below the quietPercentile of block energies, otherwise
+// silence (zero padding) never make up the window. The window is accepted only
+// if the clip has dynamic range: its mean energy must be at least
+// quietMarginDB below the quietPercentile of block energies, otherwise
 // ErrNoQuietRegion is returned (continuous song, or featureless noise, where
-// the adaptive tracker does as well). Clips shorter than about two windows
-// accept the quietest window unconditionally. Info() on the result reports
-// the window position. Returns ErrProfileTooShort for inputs shorter than one
-// frame. For a clip that arrives in chunks, or is held as int16, use
+// the adaptive tracker does as well). Clips shorter than about two windows skip
+// that test. The stretch measured for the window (widened to one frame when
+// FrameSize is longer than the window, and ending at the last whole hop block)
+// must hold no block of digital silence (below -90 dBFS RMS), otherwise
+// ErrNoQuietRegion is returned: a silent block would pull the profile below
+// the real noise. Info() on the result reports the measured stretch. Returns
+// ErrProfileTooShort for inputs shorter than one frame. For a clip that arrives in chunks, or is held as int16, use
 // NewNoiseProfileEstimator, which returns the same result in bounded memory.
 func (d *Denoiser) EstimateNoiseProfile(x []float32) (*NoiseProfile, error) {
 	if len(x) < d.n {
@@ -176,7 +179,10 @@ func (d *Denoiser) EstimateNoiseProfile(x []float32) (*NoiseProfile, error) {
 	if err != nil {
 		return nil, err
 	}
-	start, end := profileRange(best, w, d.hop, d.n, len(x))
+	start, end, err := e.measuredRange(best, w)
+	if err != nil {
+		return nil, err
+	}
 	return e.buildProfile(x[start:end], start, end)
 }
 
