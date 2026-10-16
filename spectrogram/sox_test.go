@@ -229,7 +229,8 @@ func TestSoxReadmeListsCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	readme := string(raw)
+	// A Windows checkout with core.autocrlf rewrites the line endings.
+	readme := strings.ReplaceAll(string(raw), "\r\n", "\n")
 	for _, r := range soxRefs() {
 		if !strings.Contains(readme, r.command()+"\n") {
 			t.Errorf("README.md does not list %q on a line of its own", r.command())
