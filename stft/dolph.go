@@ -101,15 +101,10 @@ func dolph64(m int, attenuationDB float64) ([]float64, error) {
 	}
 	dolphInto(w, make([]float64, (m-1)/2+1), make([]float64, 2*m), attenuationDB)
 
-	// The domain keeps the evaluation positive and finite, so this guard does not
-	// fire for validated input; it keeps a NaN or Inf from reaching the caller if
-	// that measurement is ever wrong on some platform.
-	peak := slices.Max(w)
-	if !(peak > 0) || math.IsInf(peak, 1) {
-		return nil, fmt.Errorf("%w: Dolph-Chebyshev evaluation lost precision (length %d, attenuationDB %g)", ErrInvalidConfig, m, attenuationDB)
-	}
-	for i := range w {
-		w[i] /= peak
+	// The domain keeps the evaluation positive and finite, so the guard in
+	// normalizeBy does not fire for validated input.
+	if err := normalizeBy(w, slices.Max(w), attenuationDB); err != nil {
+		return nil, err
 	}
 	return w, nil
 }
@@ -117,8 +112,7 @@ func dolph64(m int, attenuationDB float64) ([]float64, error) {
 // dolphCentreInto fills w (length m >= 1) with the symmetric m-point
 // Dolph-Chebyshev window normalized so its centre sample, index (m-1)/2, is 1.
 // p and tab are caller scratch of length at least (m-1)/2+1 and 2*m, so an
-// analyzer can evaluate many lengths without allocating. The error guard is the
-// one dolph64 applies, on the centre instead of the peak.
+// analyzer can evaluate many lengths without allocating.
 func dolphCentreInto(w, p, tab []float64, attenuationDB float64) error {
 	m := len(w)
 	if m == 1 {
@@ -126,12 +120,18 @@ func dolphCentreInto(w, p, tab []float64, attenuationDB float64) error {
 		return nil
 	}
 	dolphInto(w, p, tab, attenuationDB)
-	c := w[(m-1)/2]
-	if !(c > 0) || math.IsInf(c, 1) {
-		return fmt.Errorf("%w: Dolph-Chebyshev evaluation lost precision (length %d, attenuationDB %g)", ErrInvalidConfig, m, attenuationDB)
+	return normalizeBy(w, w[(m-1)/2], attenuationDB)
+}
+
+// normalizeBy divides w by norm, which must be positive and finite. The guard
+// keeps a NaN or Inf from reaching the caller if the float64 evaluation ever
+// loses precision on some platform.
+func normalizeBy(w []float64, norm, attenuationDB float64) error {
+	if !(norm > 0) || math.IsInf(norm, 1) {
+		return fmt.Errorf("%w: Dolph-Chebyshev evaluation lost precision (length %d, attenuationDB %g)", ErrInvalidConfig, len(w), attenuationDB)
 	}
 	for i := range w {
-		w[i] /= c
+		w[i] /= norm
 	}
 	return nil
 }

@@ -96,10 +96,11 @@ func newEdge(tb testing.TB, n int, shape WindowShape) *EdgeAnalyzer {
 	return a
 }
 
-var (
-	hannShape  = WindowShape{Family: ShapeHann}
-	dolphShape = func(att float64) WindowShape { return WindowShape{Family: ShapeDolphChebyshev, AttenuationDB: att} }
-)
+var hannShape = WindowShape{Family: ShapeHann}
+
+func dolphShape(att float64) WindowShape {
+	return WindowShape{Family: ShapeDolphChebyshev, AttenuationDB: att}
+}
 
 // runEdge feeds sig in one call, finishes, and returns every frame's power.
 func runEdge(a *EdgeAnalyzer, hop int, sig []float32) ([][]float32, error) {

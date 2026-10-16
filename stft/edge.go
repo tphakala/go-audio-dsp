@@ -100,7 +100,6 @@ type EdgeAnalyzer struct {
 	drain      []float32 // drainCount windows of N, window j has d = drainD0+j*hop drain zeros
 	drainHop   int
 	drainD0    int
-	drainN     int // drain frames the slab was keyed for, before the cache cap
 	drainValid bool
 	drainCount int
 
@@ -291,21 +290,21 @@ func (a *EdgeAnalyzer) Finish(onFrame func(power []float32)) {
 }
 
 // prepareDrain makes the drain slab hold the windows for a drain of nDrain frames
-// whose first holds d0 zeros. The key carries every input a drain window depends
-// on: the hop, the first frame's zero count and the number of frames.
+// whose first holds d0 zeros. Window j depends on the hop and d0+j*hop alone, so
+// the key is the hop, d0 and how many windows the slab holds.
 func (a *EdgeAnalyzer) prepareDrain(d0, nDrain int) {
 	if nDrain == 0 {
 		return // no drain frame; keep the slab for the next stream
 	}
-	a.drainCount = min(nDrain, edgeCacheWindows)
-	if a.drainValid && a.drainHop == a.hop && a.drainD0 == d0 && a.drainN == nDrain {
+	count := min(nDrain, edgeCacheWindows)
+	if a.drainValid && a.drainHop == a.hop && a.drainD0 == d0 && a.drainCount == count {
 		return
 	}
-	a.drain = growWindows(a.drain, a.drainCount*a.n)
-	for j := range a.drainCount {
+	a.drain = growWindows(a.drain, count*a.n)
+	for j := range count {
 		a.buildDrain(a.drain[j*a.n:(j+1)*a.n], d0+j*a.hop)
 	}
-	a.drainHop, a.drainD0, a.drainN, a.drainValid = a.hop, d0, nDrain, true
+	a.drainHop, a.drainD0, a.drainCount, a.drainValid = a.hop, d0, count, true
 }
 
 // flowWindow returns the window of the next frame completed from signal samples
@@ -385,7 +384,8 @@ func (a *EdgeAnalyzer) evalShape(m int) bool {
 	return false
 }
 
-// sumFloat64 adds v in order.
+// sumFloat64 adds v in order. The sum stays scalar on purpose: it sets the
+// default hop through rounding, which must not depend on the simd kernel tier.
 func sumFloat64(v []float64) float64 {
 	var s float64
 	for _, x := range v {

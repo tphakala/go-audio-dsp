@@ -157,7 +157,8 @@ func hannSymmetric64(dst []float64) {
 }
 
 // ShapeFamily selects a symmetric window family that EdgeAnalyzer evaluates at
-// many lengths. The zero value is ShapeHann.
+// many lengths, one per frame near the signal edges. It is separate from Window,
+// which names a window of one fixed length. The zero value is ShapeHann.
 type ShapeFamily int
 
 const (
