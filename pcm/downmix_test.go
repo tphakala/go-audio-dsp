@@ -3,6 +3,7 @@ package pcm
 import (
 	"errors"
 	"math"
+	"slices"
 	"testing"
 )
 
@@ -167,28 +168,55 @@ func TestDownmixBytesShortDst(t *testing.T) {
 	})
 }
 
+// errSentinel fills dst before an error case. The error cases' sources are
+// small samples whose means lie in [-1, 1], so any write into dst before the
+// error replaces it.
+const errSentinel = float32(7)
+
+func fillSentinel(dst []float32) {
+	for i := range dst {
+		dst[i] = errSentinel
+	}
+}
+
+// requireUntouched reports a dst element that is not the sentinel.
+func requireUntouched(t *testing.T, name string, dst []float32) {
+	t.Helper()
+	for i, v := range dst {
+		if math.Float32bits(v) != math.Float32bits(errSentinel) {
+			t.Errorf("%s: dst[%d] = %v after an error, want it untouched", name, i, v)
+			return
+		}
+	}
+}
+
 func TestDownmixBytesErrors(t *testing.T) {
 	bothPaths(t, func(t *testing.T) {
 		t.Helper()
 		dst := make([]float32, 8)
+		// Non-zero samples: a call that converted the whole frames before
+		// failing would write non-sentinel values into dst.
+		nonZero := func(n int) []byte { return leBytes(slices.Repeat([]int16{12345}, n/2)) }
 		cases := []struct {
 			name     string
 			src      []byte
 			channels int
 			want     error
 		}{
-			{"odd byte count", make([]byte, 5), 1, ErrOddByteLength},
-			{"odd byte count stereo", make([]byte, 7), 2, ErrOddByteLength},
-			{"partial frame", make([]byte, 6), 2, ErrPartialFrame},
-			{"partial frame surround", make([]byte, 2*7), 6, ErrPartialFrame},
-			{"zero channels", make([]byte, 4), 0, ErrInvalidConfig},
-			{"negative channels", make([]byte, 4), -1, ErrInvalidConfig},
+			{"odd byte count", append(nonZero(4), 1), 1, ErrOddByteLength},
+			{"odd byte count stereo", append(nonZero(6), 1), 2, ErrOddByteLength},
+			{"partial frame", nonZero(6), 2, ErrPartialFrame},
+			{"partial frame surround", nonZero(2 * 7), 6, ErrPartialFrame},
+			{"zero channels", nonZero(4), 0, ErrInvalidConfig},
+			{"negative channels", nonZero(4), -1, ErrInvalidConfig},
 		}
 		for _, c := range cases {
+			fillSentinel(dst)
 			n, err := DownmixBytesToFloat32(dst, c.src, c.channels)
 			if !errors.Is(err, c.want) || n != 0 {
 				t.Errorf("%s: n, err = %d, %v; want 0, %v", c.name, n, err, c.want)
 			}
+			requireUntouched(t, c.name, dst)
 		}
 	})
 }
@@ -259,22 +287,25 @@ func TestDownmixFloat32ShortDst(t *testing.T) {
 
 func TestDownmixFloat32Errors(t *testing.T) {
 	dst := make([]float32, 8)
+	nonZero := func(n int) []float32 { return slices.Repeat([]float32{0.5}, n) }
 	cases := []struct {
 		name     string
 		src      []float32
 		channels int
 		want     error
 	}{
-		{"partial frame", make([]float32, 3), 2, ErrPartialFrame},
-		{"partial frame surround", make([]float32, 7), 6, ErrPartialFrame},
-		{"zero channels", make([]float32, 4), 0, ErrInvalidConfig},
-		{"negative channels", make([]float32, 4), -1, ErrInvalidConfig},
+		{"partial frame", nonZero(3), 2, ErrPartialFrame},
+		{"partial frame surround", nonZero(7), 6, ErrPartialFrame},
+		{"zero channels", nonZero(4), 0, ErrInvalidConfig},
+		{"negative channels", nonZero(4), -1, ErrInvalidConfig},
 	}
 	for _, c := range cases {
+		fillSentinel(dst)
 		n, err := DownmixFloat32(dst, c.src, c.channels)
 		if !errors.Is(err, c.want) || n != 0 {
 			t.Errorf("%s: n, err = %d, %v; want 0, %v", c.name, n, err, c.want)
 		}
+		requireUntouched(t, c.name, dst)
 	}
 }
 
