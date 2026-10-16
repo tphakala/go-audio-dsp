@@ -160,8 +160,9 @@ const (
 // must hold no block of digital silence (below -90 dBFS RMS), otherwise
 // ErrNoQuietRegion is returned: a silent block would pull the profile below
 // the real noise. Info() on the result reports the measured stretch. Returns
-// ErrProfileTooShort for inputs shorter than one frame. For a clip that arrives in chunks, or is held as int16, use
-// NewNoiseProfileEstimator, which returns the same result in bounded memory.
+// ErrProfileTooShort for inputs shorter than one frame. For a clip that
+// arrives in chunks, or is held as int16, use NewNoiseProfileEstimator, which
+// returns the same result in bounded memory.
 func (d *Denoiser) EstimateNoiseProfile(x []float32) (*NoiseProfile, error) {
 	if len(x) < d.n {
 		return nil, ErrProfileTooShort

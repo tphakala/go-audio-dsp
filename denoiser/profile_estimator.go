@@ -316,6 +316,7 @@ func selectNth(a []float32, k int) float32 {
 // silence-free while widening it to one frame reaches a silent block, and a
 // silent block drags the measured profile below the real noise (to the power
 // floor for an all-zero range), so the range is checked, not only the window.
+// No other window is tried when the best one fails.
 func (e *NoiseProfileEstimator) measuredRange(best, w int) (start, end int, err error) {
 	start, end = profileRange(best, w, e.hop, e.n, len(e.energy)*e.hop)
 	for _, v := range e.energy[start/e.hop : end/e.hop] {

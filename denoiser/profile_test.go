@@ -435,3 +435,45 @@ func TestEstimateNoiseProfileRangeOnHopGrid(t *testing.T) {
 		check(t, p, err)
 	})
 }
+
+// TestEstimateNoiseProfileDoesNotSearchPastSilentWideRange pins that when the
+// quietest window's widened range reaches digital silence the estimate is
+// ErrNoQuietRegion, although a slightly louder clean window that passes the
+// acceptance test exists elsewhere. At 48 kHz with FrameSize 32768 and
+// HopSize 8192 the 0.5 s window is three blocks and is widened to four. The
+// clip is three clean blocks (-45 dBFS), nine loud blocks (-30 dBFS), the
+// quietest three blocks (-50 dBFS) followed by one zero block, and 20 loud
+// blocks. The loud blocks set the percentile reference, so both quiet windows
+// are accepted on their own; the control clip loses the quietest blocks and
+// the zero block and gets the clean window.
+func TestEstimateNoiseProfileDoesNotSearchPastSilentWideRange(t *testing.T) {
+	const sr, frame, hop = 48000, 32768, 8192
+	d := mustDenoiser(t, Config{SampleRate: sr, FrameSize: frame, HopSize: hop})
+	clean := whiteNoise(3*hop, 0.00562, 41)
+	loud := whiteNoise(9*hop, 0.0316, 42)
+	quietest := whiteNoise(3*hop, 0.00316, 43)
+	tail := whiteNoise(20*hop, 0.0316, 44)
+	x := slices.Concat(clean, loud, quietest, make([]float32, hop), tail)
+
+	e := d.NewNoiseProfileEstimator()
+	feedFloat(e, x, fixed(4801))
+	best, _, err := e.selectWindow()
+	if err != nil || best != 12 {
+		t.Fatalf("precondition: selectWindow = block %d, err %v; want the quietest window at block 12, accepted", best, err)
+	}
+	if _, err := e.Profile(); !errors.Is(err, ErrNoQuietRegion) {
+		t.Errorf("Profile: err = %v, want ErrNoQuietRegion", err)
+	}
+	if _, err := d.EstimateNoiseProfile(x); !errors.Is(err, ErrNoQuietRegion) {
+		t.Errorf("EstimateNoiseProfile: err = %v, want ErrNoQuietRegion", err)
+	}
+
+	control := slices.Concat(clean, loud, whiteNoise(4*hop, 0.0316, 45), tail)
+	p, err := d.EstimateNoiseProfile(control)
+	if err != nil {
+		t.Fatalf("control: the clean window is not accepted on its own: %v", err)
+	}
+	if start := int(math.Round(p.Info().StartSec * sr)); start != 0 {
+		t.Errorf("control: measured start %d, want the clean window at 0", start)
+	}
+}
