@@ -154,8 +154,8 @@ func TestNewErrors(t *testing.T) {
 }
 
 // TestSineAtEachCentre pins the reference level: a full scale sine at a band's
-// exact centre reads -3.01 dB in that band (the peak gain is 0 dB) at every rate,
-// in both filter profiles.
+// exact centre reads -3.01 dB in that band (both profiles are normalized to 0 dB
+// at the geometric centre) at every rate.
 func TestSineAtEachCentre(t *testing.T) {
 	for _, design := range designs {
 		for _, rate := range []int{44100, 48000, 96000, 256000} {

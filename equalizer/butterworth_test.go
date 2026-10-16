@@ -102,10 +102,10 @@ func TestButterworthBandPassMatchesAnalytic(t *testing.T) {
 	}
 }
 
-// TestButterworthBandPassLevels pins the level the design promises at the
-// anchor points of a one-third-octave band at 1 kHz: 0 dB at the geometric
-// centre and -3.0103 dB on both edges, at the actual rate, with one section per
-// prototype pole.
+// TestButterworthBandPassLevels pins the levels at the anchor points of a
+// one-third-octave band at 1 kHz, 48 kHz, far from Nyquist: 0 dB at the
+// geometric centre and -3.0103 dB on both edges, with one section per prototype
+// pole.
 func TestButterworthBandPassLevels(t *testing.T) {
 	lower, upper := thirdOctave(1000)
 	for _, order := range []int{1, 2, 3, 4, 5} {

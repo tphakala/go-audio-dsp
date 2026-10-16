@@ -14,7 +14,8 @@ import (
 // little above the geometric one, so the gain at an edge is -3.01 dB plus that
 // excess: within 0.002 dB for order 4 and a one-third-octave band up to 0.95 of
 // Nyquist, further off for low orders and wide bands near Nyquist (order 1 reads
-// -2.79 dB at an upper edge of 21 kHz at 48 kHz). order is the prototype
+// -2.79 dB at the upper edge of a one-third-octave band ending at 21 kHz at
+// 48 kHz). order is the prototype
 // (low-pass) order N: the band-pass has 2N poles, realised as N biquad sections,
 // and falls off at 6N dB per octave far from the band. Order 1 is the
 // second-order band-pass, order 4 an eight-pole one.
