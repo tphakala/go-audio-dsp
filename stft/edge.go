@@ -75,8 +75,10 @@ type EdgeConfig struct {
 // Reset(hop) starts a stream; Feed pushes samples; Finish appends the drain and
 // ends the stream, after which Feed and Finish do nothing until the next Reset.
 // Memory is bounded by (2*32+2)*FrameSize float32 window values plus fixed
-// scratch, independent of the input length. Feed and Finish allocate nothing when
-// onFrame does not. Not safe for concurrent use.
+// scratch, independent of the input length. Feed allocates nothing when onFrame
+// does not; Finish and Reset allocate only when a window slab must grow, the first
+// time a geometry needs more cached windows than any earlier run. Not safe for
+// concurrent use.
 type EdgeAnalyzer struct {
 	p     *f32.STFTPlan
 	n     int
