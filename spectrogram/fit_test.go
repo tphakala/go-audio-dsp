@@ -337,6 +337,13 @@ func TestFitIgnoresSamplesPastTheKeptColumns(t *testing.T) {
 				t.Fatalf("geometry %d/%d, want %d/%d", f.Hop(), f.BlockSteps(), c.hop, c.block)
 			}
 			sig := long
+			// The last kept frame completes inside Feed, before Finish pads anything:
+			// a limit one sample short would leave it to the drain frames.
+			fed := 0
+			f.Feed(sig, func([]float32, int) { fed++ })
+			if fed != c.x {
+				t.Errorf("Feed alone emitted %d columns, want all %d", fed, c.x)
+			}
 			want, err := fitColumns(f, sig, c.span, []int{1000})
 			if err != nil {
 				t.Fatal(err)
@@ -441,18 +448,51 @@ func TestFitConfig(t *testing.T) {
 }
 
 // TestFitFailedResetKeepsTheStream checks that a rejected Reset leaves the
-// previous geometry and stream in place.
+// previous geometry and the stream in place: the pending block, the column
+// index and the sample count carry on as if the Reset had not been called.
 func TestFitFailedResetKeepsTheStream(t *testing.T) {
+	clip := soxSignal(t, soxRef{})
+	const span = 15 * 24000
 	f := newTestFit(t, 24000, 256, 258, hannShape)
-	if err := f.Reset(15 * 24000); err != nil {
+	want, err := fitColumns(f, clip, span, []int{1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got [][]float32
+	onColumn := func(col []float32, index int) {
+		if index != len(got) {
+			t.Fatalf("column index %d, want %d", index, len(got))
+		}
+		got = append(got, slices.Clone(col))
+	}
+	if err := f.Reset(span); err != nil {
 		t.Fatal(err)
 	}
 	hop, block := f.Hop(), f.BlockSteps()
+	f.Feed(clip[:3000], onColumn) // two columns and a pending partial block
+	emitted, consumed := f.emitted, f.consumed
+	if emitted != 2 || f.count == 0 {
+		t.Fatalf("setup: %d columns and %d pending frames, want 2 and some", emitted, f.count)
+	}
 	if err := f.Reset(-5); err == nil {
 		t.Fatal("Reset(-5) succeeded")
 	}
 	if f.Hop() != hop || f.BlockSteps() != block {
 		t.Errorf("geometry changed to %d/%d after a rejected Reset, want %d/%d", f.Hop(), f.BlockSteps(), hop, block)
+	}
+	if f.emitted != emitted || f.consumed != consumed {
+		t.Errorf("after a rejected Reset: %d columns and %d samples, want %d and %d", f.emitted, f.consumed, emitted, consumed)
+	}
+	f.Feed(clip[3000:], onColumn)
+	f.Finish(onColumn)
+	if len(got) != len(want) {
+		t.Fatalf("%d columns, an uninterrupted stream gives %d", len(got), len(want))
+	}
+	for i := range got {
+		if !sameBits(got[i], want[i]) {
+			t.Fatalf("column %d differs from an uninterrupted stream", i)
+		}
 	}
 }
 
