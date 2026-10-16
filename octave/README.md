@@ -33,6 +33,17 @@ every completed period; the `meanSquare` slice is reused and valid only during
 the call. The values do not depend on how the input is chunked. `Reset` starts a
 new stream.
 
+To use the Butterworth profile, set `Filter: octave.FilterButterworth` (leave
+`Order` at 0 and `NyquistMargin` at 0.95 or below):
+
+```go
+m, err := octave.New(octave.Config{
+	SampleRate:    48000,
+	PeriodSamples: 48000,
+	Filter:        octave.FilterButterworth,
+})
+```
+
 ## Levels
 
 The reference is a full scale amplitude of 1.0 (a full scale sine has mean
@@ -51,14 +62,32 @@ centre reads the same at every Order. Near Nyquist the bilinear transform warps
 the response; the bandwidth prewarp keeps the error several times smaller than a
 plain RBJ band-pass (see the package documentation for the numbers).
 
+| Config.Filter | edge level | white noise vs the rectangular band | CPU |
+|---|---|---|---|
+| `FilterBiquad` (default), Order 1 | -3.01 dB | +1.93 dB | 1x |
+| `FilterButterworth` | -3.01 dB | +0.11 dB (+0.085 dB in the top band at 48 kHz) | about 3x |
+
+`FilterButterworth` is an eight-pole Butterworth band-pass per band whose -3 dB
+points are on the band edges (within 0.002 dB) at the actual sample rate, with
+0 dB at the centre. Its relative attenuation is within the class 1 template of
+IEC 61260:1995 (identical national adoption IS 6964:2001, Table 1 and Annex B)
+for every band the meter includes, at any sample rate, from 0 Hz to Nyquist. This is not a claim
+of IEC 61260-1:2014 conformance: the 2014 acceptance limits were not checked, nor
+were effective bandwidth, linearity, time invariance or any other requirement of
+either edition. Levels from the two designs are not comparable: broadband noise
+reads about 1.8 dB lower with the Butterworth profile.
+
 ## Not implemented
 
-IEC 61260-1 class compliant filters (tracked separately), A/C/Z weighting,
-F/S time weighting, multichannel input, and fractional octaves other than 1/3.
+A/C/Z weighting, F/S time weighting, multichannel input, fractional octaves
+other than 1/3, and verification against the IEC 61260-1:2014 acceptance limits
+(the Butterworth profile is checked against the 1995 attenuation template only).
 
 ## Design
 
-Each band is an [`equalizer`](../equalizer/) `BandPass` with `Passes = Order`, so
-the filter code is shared with the equalizer, not copied. State and sums are
+By default each band is an [`equalizer`](../equalizer/) `BandPass` with
+`Passes = Order`; with `FilterButterworth` it is
+`equalizer.NewButterworthBandPass` over the band's edges. Either way the filter
+code is shared with the equalizer, not copied. State and sums are
 float64; squares are accumulated sample by sample, which is what makes the result
 independent of chunk boundaries.

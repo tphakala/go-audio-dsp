@@ -120,18 +120,34 @@ func (b Band) alpha(w0, sw float64) (float64, error) {
 	return sw / (2 * b.Q), nil
 }
 
+// inRange reports whether every coefficient is finite and small enough for the
+// float32 output.
+func (c coeffs) inRange() bool {
+	for _, v := range [...]float64{c.b0, c.b1, c.b2, c.a1, c.a2} {
+		if math.IsNaN(v) || math.IsInf(v, 0) || math.Abs(v) > math.MaxFloat32 {
+			return false
+		}
+	}
+	return true
+}
+
+// stable reports whether both poles are inside the unit circle, by the standard
+// second-order condition |a2| < 1 and |a1| < 1 + a2; a NaN coefficient reports
+// false.
+func (c coeffs) stable() bool {
+	return math.Abs(c.a2) < 1 && math.Abs(c.a1) < 1+c.a2
+}
+
 // check rejects normalized coefficients that a general EQ cannot use: a
 // non-finite value or one too large for the float32 output, and a pole pair
 // outside the unit circle (an unstable filter, which extreme parameters near
-// Nyquist can produce even from finite inputs). The stability test is the
-// standard second-order condition |a2| < 1 and |a1| < 1 + a2.
+// Nyquist can produce even from finite inputs). The two tests are inRange and
+// stable, which NewBiquadFilter applies to caller-supplied sections too.
 func (c coeffs) check(b Band) error {
-	for _, v := range [...]float64{c.b0, c.b1, c.b2, c.a1, c.a2} {
-		if math.IsNaN(v) || math.IsInf(v, 0) || math.Abs(v) > math.MaxFloat32 {
-			return fmt.Errorf("%w: filter coefficients out of range for %s at Frequency %g, GainDB %g", ErrInvalidConfig, b.Type, b.Frequency, b.GainDB)
-		}
+	if !c.inRange() {
+		return fmt.Errorf("%w: filter coefficients out of range for %s at Frequency %g, GainDB %g", ErrInvalidConfig, b.Type, b.Frequency, b.GainDB)
 	}
-	if !(math.Abs(c.a2) < 1 && math.Abs(c.a1) < 1+c.a2) {
+	if !c.stable() {
 		return fmt.Errorf("%w: %s filter is unstable at Frequency %g (too close to 0 or Nyquist for these parameters)", ErrInvalidConfig, b.Type, b.Frequency)
 	}
 	return nil

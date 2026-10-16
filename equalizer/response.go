@@ -37,12 +37,29 @@ func (c coeffs) at(w float64) complex128 {
 // [0, SampleRate/2] are meaningful; the response is periodic, so a frequency
 // outside that range is evaluated as given rather than rejected.
 func (e *Equalizer) Response(freqs []float64) []ResponsePoint {
+	return sectionsResponse(e.sections, e.sampleRate, freqs)
+}
+
+// Response evaluates the filter's magnitude and phase at each frequency in
+// freqs (Hz), with the same conventions as Equalizer.Response: one
+// ResponsePoint per input frequency in order, GainDB negative infinity only for
+// an exact null and NaN for a non-finite frequency. It is a visualization and
+// measurement helper, not an audio-path method: it allocates the returned slice
+// and does not touch the filter state, so it is safe to call while streaming.
+func (f *Filter) Response(freqs []float64) []ResponsePoint {
+	return sectionsResponse(f.sections, f.sampleRate, freqs)
+}
+
+// sectionsResponse evaluates the cascade of sections at sampleRate at each
+// frequency in freqs; it is the single implementation behind Equalizer.Response
+// and Filter.Response.
+func sectionsResponse(sections []section, sampleRate int, freqs []float64) []ResponsePoint {
 	pts := make([]ResponsePoint, len(freqs))
 	for i, f := range freqs {
-		w := 2 * math.Pi * f / float64(e.sampleRate)
+		w := 2 * math.Pi * f / float64(sampleRate)
 		h := complex(1, 0)
-		for j := range e.sections {
-			h *= e.sections[j].c.at(w)
+		for j := range sections {
+			h *= sections[j].c.at(w)
 		}
 		mag := cmplx.Abs(h)
 		gainDB := math.Inf(-1) // an exact zero (a perfect null) stays -Inf

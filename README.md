@@ -11,10 +11,10 @@ via [`github.com/tphakala/simd`](https://github.com/tphakala/simd).
 | Package | Status | What it does |
 | ------- | ------ | ------------ |
 | [`loudnorm`](loudnorm/) | stable | EBU R 128 / ITU-R BS.1770-4 loudness normalization of in-memory PCM (LUFS measurement, true-peak limiting, linear gain). |
-| [`octave`](octave/) | beta | Streaming 1/3-octave band level meter (ISO 266 / IEC 61260-1 bands, mean square per period). |
+| [`octave`](octave/) | beta | Streaming 1/3-octave band level meter (ISO 266 / IEC 61260-1 bands, mean square per period), with an optional Butterworth profile within the IEC 61260:1995 class 1 attenuation template. |
 | [`denoiser`](denoiser/) | beta | Spectral audio denoiser (STFT, measured or adaptive noise profile, Wiener / MMSE-LSA gain, overlap-add reconstruction). Replaces ffmpeg `afftdn` on the BirdNET-Go clip path. |
 | [`denoiser/gate`](denoiser/gate/) | beta | Spectral soft-gate waveform denoiser: a lighter second denoise method for the clip/export path that suppresses continuous background noise (wind, rain, hum, cicadas) while preserving bird song. |
-| [`equalizer`](equalizer/) | beta | RBJ biquad filter chain (low/high/all-pass, band-pass, notch, shelves, peaking) as a streaming block, with frequency-response output for a UI curve. |
+| [`equalizer`](equalizer/) | beta | RBJ biquad filter chain (low/high/all-pass, band-pass, notch, shelves, peaking) as a streaming block, with frequency-response output for a UI curve; also a Butterworth band-pass and filters built from caller-supplied biquad sections. |
 | [`gain`](gain/) | beta | Fixed decibel gain as a streaming block, with saturating int16 entry points. |
 | [`stft`](stft/) | beta | Shared short-time Fourier analysis layer (framing, analysis windows, padding convention, per-frame real transform): a whole-clip `Plan`, a streaming `Analyzer`, and its overlap-add `Synthesizer`; the denoiser, spectrogram, and mel blocks are built on them. |
 | [`spectrogram`](spectrogram/) | beta | Numeric magnitude, power, or dB spectrogram matrix over the shared STFT core, as a whole-clip matrix or an incremental streaming column source. Native replacement for the sox / ffmpeg spectrogram subprocess. |
