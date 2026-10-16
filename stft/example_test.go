@@ -2,6 +2,7 @@ package stft_test
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/tphakala/go-audio-dsp/stft"
 )
@@ -90,4 +91,37 @@ func ExampleDolphChebyshev() {
 	}
 	fmt.Printf("%d %.4f %d\n", len(w), w[len(w)/2], a.NumBins())
 	// Output: 2048 1.0000 1025
+}
+
+// EdgeAnalyzer: the sox 14.4.2 frame schedule with edge-adapted windows. A
+// Dolph-Chebyshev shape at 106.5 dB, hop 350 and 48000 samples gives 137 frames,
+// and a full-scale cosine centred on a bin reads 0 dBFS in a frame without padding.
+func ExampleEdgeAnalyzer() {
+	const n, hop, k0 = 1024, 350, 128
+	a, err := stft.NewEdgeAnalyzer(stft.EdgeConfig{
+		FrameSize: n,
+		Shape:     stft.WindowShape{Family: stft.ShapeDolphChebyshev, AttenuationDB: 106.5},
+	})
+	if err != nil {
+		panic(err)
+	}
+	if err := a.Reset(hop); err != nil {
+		panic(err)
+	}
+	signal := make([]float32, 48000)
+	for i := range signal {
+		signal[i] = float32(math.Cos(2 * math.Pi * k0 * float64(i) / n))
+	}
+	frames, mid := 0, 0.0
+	onFrame := func(power []float32) {
+		if frames == 60 {
+			mid = 10 * math.Log10(float64(power[k0]))
+		}
+		frames++
+	}
+	a.Feed(signal, onFrame)
+	a.Finish(onFrame)
+	fmt.Printf("%d frames, expected %d, mid-stream level within 0.01 dB of 0 dBFS: %t\n",
+		frames, a.NumFrames(int64(len(signal))), math.Abs(mid) < 0.01)
+	// Output: 137 frames, expected 137, mid-stream level within 0.01 dB of 0 dBFS: true
 }

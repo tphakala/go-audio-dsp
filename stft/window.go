@@ -95,7 +95,7 @@ func GenerateWindow(w Window, n int) []float32 {
 		}
 	case HannSymmetric:
 		for i := range out {
-			out[i] = float32(0.5 - 0.5*math.Cos(2*math.Pi*float64(i)/float64(n-1)))
+			out[i] = float32(hannSymmetricAt(i, n))
 		}
 	case Hamming:
 		for i := range out {
@@ -133,4 +133,73 @@ func WOLANorm(wa, ws []float32, hop int) []float32 {
 		norm[i] = float32(s)
 	}
 	return norm
+}
+
+// hannSymmetricAt returns sample i of the symmetric m-point Hann window in
+// float64, 0.5 - 0.5*cos(2*pi*i/(m-1)). It is the one expression behind both
+// GenerateWindow(HannSymmetric, m) and EdgeAnalyzer's Hann shape, so the two
+// cannot drift apart. m must be >= 2; a one-point window has no taper and the
+// callers handle it before calling.
+func hannSymmetricAt(i, m int) float64 {
+	return 0.5 - 0.5*math.Cos(2*math.Pi*float64(i)/float64(m-1))
+}
+
+// hannSymmetric64 fills dst with the symmetric len(dst)-point Hann window in
+// float64. A single point is the unit sample, as in GenerateWindow.
+func hannSymmetric64(dst []float64) {
+	if len(dst) == 1 {
+		dst[0] = 1
+		return
+	}
+	for i := range dst {
+		dst[i] = hannSymmetricAt(i, len(dst))
+	}
+}
+
+// ShapeFamily selects a symmetric window family that EdgeAnalyzer evaluates at
+// many lengths. The zero value is ShapeHann.
+type ShapeFamily int
+
+const (
+	// ShapeHann is the symmetric Hann window, 0.5 - 0.5*cos(2*pi*i/(m-1)).
+	ShapeHann ShapeFamily = iota
+	// ShapeDolphChebyshev is the symmetric Dolph-Chebyshev window with its centre
+	// sample normalized to 1 (DolphChebyshevSymmetric normalizes the peak
+	// instead; the two differ below about 86 dB attenuation).
+	ShapeDolphChebyshev
+)
+
+// String returns the family name.
+func (f ShapeFamily) String() string {
+	switch f {
+	case ShapeHann:
+		return "hann"
+	case ShapeDolphChebyshev:
+		return "dolph-chebyshev"
+	}
+	return fmt.Sprintf("ShapeFamily(%d)", int(f))
+}
+
+// WindowShape is a window family plus its parameter. AttenuationDB is the
+// Dolph-Chebyshev sidelobe attenuation, in [20, 200] dB; it must be 0 for
+// ShapeHann, which catches a Dolph attenuation set alongside the zero-value
+// family.
+type WindowShape struct {
+	Family        ShapeFamily
+	AttenuationDB float64
+}
+
+// validate reports whether s is usable at frame size n, with an error wrapping
+// ErrInvalidConfig otherwise.
+func (s WindowShape) validate(n int) error {
+	switch s.Family {
+	case ShapeHann:
+		if s.AttenuationDB != 0 {
+			return fmt.Errorf("%w: Hann shape takes no attenuation, got AttenuationDB %g", ErrInvalidConfig, s.AttenuationDB)
+		}
+		return nil
+	case ShapeDolphChebyshev:
+		return validateDolph(n, s.AttenuationDB)
+	}
+	return fmt.Errorf("%w: unknown ShapeFamily %d", ErrInvalidConfig, int(s.Family))
 }

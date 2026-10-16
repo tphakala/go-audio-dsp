@@ -90,28 +90,71 @@ func toFloat32(w []float64) []float32 {
 }
 
 // dolph64 returns the symmetric m-point Dolph-Chebyshev window in float64, peak
-// normalized to 1, by frequency sampling: the window is the inverse DFT of the
-// Chebyshev polynomial T_(m-1) evaluated at x0*cos(pi*k/m), where x0 is set so
-// the polynomial's sidelobe plateau sits attenuationDB below its peak (scipy
-// 1.18.1 scipy/signal/windows/_windows.py, chebwin).
-//
-// The spectrum samples are real and mirror-symmetric, so the inverse DFT of a
-// symmetric window reduces to w[i] = p[0] + 2*sum_{k=1..K} p[k]*cos(pi*k*d/m)
-// with d = (m-1) - 2*i and K = (m-1)/2, evaluated for the first half of the
-// window and mirrored. Callers have validated m and attenuationDB.
+// normalized to 1. It evaluates the window with dolphInto on freshly allocated
+// scratch, then divides by the peak. Callers have validated m and
+// attenuationDB.
 func dolph64(m int, attenuationDB float64) ([]float64, error) {
 	w := make([]float64, m)
 	if m == 1 {
 		w[0] = 1
 		return w, nil
 	}
+	dolphInto(w, make([]float64, (m-1)/2+1), make([]float64, 2*m), attenuationDB)
+
+	// The domain keeps the evaluation positive and finite, so this guard does not
+	// fire for validated input; it keeps a NaN or Inf from reaching the caller if
+	// that measurement is ever wrong on some platform.
+	peak := slices.Max(w)
+	if !(peak > 0) || math.IsInf(peak, 1) {
+		return nil, fmt.Errorf("%w: Dolph-Chebyshev evaluation lost precision (length %d, attenuationDB %g)", ErrInvalidConfig, m, attenuationDB)
+	}
+	for i := range w {
+		w[i] /= peak
+	}
+	return w, nil
+}
+
+// dolphCentreInto fills w (length m >= 1) with the symmetric m-point
+// Dolph-Chebyshev window normalized so its centre sample, index (m-1)/2, is 1.
+// p and tab are caller scratch of length at least (m-1)/2+1 and 2*m, so an
+// analyzer can evaluate many lengths without allocating. The error guard is the
+// one dolph64 applies, on the centre instead of the peak.
+func dolphCentreInto(w, p, tab []float64, attenuationDB float64) error {
+	m := len(w)
+	if m == 1 {
+		w[0] = 1
+		return nil
+	}
+	dolphInto(w, p, tab, attenuationDB)
+	c := w[(m-1)/2]
+	if !(c > 0) || math.IsInf(c, 1) {
+		return fmt.Errorf("%w: Dolph-Chebyshev evaluation lost precision (length %d, attenuationDB %g)", ErrInvalidConfig, m, attenuationDB)
+	}
+	for i := range w {
+		w[i] /= c
+	}
+	return nil
+}
+
+// dolphInto fills w (length m >= 2) with the unnormalized symmetric m-point
+// Dolph-Chebyshev window by frequency sampling: the window is the inverse DFT of
+// the Chebyshev polynomial T_(m-1) evaluated at x0*cos(pi*k/m), where x0 is set
+// so the polynomial's sidelobe plateau sits attenuationDB below its peak (scipy
+// 1.18.1 scipy/signal/windows/_windows.py, chebwin).
+//
+// The spectrum samples are real and mirror-symmetric, so the inverse DFT of a
+// symmetric window reduces to w[i] = p[0] + 2*sum_{k=1..K} p[k]*cos(pi*k*d/m)
+// with d = (m-1) - 2*i and K = (m-1)/2, evaluated for the first half of the
+// window and mirrored. p and tab are scratch of length at least K+1 and 2*m.
+func dolphInto(w, p, tab []float64, attenuationDB float64) {
+	m := len(w)
 	order := float64(m - 1)
 	x0 := math.Cosh(math.Acosh(math.Pow(10, attenuationDB/20)) / order)
 	half := (m - 1) / 2
 
 	// For k <= half < m/2 the cosine is positive, so x > 0 and only the
 	// hyperbolic and the trigonometric branch of T_order are reachable.
-	p := make([]float64, half+1)
+	p = p[:half+1]
 	for k := range p {
 		x := x0 * math.Cos(math.Pi*float64(k)/float64(m))
 		if x > 1 {
@@ -125,7 +168,7 @@ func dolph64(m int, attenuationDB float64) ([]float64, error) {
 	// evaluating the cosine of large arguments. Indices stay below 2m, which is
 	// below 2^17 at the length cap, so they are safe for a 32-bit int.
 	period := 2 * m
-	tab := make([]float64, period)
+	tab = tab[:period]
 	for j := range tab {
 		tab[j] = math.Cos(math.Pi * float64(j) / float64(m))
 	}
@@ -144,16 +187,4 @@ func dolph64(m int, attenuationDB float64) ([]float64, error) {
 		w[i] = v
 		w[m-1-i] = v
 	}
-
-	// The domain keeps the evaluation positive and finite, so this guard does not
-	// fire for validated input; it keeps a NaN or Inf from reaching the caller if
-	// that measurement is ever wrong on some platform.
-	peak := slices.Max(w)
-	if !(peak > 0) || math.IsInf(peak, 1) {
-		return nil, fmt.Errorf("%w: Dolph-Chebyshev evaluation lost precision (length %d, attenuationDB %g)", ErrInvalidConfig, m, attenuationDB)
-	}
-	for i := range w {
-		w[i] /= peak
-	}
-	return w, nil
 }
