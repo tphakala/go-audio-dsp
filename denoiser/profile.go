@@ -175,7 +175,7 @@ func (d *Denoiser) EstimateNoiseProfile(x []float32) (*NoiseProfile, error) {
 		e.addBlock(f32.SumOfSquares(x[b*d.hop:(b+1)*d.hop]) / float32(d.hop))
 	}
 	e.pos = len(x)
-	best, w, _, err := e.selectWindow()
+	best, w, err := e.selectWindow()
 	if err != nil {
 		return nil, err
 	}

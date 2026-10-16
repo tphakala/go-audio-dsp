@@ -187,7 +187,7 @@ func (e *NoiseProfileEstimator) setCandidate(best int) {
 // EstimateNoiseProfile). It does not change the estimator, so it may be called
 // repeatedly and between Add calls.
 func (e *NoiseProfileEstimator) Profile() (*NoiseProfile, error) {
-	best, w, held, err := e.selectWindow()
+	best, w, err := e.selectWindow()
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +195,7 @@ func (e *NoiseProfileEstimator) Profile() (*NoiseProfile, error) {
 	if err != nil {
 		return nil, err
 	}
-	samples, err := e.windowSamples(start, end, held)
+	samples, err := e.windowSamples(start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -204,27 +204,25 @@ func (e *NoiseProfileEstimator) Profile() (*NoiseProfile, error) {
 
 // selectWindow picks the quietest window free of digital silence among the
 // blocks seen so far and applies the acceptance test. It returns the start
-// block, the window length in blocks and whether the candidate holds the
-// window's samples (false for a clip shorter than the window, which the ring
-// holds whole). It is the selection half of EstimateNoiseProfile, shared by the
-// whole-buffer and streaming paths.
-func (e *NoiseProfileEstimator) selectWindow() (best, w int, held bool, err error) {
+// block and the window length in blocks. It is the selection half of
+// EstimateNoiseProfile, shared by the whole-buffer and streaming paths.
+func (e *NoiseProfileEstimator) selectWindow() (best, w int, err error) {
 	if e.pos < e.n {
-		return 0, 0, false, ErrProfileTooShort
+		return 0, 0, ErrProfileTooShort
 	}
 	nb := len(e.energy)
 	w = min(e.w0, nb)
 
 	var bestSum float64
 	if nb >= e.w0 {
-		best, bestSum, held = e.tracker.best, e.tracker.bestSum, true
+		best, bestSum = e.tracker.best, e.tracker.bestSum
 	} else {
 		best, bestSum = quietestWindow(e.energy, w)
 	}
 	if best < 0 || !e.accepts(w, bestSum) {
-		return 0, 0, false, ErrNoQuietRegion
+		return 0, 0, ErrNoQuietRegion
 	}
-	return best, w, held, nil
+	return best, w, nil
 }
 
 // buildProfile measures the profile of samples, which cover [start, end) of the clip.
@@ -344,9 +342,10 @@ func profileRange(best, w, hop, frame, total int) (start, end int) {
 }
 
 // windowSamples returns the samples [start, end) from the ring or, when the
-// ring has moved past them and held is set, from the candidate's snapshot. The result aliases
-// internal memory and is only valid until the next Add or Profile call.
-func (e *NoiseProfileEstimator) windowSamples(start, end int, held bool) ([]float32, error) {
+// ring has moved past them, from the candidate's snapshot (a clip shorter than
+// the window never evicts, so it has no candidate). The result aliases internal
+// memory and is only valid until the next Add or Profile call.
+func (e *NoiseProfileEstimator) windowSamples(start, end int) ([]float32, error) {
 	c := len(e.ring)
 	if start >= e.pos-c {
 		off := start % c
@@ -356,7 +355,7 @@ func (e *NoiseProfileEstimator) windowSamples(start, end int, held bool) ([]floa
 		e.wrap = e.appendRing(e.wrap[:0], start, end)
 		return e.wrap, nil
 	}
-	if cd := &e.cand; held && cd.active && !cd.resident && cd.rs <= start && end <= cd.re {
+	if cd := &e.cand; cd.active && !cd.resident && cd.rs <= start && end <= cd.re {
 		return cd.snap[start-cd.rs : end-cd.rs], nil
 	}
 	return nil, errWindowEvicted
