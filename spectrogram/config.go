@@ -87,7 +87,8 @@ type Config struct {
 	// WindowLength is 0). It is copied at construction. Use it for a
 	// parameterized window such as stft.DolphChebyshev. The window-energy
 	// normalization is computed from the window actually used, so its overall
-	// scale does not change the output.
+	// scale does not change the output, as long as the scaled power spectrum and
+	// 1/sum(w^2) stay finite and nonzero in float32.
 	CustomWindow []float32
 	// WindowLength is the analysis window length in samples, in [1, FrameSize];
 	// 0 selects FrameSize. A shorter window is zero-padded into the FrameSize
