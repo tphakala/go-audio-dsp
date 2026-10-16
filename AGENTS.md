@@ -16,7 +16,7 @@ Packages:
 |---|---|---|
 | `dsp` (root) | | `Processor` and `Flusher` streaming contract, shared sentinels `ErrBufferTooSmall` and `ErrInvalidConfig`, `FactorFromDB` |
 | `loudnorm` | stable | EBU R 128 / BS.1770-4 two-pass loudness normalization of in-memory PCM (whole clip, not a `Processor`) |
-| `pcm` | stable | int16 <-> float32 conversion at the chain edges, saturating `ScaleInt16` |
+| `pcm` | stable | int16 <-> float32 conversion at the chain edges, saturating `ScaleInt16`, interleaved-to-mono downmix |
 | `denoiser` | beta | Spectral denoiser (measured or adaptive noise profile, Wiener / MMSE-LSA gain, overlap-add), `NoiseProfileEstimator` |
 | `denoiser/gate` | beta | Spectral soft-gate waveform denoiser, the lighter second denoise method |
 | `equalizer` | beta | RBJ biquad filter chain as a streaming block, plus frequency response for a UI curve; Butterworth band-pass and caller-supplied biquad sections as a `Filter` |

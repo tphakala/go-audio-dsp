@@ -25,4 +25,14 @@
 // scales from one []byte into another (or into itself), so a caller can gain a
 // chunk of a read-only source into a reusable scratch with no extra copy. Both
 // allocate nothing.
+//
+// DownmixBytesToFloat32 and DownmixFloat32 fold interleaved multi-channel audio
+// to mono at the same boundary. They average the channels, so a left-only
+// signal at amplitude x comes out at x/2 (the convention of sox "channels 1"
+// and ffmpeg "-ac 1"), and the int16 form scales like BytesToFloat32: with one
+// channel the result is bit-identical to it. A channel count below 1 wraps
+// ErrInvalidConfig, and input that is not a whole number of frames returns
+// ErrPartialFrame (or ErrOddByteLength for an odd byte count). The byte form
+// keeps the zero-copy read on hosts that allow it and the byte-wise read
+// elsewhere; both allocate nothing.
 package pcm
