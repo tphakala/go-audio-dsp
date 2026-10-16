@@ -3,6 +3,8 @@ package spectrogram
 import (
 	"slices"
 	"testing"
+
+	"github.com/tphakala/go-audio-dsp/stft"
 )
 
 // feedChunked feeds sig to s in irregular chunk sizes and returns each emitted
@@ -27,13 +29,22 @@ func TestStreamMatchesBatch(t *testing.T) {
 		sig[i] += v
 	}
 
-	cfgs := []Config{
-		{SampleRate: sr, FrameSize: n, HopSize: hop, Scale: Magnitude},
-		{SampleRate: sr, FrameSize: n, HopSize: hop, Scale: Power, MinHz: 500, MaxHz: 6000},
-		{SampleRate: sr, FrameSize: n, HopSize: hop, Scale: DB, GainDB: 3, DynamicRangeDB: 100},
+	dolph, err := stft.DolphChebyshev(n, 106.5)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, cfg := range cfgs {
-		t.Run(cfg.Scale.String(), func(t *testing.T) {
+	cfgs := []struct {
+		name string
+		cfg  Config
+	}{
+		{"magnitude", Config{SampleRate: sr, FrameSize: n, HopSize: hop, Scale: Magnitude}},
+		{"power", Config{SampleRate: sr, FrameSize: n, HopSize: hop, Scale: Power, MinHz: 500, MaxHz: 6000}},
+		{"db", Config{SampleRate: sr, FrameSize: n, HopSize: hop, Scale: DB, GainDB: 3, DynamicRangeDB: 100}},
+		{"db-dolph", Config{SampleRate: sr, FrameSize: n, HopSize: hop, Scale: DB, GainDB: 3, DynamicRangeDB: 100, CustomWindow: dolph}},
+	}
+	for _, tc := range cfgs {
+		cfg := tc.cfg
+		t.Run(tc.name, func(t *testing.T) {
 			batch, err := New(cfg)
 			if err != nil {
 				t.Fatal(err)

@@ -14,7 +14,10 @@
 // The framing is NoPad, matching stft.Analyzer: frame f spans input samples
 // [f*HopSize, f*HopSize+FrameSize). A consumer that wants the image aligned to
 // the very edges of the clip (centered framing) feeds its own leading zeros,
-// the same convention stft documents. Presentation stays with the consumer:
+// the same convention stft documents. The analysis window is Config.Window (a
+// built-in shape) or Config.CustomWindow (any window of WindowLength samples, for
+// example stft.DolphChebyshev), and magnitudes are normalized by the window
+// energy 1/sum(w^2) of the window actually used. Presentation stays with the consumer:
 // this package returns numbers (linear frequency bins plus a BinHz helper), and
 // colormaps, axes, legends, log-frequency remapping, and PNG encoding live in
 // the renderer.

@@ -314,6 +314,16 @@ func TestNumFramesAndHopForWidth(t *testing.T) {
 	}
 }
 
+// nanWindow returns an n-sample window of ones with one NaN sample.
+func nanWindow(n int) []float32 {
+	w := make([]float32, n)
+	for i := range w {
+		w[i] = 1
+	}
+	w[n/2] = float32(math.NaN())
+	return w
+}
+
 func TestConfigValidation(t *testing.T) {
 	cases := []struct {
 		name string
@@ -334,6 +344,12 @@ func TestConfigValidation(t *testing.T) {
 		// it selects no bin.
 		{"empty bin range", Config{SampleRate: 16000, FrameSize: 256, MinHz: 7010, MaxHz: 7040}},
 		{"frame size", Config{SampleRate: 16000, FrameSize: 100}}, // not power of two, stft rejects
+		// The window fields are forwarded to stft, which rejects each of these;
+		// without forwarding all three configs would build.
+		{"custom window length", Config{SampleRate: 16000, FrameSize: 256, CustomWindow: make([]float32, 100)}},
+		{"custom window nan", Config{SampleRate: 16000, FrameSize: 256, CustomWindow: nanWindow(256)}},
+		{"window length", Config{SampleRate: 16000, FrameSize: 256, WindowLength: 257}},
+		{"window align", Config{SampleRate: 16000, FrameSize: 256, WindowAlign: stft.WindowAlign(99)}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -352,5 +368,182 @@ func TestScaleString(t *testing.T) {
 		if got := s.String(); got != want {
 			t.Errorf("Scale(%d).String() = %q, want %q", int(s), got, want)
 		}
+	}
+}
+
+// twoPartialSignal is the 4096-sample two-tone signal shared by the custom-window
+// tests.
+func twoPartialSignal(sr int) []float32 {
+	sig := sine(4096, sr, 1000, 0.8)
+	for i, v := range sine(4096, sr, 3200, 0.3) {
+		sig[i] += v
+	}
+	return sig
+}
+
+// TestCustomWindowAgainstNaiveDFT drives the same pipeline as
+// TestComputeAgainstNaiveDFT with a Dolph-Chebyshev CustomWindow, against a naive
+// DFT that takes its window energy from the window it is given. Dropping the
+// forwarding of CustomWindow falls back to Hann and fails every scale.
+func TestCustomWindowAgainstNaiveDFT(t *testing.T) {
+	const sr, n, hop = 16000, 512, 128
+	sig := twoPartialSignal(sr)
+	w, err := stft.DolphChebyshev(n, 106.5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, sc := range []Scale{Magnitude, Power, DB} {
+		t.Run(sc.String(), func(t *testing.T) {
+			s, err := New(Config{SampleRate: sr, FrameSize: n, HopSize: hop, Scale: sc, CustomWindow: w})
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := s.Compute(sig)
+			for f := range m.Frames {
+				ref := naiveColumn(sig, w, f, hop)
+				peakPow := 0.0
+				for _, p := range ref {
+					peakPow = math.Max(peakPow, p)
+				}
+				for b := range m.Bins {
+					got := float64(m.At(b, f))
+					switch sc {
+					case Power:
+						if math.Abs(got-ref[b]) > 1e-3*peakPow {
+							t.Fatalf("power frame %d bin %d: got %g, want %g (peak %g)", f, b, got, ref[b], peakPow)
+						}
+					case Magnitude:
+						if want := math.Sqrt(ref[b]); math.Abs(got-want) > 1e-3*math.Sqrt(peakPow) {
+							t.Fatalf("magnitude frame %d bin %d: got %g, want %g", f, b, got, want)
+						}
+					case DB:
+						if ref[b] < peakPow*1e-4 {
+							continue
+						}
+						want := 10 * math.Log10(math.Max(ref[b], dbFloorPower))
+						if math.Abs(got-want) > 0.2 {
+							t.Fatalf("db frame %d bin %d: got %g, want %g", f, b, got, want)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestCustomWindowScaleInvariant pins that the window-energy normalization is
+// computed from the resolved window: doubling every sample of the window leaves
+// every column unchanged. A norm taken from anything else (for example the
+// built-in Window) would scale Power by 4 and Magnitude by 2.
+func TestCustomWindowScaleInvariant(t *testing.T) {
+	const sr, n, hop = 16000, 512, 128
+	sig := twoPartialSignal(sr)
+	w, err := stft.DolphChebyshev(n, 106.5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w2 := make([]float32, n)
+	for i, v := range w {
+		w2[i] = 2 * v // exact in float32
+	}
+
+	for _, sc := range []Scale{Magnitude, Power, DB} {
+		t.Run(sc.String(), func(t *testing.T) {
+			compute := func(cw []float32) Matrix {
+				s, err := New(Config{SampleRate: sr, FrameSize: n, HopSize: hop, Scale: sc, CustomWindow: cw})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return s.Compute(sig)
+			}
+			a, b := compute(w), compute(w2)
+			if a.Frames != b.Frames || a.Bins != b.Bins {
+				t.Fatalf("shape mismatch: %dx%d vs %dx%d", a.Bins, a.Frames, b.Bins, b.Frames)
+			}
+			for f := range a.Frames {
+				peak := 0.0
+				for bin := range a.Bins {
+					peak = math.Max(peak, math.Abs(float64(a.At(bin, f))))
+				}
+				for bin := range a.Bins {
+					x, y := float64(a.At(bin, f)), float64(b.At(bin, f))
+					if sc == DB {
+						// dB is meaningful within 40 dB of the column peak.
+						if x < peak-40 {
+							continue
+						}
+						if math.Abs(x-y) > 1e-4 {
+							t.Fatalf("db frame %d bin %d: %g vs %g", f, bin, x, y)
+						}
+						continue
+					}
+					if math.Abs(x-y) > 1e-5*peak {
+						t.Fatalf("%s frame %d bin %d: %g vs %g (peak %g)", sc, f, bin, x, y, peak)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestWindowLengthAlignForwarded checks that WindowLength and WindowAlign reach
+// stft: a 256-sample Hann window inside a 512-point frame, placed left or
+// centered, against a naive DFT of the explicitly padded window. The signal is a
+// tone gated on mid-stream so frames straddling the onset see the two
+// placements differently.
+func TestWindowLengthAlignForwarded(t *testing.T) {
+	const sr, n, hop, win = 16000, 512, 128, 256
+	sig := make([]float32, 4096)
+	for i := 1300; i < len(sig); i++ {
+		sig[i] = float32(0.8 * math.Sin(2*math.Pi*1000*float64(i)/sr))
+	}
+	hann := stft.GenerateWindow(stft.Hann, win)
+	placed := func(off int) []float32 {
+		w := make([]float32, n)
+		copy(w[off:], hann)
+		return w
+	}
+
+	mats := map[stft.WindowAlign]Matrix{}
+	for _, c := range []struct {
+		align stft.WindowAlign
+		off   int
+	}{{stft.AlignLeft, 0}, {stft.AlignCenter, (n - win) / 2}} {
+		s, err := New(Config{SampleRate: sr, FrameSize: n, HopSize: hop, Scale: Power, WindowLength: win, WindowAlign: c.align})
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := s.Compute(sig)
+		mats[c.align] = m
+		w := placed(c.off)
+		for f := range m.Frames {
+			ref := naiveColumn(sig, w, f, hop)
+			peakPow := 0.0
+			for _, p := range ref {
+				peakPow = math.Max(peakPow, p)
+			}
+			for b := range m.Bins {
+				if got := float64(m.At(b, f)); math.Abs(got-ref[b]) > 1e-3*peakPow {
+					t.Fatalf("align %v frame %d bin %d: got %g, want %g (peak %g)", c.align, f, b, got, ref[b], peakPow)
+				}
+			}
+		}
+	}
+
+	// The fixture must tell the placements apart, or the checks above could pass
+	// with the alignment ignored.
+	l, c := mats[stft.AlignLeft], mats[stft.AlignCenter]
+	differs := false
+	for f := 0; f < l.Frames && !differs; f++ {
+		for b := range l.Bins {
+			if l.At(b, f) != c.At(b, f) {
+				differs = true
+				break
+			}
+		}
+	}
+	if !differs {
+		t.Fatal("AlignLeft and AlignCenter matrices are identical; the signal does not discriminate")
 	}
 }

@@ -8,7 +8,7 @@ Orientation for coding agents and automated reviewers working on this repository
 
 1. **Build anywhere Go builds.** No cgo, no external binaries at runtime. Every package cross-compiles to every target BirdNET-Go ships on, including 32-bit ARM and little-endian MIPS.
 2. **Be fast without being fragile.** Hot loops go through `github.com/tphakala/simd` (AVX, NEON) with a portable Go fallback that gives the same result. Streaming blocks allocate nothing in steady state.
-3. **Be measurably correct.** Output is checked against reference implementations (ffmpeg `ebur128` and `afftdn`, librosa mel filterbanks), not just against itself. ffmpeg is a test oracle, never a runtime dependency.
+3. **Be measurably correct.** Output is checked against reference implementations (ffmpeg `ebur128` and `afftdn`, librosa mel filterbanks, scipy Dolph-Chebyshev windows), not just against itself. ffmpeg is a test oracle, never a runtime dependency.
 
 Packages:
 
@@ -69,6 +69,7 @@ chain_alloc_test.go      Steady-state chain allocation test
 <pkg>/ffmpeg_test.go     ffmpeg oracle tests (loudnorm, denoiser)
 denoiser/corpus_test.go  A/B against afftdn on a local real-clip corpus
 mel/testdata/            librosa mel filterbank golden values
+stft/testdata/           scipy chebwin golden values
 internal/audiotest/      Test-only signal, metric and A/B helpers
 rules/                   ruleguard matchers
 examples/streaming/      Runnable chain example
@@ -81,7 +82,7 @@ Unit tests run without external tools; the oracle tests skip when ffmpeg is not 
 - **Regression tests.** New behaviour gets a test. A bug fix gets a regression test that fails before the fix. A test must be able to fail: break the line it pins and confirm it fails, and avoid fixtures where every path gives the same result (silence, DC, a single sine for a frequency-dependent change).
 - **Contract tests.** Every streaming block is tested against the `Processor` contract: `MaxOutputLen` holds for every chunk size, `ErrBufferTooSmall` leaves state untouched, output length equals input length after flush, chunking does not change the result, and `Reset` starts a clean stream. Some of this lives in `contract_test.go`, the rest in chunk-invariance and reset tests next to the block; a new block covers all of it.
 - **Allocation tests.** `testing.AllocsPerRun` guards steady-state paths; they carry `//go:build !race` because the race detector allocates. A change on a hot path keeps them at zero.
-- **Reference oracles.** `loudnorm` is checked against ffmpeg `ebur128`, `denoiser` against `afftdn`, `mel` against librosa golden data. Tolerances are stated in the test; tighten them when the implementation improves, do not loosen them to make a change pass without explaining why in the PR.
+- **Reference oracles.** `loudnorm` is checked against ffmpeg `ebur128`, `denoiser` against `afftdn`, `mel` against librosa golden data, `stft` Dolph-Chebyshev windows against scipy `chebwin` golden data. Tolerances are stated in the test; tighten them when the implementation improves, do not loosen them to make a change pass without explaining why in the PR.
 - **Corpus A/B.** `task ab` runs `denoiser` and `denoiser/gate` against `afftdn` on real clips in `testdata/corpus/` and recorded noise beds in `testdata/noisebed/`. Both directories are local only and gitignored; the tests skip without them.
 - **Loudness corpus.** `task ab:loudnorm` runs `loudnorm.PlanBytes` against ffmpeg `loudnorm` on real clips in `loudnorm/testdata/corpus/` (or `LOUDNORM_CORPUS_DIR`), gitignored and local only; the test skips without the corpus or ffmpeg.
 - **Scalar path.** `task test:noasm` (`SIMD_DISABLE=all`, `-count=1` because the variable is read at init) runs the pure-Go kernels.

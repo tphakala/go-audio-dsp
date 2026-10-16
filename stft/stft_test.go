@@ -172,6 +172,16 @@ func TestNumFramesSemantics(t *testing.T) {
 	}
 }
 
+// windowWith returns an n-sample window of ones whose middle sample is v.
+func windowWith(n int, v float32) []float32 {
+	w := make([]float32, n)
+	for i := range w {
+		w[i] = 1
+	}
+	w[n/2] = v
+	return w
+}
+
 func TestConfigValidation(t *testing.T) {
 	cases := []struct {
 		name string
@@ -187,6 +197,8 @@ func TestConfigValidation(t *testing.T) {
 		{"hop negative", Config{FrameSize: 256, HopSize: -1}, ""},
 		{"bad window", Config{FrameSize: 256, Window: Window(99)}, ""},
 		{"custom window wrong len", Config{FrameSize: 256, CustomWindow: make([]float32, 100)}, "CustomWindow length"},
+		{"custom window nan", Config{FrameSize: 256, CustomWindow: windowWith(256, float32(math.NaN()))}, "must be finite"},
+		{"custom window inf", Config{FrameSize: 256, CustomWindow: windowWith(256, float32(math.Inf(1)))}, "must be finite"},
 		{"window length too large", Config{FrameSize: 256, WindowLength: 257}, "WindowLength"},
 		{"window length negative", Config{FrameSize: 256, WindowLength: -1}, "WindowLength"},
 		{"bad window align", Config{FrameSize: 256, WindowAlign: WindowAlign(99)}, "WindowAlign"},
