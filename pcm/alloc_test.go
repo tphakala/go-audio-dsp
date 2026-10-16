@@ -12,6 +12,7 @@ func TestZeroAllocConversions(t *testing.T) {
 	i16 := make([]int16, 1024)
 	f := make([]float32, 1024)
 	b := make([]byte, 2048)
+	mono := make([]float32, 1024)
 	for i := range i16 {
 		i16[i] = int16(i - 512)
 	}
@@ -23,6 +24,12 @@ func TestZeroAllocConversions(t *testing.T) {
 	if _, err := Float32ToBytes(b, f); err != nil {
 		t.Fatalf("Float32ToBytes: %v", err)
 	}
+	if n, err := DownmixFloat32(mono, f, 2); err != nil || n == 0 {
+		t.Fatalf("DownmixFloat32: n, err = %d, %v", n, err)
+	}
+	if n, err := DownmixFloat32(mono, f[:1023], 3); err != nil || n == 0 {
+		t.Fatalf("DownmixFloat32 3ch: n, err = %d, %v", n, err)
+	}
 	checks := []struct {
 		name string
 		fn   func()
@@ -32,6 +39,8 @@ func TestZeroAllocConversions(t *testing.T) {
 		{"BytesToFloat32", func() { _, _ = BytesToFloat32(f, b) }},
 		{"Float32ToBytes", func() { _, _ = Float32ToBytes(b, f) }},
 		{"ScaleInt16", func() { ScaleInt16(i16, 2.0) }},
+		{"DownmixFloat32 2ch", func() { _, _ = DownmixFloat32(mono, f, 2) }},
+		{"DownmixFloat32 3ch", func() { _, _ = DownmixFloat32(mono, f[:1023], 3) }},
 	}
 	for _, c := range checks {
 		if a := testing.AllocsPerRun(50, c.fn); a != 0 {
@@ -85,6 +94,27 @@ func TestZeroAllocByteScaling(t *testing.T) {
 		}
 		if a := testing.AllocsPerRun(50, func() { _, _ = BytesToInt16(i16, src) }); a != 0 {
 			t.Errorf("BytesToInt16 allocated %v times, want 0", a)
+		}
+	})
+}
+
+// TestZeroAllocDownmixBytes covers the byte downmix as bothPaths runs it (the
+// zero-copy read where the host allows it, and the byte-wise read), with a
+// source that starts at an odd address.
+func TestZeroAllocDownmixBytes(t *testing.T) {
+	src := oddStartBuf(t, 4096)
+	mono := make([]float32, 1024)
+	bothPaths(t, func(t *testing.T) {
+		t.Helper()
+		for _, ch := range []int{2, 3} {
+			s := src[:2*(len(src)/2/ch*ch)]
+			// An always-erroring call would allocate nothing and pass falsely.
+			if n, err := DownmixBytesToFloat32(mono, s, ch); err != nil || n == 0 {
+				t.Fatalf("channels=%d: n, err = %d, %v", ch, n, err)
+			}
+			if a := testing.AllocsPerRun(50, func() { _, _ = DownmixBytesToFloat32(mono, s, ch) }); a != 0 {
+				t.Errorf("DownmixBytesToFloat32 with %d channels allocated %v times, want 0", ch, a)
+			}
 		}
 	})
 }
