@@ -98,10 +98,10 @@ func chunkings(n int) map[string][]int {
 	return map[string][]int{"whole": {n}, "fixed": repeated, "shuffled": shuffled}
 }
 
-// streamAll feeds x in the given chunk lengths (clipped to the input) and
-// flushes, asserting the buffer-sizing contract at every call, and returns the
+// processAll feeds x in the given chunk lengths (clipped to the input) without
+// flushing, asserting the buffer-sizing contract at every call, and returns the
 // concatenated output.
-func streamAll(t *testing.T, s *Stream, x []float32, chunks []int) []float32 {
+func processAll(t *testing.T, s *Stream, x []float32, chunks []int) []float32 {
 	t.Helper()
 	var got []float32
 	pos := 0
@@ -122,6 +122,13 @@ func streamAll(t *testing.T, s *Stream, x []float32, chunks []int) []float32 {
 		}
 		got = append(got, out[:n]...)
 	}
+	return got
+}
+
+// flushAll flushes s into a Latency()+hop buffer, asserting the remainder
+// bound, and returns got followed by the flushed tail.
+func flushAll(t *testing.T, s *Stream, got []float32) []float32 {
+	t.Helper()
 	if rem := int(s.totalIn - s.totalOut); rem > s.Latency()+s.hop {
 		t.Fatalf("remainder %d before FlushInto exceeds Latency()+hop = %d", rem, s.Latency()+s.hop)
 	}
@@ -131,6 +138,13 @@ func streamAll(t *testing.T, s *Stream, x []float32, chunks []int) []float32 {
 		t.Fatalf("FlushInto with Latency()+hop buffer: %v", err)
 	}
 	return append(got, fb[:n]...)
+}
+
+// streamAll feeds x in the given chunk lengths and flushes, returning the
+// concatenated output.
+func streamAll(t *testing.T, s *Stream, x []float32, chunks []int) []float32 {
+	t.Helper()
+	return flushAll(t, s, processAll(t, s, x, chunks))
 }
 
 // TestStreamFrameIndexAndFlushFlag pins what the hook sees: frame indices count
@@ -143,22 +157,23 @@ func TestStreamFrameIndexAndFlushFlag(t *testing.T) {
 	for _, delay := range []int{0, 1, 2} {
 		for name, chunks := range chunkings(len(x)) {
 			s, h := newStream(t, delay)
-			streamAll(t, s, x, chunks)
+			got := processAll(t, s, x, chunks)
+			fed := len(h.idx) // frames fed by ProcessInto; the rest come from FlushInto
+			flushAll(t, s, got)
 			if h.resets != 1 {
 				t.Errorf("delay %d %s: reset hook ran %d times after one FlushInto, want 1", delay, name, h.resets)
 			}
 			if len(h.idx) == 0 {
 				t.Fatalf("delay %d %s: hook never ran", delay, name)
 			}
-			firstFlush := slices.Index(h.flushing, true)
-			if firstFlush < 0 {
-				t.Fatalf("delay %d %s: no frame was fed with flushing set", delay, name)
+			if fed == len(h.idx) {
+				t.Fatalf("delay %d %s: FlushInto fed no frames, so flushing is never exercised", delay, name)
 			}
 			for i, f := range h.idx {
 				if f != int64(i) {
 					t.Fatalf("delay %d %s: call %d got frame index %d, want %d", delay, name, i, f, i)
 				}
-				if want := i >= firstFlush; h.flushing[i] != want {
+				if want := i >= fed; h.flushing[i] != want {
 					t.Fatalf("delay %d %s: frame %d flushing = %v, want %v", delay, name, i, h.flushing[i], want)
 				}
 			}
