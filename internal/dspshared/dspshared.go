@@ -94,8 +94,8 @@ func noEmit(spec []complex64, power []float32) {}
 
 // pendingOutput reports how many output samples feeding extra more input
 // samples will emit. inFill is the analyzer's buffered sample count, frames the
-// frames completed so far, and warm the number of leading frames whose output
-// block is discarded. Emission count after F frames is max(0, F-warm).
+// frames completed so far, and warm the number of frames that complete before
+// the first output block is emitted. Emission count after F frames is max(0, F-warm).
 func pendingOutput(inFill, extra, n, hop int, frames, warm int64) int {
 	total := inFill + extra
 	if total < n {

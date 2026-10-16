@@ -22,8 +22,9 @@ type FrameFunc func(f int64, spec []complex64, power []float32, flushing bool) [
 // The stream is modelled as the padded sequence p = (n-hop zeros) ++ input ++
 // (flush zeros). Frame f is p[f*hop : f*hop+n]. Input sample t is p[t+n-hop],
 // so output is aligned with input. The output for frame f-delay is produced
-// when frame f completes; the first warm = n/hop-1+delay blocks are discarded
-// (leading zeros, plus the method's priming delay), and the steady-state lag is
+// when frame f completes. The first n/hop-1 blocks (leading zeros) are discarded
+// and the first delay frames produce none, so warm = n/hop-1+delay frames
+// complete before the first block is emitted. The steady-state lag is
 // (n-hop)+delay*hop samples. Framing, windowing, the RFFT and |X|^2 live in the
 // stft.Analyzer and the overlap-add in the stft.Synthesizer.
 //
@@ -34,7 +35,7 @@ type Stream struct {
 	syn    *stft.Synthesizer
 	n, hop int
 	delay  int   // frames the method holds a frame back (0 flagship, L gate)
-	warm   int64 // n/hop-1+delay: leading frames whose output block is discarded
+	warm   int64 // n/hop-1+delay: frames that complete before the first output block is emitted
 
 	prezeros []float32 // len n-hop: the leading-zero preroll fed on Reset
 	zeros    []float32 // len hop, fed by FlushInto
