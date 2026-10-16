@@ -52,8 +52,9 @@ type EdgeConfig struct {
 // spectrogram package's Spectrogram.
 //
 // The Dolph-Chebyshev shape is normalized so its centre sample is 1, not its peak
-// (DolphChebyshevSymmetric normalizes the peak); the two differ below about 86 dB
-// attenuation, and FullWindowSum depends on the choice.
+// (DolphChebyshevSymmetric normalizes the peak); the two differ only where the window
+// peaks away from its centre (below about 50 dB at 1025 points and 40 dB at 257; the
+// threshold rises with the frame size), and FullWindowSum depends on the choice.
 //
 // Edge windows depend only on the hop, the shape and, for drain frames, on the
 // drain geometry, so the analyzer caches them across Reset calls: the start-edge

@@ -32,8 +32,9 @@ const (
 // n = 512 and 1024 for attenuations from 50 to 126.6 dB, more at higher
 // attenuation and far more for short windows); use
 // DolphChebyshevSymmetric when the bound itself matters. Below about 45 dB the
-// window's noise bandwidth stops shrinking with attenuation, and long windows
-// peak at their endpoints rather than the center.
+// window's noise bandwidth stops shrinking with attenuation. Long windows peak
+// at their endpoints rather than the center below an attenuation that rises
+// with length (about 49 dB at 1025 points, 38 dB at 257).
 //
 // n must be in [1, 32768] and attenuationDB in [20, 200]; anything else, NaN
 // included, returns an error wrapping ErrInvalidConfig. Above about 150 dB the
