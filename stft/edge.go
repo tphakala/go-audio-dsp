@@ -40,8 +40,7 @@ type EdgeConfig struct {
 // window ends at the signal edge instead of cutting through a full-length one:
 //
 //   - A frame with drain zeros (d >= 1 of them) uses the m = N-d+1 point window
-//     at slot 0, zero after, whatever lead zeros it still holds. A clip shorter
-//     than a frame therefore has drain-rule frames only.
+//     at slot 0, zero after, whatever lead zeros it still holds.
 //   - Any other frame with e lead zeros uses the m = N-e+1 point window with its
 //     first m-1 points at slots [e, N); with e = 0 that is the full window.
 //

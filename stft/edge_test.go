@@ -335,8 +335,8 @@ func TestEdgeWindowRules(t *testing.T) {
 	}
 }
 
-// A clip shorter than a frame has its only frames in the drain, and they still
-// hold lead zeros. The model windows them with the drain rule (shape_m at slot
+// A clip this short has its only frames in the drain, and they still hold lead
+// zeros. The model windows them with the drain rule (shape_m at slot
 // 0, m = N-d+1), not the lead rule. N=1024, S=350, L=200: the frame has e = 337
 // and d = 487, so m = 538.
 func TestEdgeShortClipUsesDrainRule(t *testing.T) {
