@@ -104,8 +104,8 @@ func TestNoiseProfileEstimatorSnapshotAllocatedOnce(t *testing.T) {
 	e := d.NewNoiseProfileEstimator()
 	bytes, mallocs := allocDelta(func() { feedFloat(e, x, fixed(4800)) })
 	t.Logf("%d bytes, %d mallocs over 150 evictions", bytes, mallocs)
-	// Fixed buffers: two snapshots of region floats each, plus the energy array growth.
-	if limit := uint64(2*e.region*4 + 2<<20); bytes > limit {
+	// Fixed buffers: one snapshot of region floats, plus the energy array growth.
+	if limit := uint64(e.region*4 + 2<<20); bytes > limit {
 		t.Errorf("allocated %d bytes, want <= %d", bytes, limit)
 	}
 	if mallocs > 32 {

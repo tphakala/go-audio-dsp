@@ -386,11 +386,10 @@ func TestNoiseProfileEstimatorEvictionPathCovered(t *testing.T) {
 	tests := []struct {
 		name         string
 		wantResident bool
-		useUnmasked  bool
 	}{
-		{caseEarlyQuiet, false, false},
-		{caseWidenMidLong, false, false},
-		{caseQuietAtEnd, true, false},
+		{caseEarlyQuiet, false},
+		{caseWidenMidLong, false},
+		{caseQuietAtEnd, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -404,16 +403,9 @@ func TestNoiseProfileEstimatorEvictionPathCovered(t *testing.T) {
 			if gotErr != nil {
 				t.Fatalf("case must produce a profile, got %v", gotErr)
 			}
-			idx := 0
-			if tt.useUnmasked {
-				idx = 1
-				if e.masked.best >= 0 {
-					t.Fatal("masked tracker found a window; case does not exercise the unmasked fallback")
-				}
-			}
-			cand := e.cand[idx]
+			cand := e.cand
 			if !cand.active {
-				t.Fatalf("candidate %d is not active", idx)
+				t.Fatal("candidate is not active")
 			}
 			if cand.resident != tt.wantResident {
 				t.Fatalf("candidate resident = %v, want %v", cand.resident, tt.wantResident)

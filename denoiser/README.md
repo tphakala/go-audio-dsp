@@ -125,7 +125,7 @@ sources:
    (`EstimateNoiseProfile`), which `Denoise` uses. For a clip that arrives in
    chunks or is held as 16-bit PCM, `NewNoiseProfileEstimator` returns the same
    profile from `AddFloat32` / `AddInt16` calls in bounded memory (a fixed
-   buffer of about 0.4 MB at 48 kHz plus one float32 per hop block), without
+   buffer of about 0.3 MB at 48 kHz plus one float32 per hop block), without
    ever holding the clip as float32.
 3. An adaptive minima-controlled recursive averaging (MCRA) tracker that runs
    when no profile is set, so the estimate follows slowly changing noise.

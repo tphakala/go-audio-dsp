@@ -190,21 +190,20 @@ func (d *Denoiser) EstimateNoiseProfile(x []float32) (*NoiseProfile, error) {
 // time. The statements in push are the sliding-sum scan of quietestWindow, so
 // a stream of pushes and a whole-slice scan select identical windows.
 type windowTracker struct {
-	w           int
-	maskSilence bool
-	sum         float64
-	silent      int
-	best        int // start block of the best window so far, -1 if none
-	bestSum     float64
+	w       int
+	sum     float64
+	silent  int
+	best    int // start block of the best window so far, -1 if none
+	bestSum float64
 }
 
-func newWindowTracker(w int, maskSilence bool) windowTracker {
-	return windowTracker{w: w, maskSilence: maskSilence, best: -1, bestSum: math.Inf(1)}
+func newWindowTracker(w int) windowTracker {
+	return windowTracker{w: w, best: -1, bestSum: math.Inf(1)}
 }
 
-// reset returns the tracker to its initial state, keeping w and maskSilence.
+// reset returns the tracker to its initial state, keeping w.
 func (t *windowTracker) reset() {
-	*t = newWindowTracker(t.w, t.maskSilence)
+	*t = newWindowTracker(t.w)
 }
 
 // push accounts for the last element of energy (block len(energy)-1, with the
@@ -224,7 +223,7 @@ func (t *windowTracker) push(energy []float32) (improved bool) {
 			t.silent--
 		}
 	}
-	if b >= t.w-1 && (!t.maskSilence || t.silent == 0) && t.sum < t.bestSum {
+	if b >= t.w-1 && t.silent == 0 && t.sum < t.bestSum {
 		t.bestSum, t.best = t.sum, b-t.w+1
 		return true
 	}
@@ -232,11 +231,10 @@ func (t *windowTracker) push(energy []float32) (improved bool) {
 }
 
 // quietestWindow returns the start block and energy sum of the minimum-energy
-// window of w blocks; with maskSilence it considers only windows containing
-// no digital-silence block, returning -1 if there is none. Ties go to the
-// earliest window.
-func quietestWindow(energy []float32, w int, maskSilence bool) (start int, energySum float64) {
-	t := newWindowTracker(w, maskSilence)
+// window of w blocks that contains no digital-silence block, or -1 if there is
+// none. Ties go to the earliest window.
+func quietestWindow(energy []float32, w int) (start int, energySum float64) {
+	t := newWindowTracker(w)
 	for b := range energy {
 		t.push(energy[:b+1])
 	}
