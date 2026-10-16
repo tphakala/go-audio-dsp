@@ -171,3 +171,38 @@ func TestLogSweep(t *testing.T) {
 		}
 	}
 }
+
+// TestFilterResponseMatchesEqualizer pins that Filter.Response evaluates the
+// same cascade as Equalizer.Response: for a single band, magnitude and phase
+// are identical at every frequency of a sweep.
+func TestFilterResponseMatchesEqualizer(t *testing.T) {
+	freqs, err := LogSweep(10, 23000, 257)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bands := []Band{
+		{Type: HighPass, Frequency: 80, Q: 0.7071},
+		{Type: Peaking, Frequency: 1000, WidthHz: 400, GainDB: 6},
+		{Type: LowShelf, Frequency: 200, Q: 0.7071, GainDB: -3},
+		{Type: BandPass, Frequency: 2000, WidthHz: 500, Passes: 3},
+	}
+	for _, b := range bands {
+		t.Run(b.Type.String(), func(t *testing.T) {
+			t.Parallel()
+			e, err := New(Config{SampleRate: 48000, Bands: []Band{b}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := e.Response(freqs)
+			got := mustFilter(t, b, 48000).Response(freqs)
+			if len(got) != len(want) {
+				t.Fatalf("len = %d, want %d", len(got), len(want))
+			}
+			for i := range want {
+				if got[i] != want[i] {
+					t.Fatalf("freq %g Hz: Filter.Response = %+v, Equalizer.Response = %+v", freqs[i], got[i], want[i])
+				}
+			}
+		})
+	}
+}
