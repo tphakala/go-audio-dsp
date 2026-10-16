@@ -17,9 +17,9 @@ var ErrPartialFrame = errors.New("pcm: sample count is not a whole number of fra
 var ErrInvalidConfig = dsp.ErrInvalidConfig
 
 // DownmixBytesToFloat32 averages interleaved little-endian int16 frames of
-// channels samples each into mono float32 in [-1, 1), the way sox "channels 1"
-// and ffmpeg "-ac 1" do: a left-only signal at amplitude x comes out at x/2.
-// Each output is float32(sum of the frame's samples) * (1/(32768*channels)),
+// channels samples each into mono float32 in [-1, 1) with equal weight per
+// channel, as sox "channels 1" does: one channel of a stereo pair at amplitude
+// x gives x/2. Each output is float32(sum of the frame's samples) * (1/(32768*channels)),
 // with the scale rounded once to float32. The frame sum is exact and the scale
 // is a power of two for 1, 2 and 4 channels, so those results are exact;
 // channels=1 equals BytesToFloat32 bit for bit.
@@ -51,8 +51,7 @@ func DownmixBytesToFloat32(dst []float32, src []byte, channels int) (int, error)
 
 // DownmixFloat32 averages interleaved float32 frames of channels samples each
 // into mono: each output is the sum of the frame's samples times 1/channels.
-// The sum is carried in float64 and rounded to float32 once, so the result is
-// within one float32 ulp of the exact mean and channels=1 is a copy.
+// The sum is carried in float64 and rounded to float32 once.
 //
 // channels below 1 returns an error wrapping ErrInvalidConfig and a
 // len(src) that is not a multiple of channels returns ErrPartialFrame; both

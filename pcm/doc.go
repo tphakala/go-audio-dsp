@@ -27,9 +27,9 @@
 // allocate nothing.
 //
 // DownmixBytesToFloat32 and DownmixFloat32 fold interleaved multi-channel audio
-// to mono at the same boundary. They average the channels, so a left-only
-// signal at amplitude x comes out at x/2 (the convention of sox "channels 1"
-// and ffmpeg "-ac 1"), and the int16 form scales like BytesToFloat32: with one
+// to mono at the same boundary. They average the channels with equal weight, so
+// one channel of a stereo pair at amplitude x comes out at x/2 (as with sox
+// "channels 1"), and the int16 form scales like BytesToFloat32: with one
 // channel the result is bit-identical to it. A channel count below 1 wraps
 // ErrInvalidConfig, and input that is not a whole number of frames returns
 // ErrPartialFrame (or ErrOddByteLength for an odd byte count). The byte form

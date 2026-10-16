@@ -278,8 +278,8 @@ func TestDownmixFloat32Errors(t *testing.T) {
 	}
 }
 
-// BenchmarkDownmixBytesToFloat32 measures a 15 s clip at 48 kHz, the size of a
-// BirdNET-Go export, for stereo and 5.1 input. B/op must stay 0.
+// BenchmarkDownmixBytesToFloat32 measures a 15 s clip at 48 kHz for stereo
+// and 5.1 input. B/op must stay 0.
 func BenchmarkDownmixBytesToFloat32(b *testing.B) {
 	const frames = 15 * 48000
 	for _, c := range []struct {
