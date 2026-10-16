@@ -34,8 +34,8 @@ var ErrInvalidConfig = dsp.ErrInvalidConfig
 // byte by byte with identical results. It allocates nothing. dst and src must
 // not overlap.
 func DownmixBytesToFloat32(dst []float32, src []byte, channels int) (int, error) {
-	if channels < 1 {
-		return 0, fmt.Errorf("%w: channels must be >= 1, got %d", ErrInvalidConfig, channels)
+	if err := checkChannels(channels); err != nil {
+		return 0, err
 	}
 	if len(src)%2 != 0 {
 		return 0, ErrOddByteLength
@@ -59,8 +59,8 @@ func DownmixBytesToFloat32(dst []float32, src []byte, channels int) (int, error)
 // report a count of 0. Otherwise it converts min(len(dst), frames) frames and
 // returns that count. It allocates nothing. dst and src must not overlap.
 func DownmixFloat32(dst, src []float32, channels int) (int, error) {
-	if channels < 1 {
-		return 0, fmt.Errorf("%w: channels must be >= 1, got %d", ErrInvalidConfig, channels)
+	if err := checkChannels(channels); err != nil {
+		return 0, err
 	}
 	if len(src)%channels != 0 {
 		return 0, ErrPartialFrame
@@ -75,6 +75,15 @@ func DownmixFloat32(dst, src []float32, channels int) (int, error) {
 		dst[i] = float32(sum * inv)
 	}
 	return n, nil
+}
+
+// checkChannels rejects a channel count below 1 with an error wrapping
+// ErrInvalidConfig.
+func checkChannels(channels int) error {
+	if channels < 1 {
+		return fmt.Errorf("%w: channels must be >= 1, got %d", ErrInvalidConfig, channels)
+	}
+	return nil
 }
 
 // downmixScale is the per-frame multiplier of the int16 downmix: it folds the
