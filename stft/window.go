@@ -6,6 +6,8 @@ import (
 )
 
 // Window selects a built-in analysis window shape. The zero value is Hann.
+// Parameterized windows (DolphChebyshev, DolphChebyshevSymmetric) are not Window
+// values: a caller generates one and passes it as Config.CustomWindow.
 type Window int
 
 const (

@@ -66,6 +66,7 @@ type Config struct {
 	// FrameSize/4 (75% overlap), matching stft.
 	HopSize int
 	// Window selects the analysis window; the zero value is Hann (periodic).
+	// Ignored when CustomWindow is non-nil.
 	Window stft.Window
 	// Scale selects the output value mapping; the zero value is Magnitude.
 	Scale Scale
@@ -81,16 +82,40 @@ type Config struct {
 	// 0, or any positive value at or above Nyquist, is treated as Nyquist; a
 	// negative MaxHz is rejected. MinHz must be < the effective MaxHz.
 	MinHz, MaxHz float64
+	// CustomWindow, when non-nil, is the exact analysis window and overrides
+	// Window; its length must equal the effective WindowLength (FrameSize when
+	// WindowLength is 0). It is copied at construction. Use it for a
+	// parameterized window such as stft.DolphChebyshev. The window-energy
+	// normalization is computed from the window actually used, so its overall
+	// scale does not change the output, as long as the scaled power spectrum and
+	// 1/sum(w^2) stay finite and nonzero in float32.
+	CustomWindow []float32
+	// WindowLength is the analysis window length in samples, in [1, FrameSize];
+	// 0 selects FrameSize. A shorter window is zero-padded into the FrameSize
+	// frame per WindowAlign (stft.Config.WindowLength), so Bins, BinHz and the
+	// framing grid stay FrameSize.
+	WindowLength int
+	// WindowAlign places a window shorter than FrameSize inside the frame; the
+	// zero value is stft.AlignCenter.
+	WindowAlign stft.WindowAlign
 }
 
 // stftConfig projects the transform fields onto an stft.Config. FrameSize,
-// HopSize and Window are validated by stft when the engine is built.
+// HopSize and the window fields are validated by stft when the engine is built.
 func (c Config) stftConfig() stft.Config {
-	return stft.Config{FrameSize: c.FrameSize, HopSize: c.HopSize, Window: c.Window}
+	return stft.Config{
+		FrameSize:    c.FrameSize,
+		HopSize:      c.HopSize,
+		Window:       c.Window,
+		CustomWindow: c.CustomWindow,
+		WindowLength: c.WindowLength,
+		WindowAlign:  c.WindowAlign,
+	}
 }
 
-// validate checks the spectrogram-specific fields. FrameSize, HopSize and Window
-// are left to stft.NewAnalyzer, which wraps the same ErrInvalidConfig.
+// validate checks the spectrogram-specific fields. FrameSize, HopSize and the
+// window fields (Window, CustomWindow, WindowLength, WindowAlign) are left to
+// stft.NewAnalyzer, which wraps the same ErrInvalidConfig.
 func (c Config) validate() error {
 	if c.SampleRate <= 0 {
 		return fmt.Errorf("%w: SampleRate must be > 0, got %d", ErrInvalidConfig, c.SampleRate)

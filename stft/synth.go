@@ -41,7 +41,7 @@ type Synthesizer struct {
 // geometry. It returns an error wrapping ErrInvalidConfig when an is nil, or when the
 // window's overlap sum vanishes or is not finite at some position of the hop (for
 // example HopSize equal to FrameSize, a window much shorter than the hop, or a
-// custom window with infinite or overflowing values), since no normalization can
+// custom window whose squares overflow float32), since no normalization can
 // reconstruct those samples. A HopSize that does not divide FrameSize is accepted
 // as long as the overlap sum stays positive; the leading-zero preroll then ends part way through a block, so only floor((FrameSize-HopSize)/HopSize) blocks are entirely leading zeros.
 func NewSynthesizer(an *Analyzer) (*Synthesizer, error) {

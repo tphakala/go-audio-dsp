@@ -76,3 +76,18 @@ func ExampleSynthesizer() {
 	fmt.Println("reconstructed:", written >= len(in), maxErr < 1e-4)
 	// Output: reconstructed: true true
 }
+
+// Dolph-Chebyshev window: a parameterized window is generated once and passed as
+// CustomWindow. At this length and attenuation the window peaks at the center sample.
+func ExampleDolphChebyshev() {
+	w, err := stft.DolphChebyshev(2048, 106.5)
+	if err != nil {
+		panic(err)
+	}
+	a, err := stft.NewAnalyzer(stft.Config{FrameSize: 2048, CustomWindow: w})
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("%d %.4f %d\n", len(w), w[len(w)/2], a.NumBins())
+	// Output: 2048 1.0000 1025
+}

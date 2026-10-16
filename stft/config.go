@@ -2,6 +2,7 @@ package stft
 
 import (
 	"fmt"
+	"math"
 	"slices"
 )
 
@@ -21,12 +22,17 @@ type Config struct {
 	// hop position, which NewSynthesizer checks.
 	HopSize int
 	// Window selects the built-in analysis window shape. Ignored when CustomWindow
-	// is non-nil. The zero value is Hann (periodic).
+	// is non-nil. The zero value is Hann (periodic). Parameterized windows such as
+	// DolphChebyshev are not Window values; pass them as CustomWindow.
 	Window Window
 	// CustomWindow, when non-nil, is the exact analysis window and its length must
 	// equal the effective WindowLength (FrameSize when WindowLength is 0). It is
 	// copied, so the caller may reuse or mutate the slice afterwards; a window
 	// shorter than FrameSize is zero-padded per WindowAlign like a built-in one.
+	// Samples must be finite; a finite window large enough to overflow float32
+	// frame power still produces infinite output, and that stays the caller's
+	// concern. DolphChebyshev and DolphChebyshevSymmetric generate windows for
+	// this field.
 	CustomWindow []float32
 	// WindowLength is the analysis window length in samples, in [1, FrameSize]. 0
 	// selects FrameSize. A window shorter than FrameSize is zero-padded to FrameSize
@@ -68,6 +74,12 @@ func (c Config) resolve() (Config, error) {
 	if c.CustomWindow != nil {
 		if len(c.CustomWindow) != c.WindowLength {
 			return c, fmt.Errorf("%w: CustomWindow length %d must equal WindowLength %d", ErrInvalidConfig, len(c.CustomWindow), c.WindowLength)
+		}
+		// A NaN or Inf sample would flow into every frame's spectrum.
+		for i, v := range c.CustomWindow {
+			if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+				return c, fmt.Errorf("%w: CustomWindow[%d] must be finite, got %g", ErrInvalidConfig, i, v)
+			}
 		}
 	} else if !c.Window.valid() {
 		return c, fmt.Errorf("%w: unknown Window %d", ErrInvalidConfig, int(c.Window))

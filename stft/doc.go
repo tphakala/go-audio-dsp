@@ -28,7 +28,9 @@
 // window, so existing configs are unchanged.
 //
 // GenerateWindow and WOLANorm are exposed for consumers that build their own
-// windows or need the overlap-add normalization for resynthesis.
+// windows or need the overlap-add normalization for resynthesis. DolphChebyshev
+// (periodic, the default form) and DolphChebyshevSymmetric generate the
+// parameterized Dolph-Chebyshev window, which feeds Config.CustomWindow.
 //
 // A Plan and an Analyzer each hold per-transform scratch through their simd plan,
 // so neither is safe for concurrent use; build one per goroutine. Distinct Plans

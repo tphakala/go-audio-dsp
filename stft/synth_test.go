@@ -110,23 +110,18 @@ func TestNewSynthesizerRejectsNilAndNonFinite(t *testing.T) {
 		t.Errorf("nil Analyzer: err = %v, want ErrInvalidConfig", err)
 	}
 	const n, hop = 256, 64
-	inf := make([]float32, n)
-	for i := range inf {
-		inf[i] = 1
-	}
-	inf[10] = float32(math.Inf(1))
-	huge := make([]float32, n) // squares overflow float32 in the overlap sum
+	// Finite taps whose squares overflow float32 in the overlap sum. A non-finite
+	// tap never gets this far: NewAnalyzer rejects it (TestConfigValidation).
+	huge := make([]float32, n)
 	for i := range huge {
 		huge[i] = 1e20
 	}
-	for name, w := range map[string][]float32{"+Inf tap": inf, "overflowing taps": huge} {
-		an, err := NewAnalyzer(Config{FrameSize: n, HopSize: hop, CustomWindow: w})
-		if err != nil {
-			t.Fatalf("%s: NewAnalyzer: %v", name, err)
-		}
-		if _, err := NewSynthesizer(an); !errors.Is(err, ErrInvalidConfig) {
-			t.Errorf("%s: err = %v, want ErrInvalidConfig", name, err)
-		}
+	an, err := NewAnalyzer(Config{FrameSize: n, HopSize: hop, CustomWindow: huge})
+	if err != nil {
+		t.Fatalf("NewAnalyzer: %v", err)
+	}
+	if _, err := NewSynthesizer(an); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("overflowing taps: err = %v, want ErrInvalidConfig", err)
 	}
 }
 
