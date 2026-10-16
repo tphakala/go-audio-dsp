@@ -192,15 +192,17 @@ func TestFitSoxEdges(t *testing.T) {
 // image for these (TestSoxLive checks that where sox is installed).
 func TestFitSoxEdgesZeroColumns(t *testing.T) {
 	clip := soxSignal(t, soxRef{})
+	const span = 15 * soxClipRate
+	lg := soxRef{name: "lg", x: 1026, y: 513, spanSample: span, z: 100}
 	cases := []struct {
 		ref soxRef
 		l   int
 	}{
-		{soxRef{name: "lg", x: 1026, y: 513, spanSample: 15 * soxClipRate, z: 100}, 1},
-		{soxRef{name: "lg", x: 1026, y: 513, spanSample: 15 * soxClipRate, z: 100}, 100},
-		{soxRef{name: "lg", x: 1026, y: 513, spanSample: 15 * soxClipRate, z: 100}, 174},
-		{soxRef{name: "sm", x: 258, y: 129, spanSample: 15 * soxClipRate, z: 100, dolph: true}, 1},
-		{soxRef{name: "xl", x: 2050, y: 1025, spanSample: 15 * soxClipRate, z: 100, dolph: true}, 1},
+		{lg, 1},
+		{lg, 100},
+		{lg, 174},
+		{soxRef{name: "sm", x: 258, y: 129, spanSample: span, z: 100, dolph: true}, 1},
+		{soxRef{name: "xl", x: 2050, y: 1025, spanSample: span, z: 100, dolph: true}, 1},
 	}
 	for _, c := range cases {
 		f := soxFit(t, c.ref)
@@ -235,13 +237,10 @@ func TestSoxReadmeListsCommands(t *testing.T) {
 	}
 }
 
-// TestSoxLive re-renders every reference with the installed sox and checks that
-// the committed images are what this sox build writes, then compares Fit with the
-// renders that are not committed. It skips without sox.
-func TestSoxLive(t *testing.T) {
-	if !haveSox() {
-		t.Skip("sox not on PATH")
-	}
+// soxTempDir returns a fresh directory holding a copy of the reference clip, for
+// sox to write its renders into.
+func soxTempDir(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
 	clip, err := os.ReadFile(filepath.Join(soxDir, "clip.wav"))
 	if err != nil {
@@ -250,6 +249,17 @@ func TestSoxLive(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "clip.wav"), clip, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	return dir
+}
+
+// TestSoxLive re-renders every reference with the installed sox and checks that
+// the committed images are what this sox build writes, then compares Fit with the
+// renders that are not committed. It skips without sox.
+func TestSoxLive(t *testing.T) {
+	if !haveSox() {
+		t.Skip("sox not on PATH")
+	}
+	dir := soxTempDir(t)
 	for _, r := range soxRefs() {
 		runSox(t, dir, r.args())
 		live := readSoxPNG(t, filepath.Join(dir, r.name+".png"))
@@ -272,14 +282,7 @@ func TestSoxLiveEmpty(t *testing.T) {
 	if !haveSox() {
 		t.Skip("sox not on PATH")
 	}
-	dir := t.TempDir()
-	clip, err := os.ReadFile(filepath.Join(soxDir, "clip.wav"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "clip.wav"), clip, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dir := soxTempDir(t)
 	empty := []soxRef{
 		{name: "e-lg-1", x: 1026, y: 513, span: "15", z: 100, trim: 1},
 		{name: "e-lg-174", x: 1026, y: 513, span: "15", z: 100, trim: 174},
@@ -301,14 +304,7 @@ func TestSoxLiveGain(t *testing.T) {
 	if !haveSox() {
 		t.Skip("sox not on PATH")
 	}
-	dir := t.TempDir()
-	clip, err := os.ReadFile(filepath.Join(soxDir, "clip.wav"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "clip.wav"), clip, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	dir := soxTempDir(t)
 	const gain = 10
 	r := soxRef{name: "gain", x: 514, y: 257, spanSample: 15 * soxClipRate, z: 100}
 	args := []string{"clip.wav", "-n", "spectrogram", "-x", "514", "-y", "257", "-d", "15", "-z", "100", "-Z", "-10", "-w", hannName, "-o", "gain.png", "-r"}

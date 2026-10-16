@@ -307,11 +307,6 @@ func (f *Fit) ComputeInto(dst *Matrix, signal []float32, spanSamples int64) (int
 	if cap(dst.Data) < need {
 		return 0, ErrBufferTooSmall
 	}
-	return f.fill(dst, signal, need), nil
-}
-
-// fill runs the signal through the reset Fit into dst, which has capacity need.
-func (f *Fit) fill(dst *Matrix, signal []float32, need int) int {
 	dst.Data = dst.Data[:need]
 	dst.Bins = f.bins
 	bins := f.bins
@@ -321,17 +316,17 @@ func (f *Fit) fill(dst *Matrix, signal []float32, need int) int {
 	f.Feed(signal, onColumn)
 	f.Finish(onColumn)
 	dst.Frames = f.emitted
-	return f.emitted
+	return f.emitted, nil
 }
 
 // Compute returns a freshly allocated Matrix for signal; see ComputeInto for the
 // span. Reuse ComputeInto with a retained Matrix on a hot path.
 func (f *Fit) Compute(signal []float32, spanSamples int64) (Matrix, error) {
-	if err := f.Reset(f.resolveSpan(len(signal), spanSamples)); err != nil {
+	span := f.resolveSpan(len(signal), spanSamples)
+	if err := f.Reset(span); err != nil {
 		return Matrix{}, err
 	}
-	need := f.bins * f.NumColumns(int64(len(signal)))
-	m := Matrix{Data: make([]float32, need)}
-	f.fill(&m, signal, need)
-	return m, nil
+	m := Matrix{Data: make([]float32, f.bins*f.NumColumns(int64(len(signal))))}
+	_, err := f.ComputeInto(&m, signal, span)
+	return m, err
 }
