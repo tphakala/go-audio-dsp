@@ -8,7 +8,7 @@ Orientation for coding agents and automated reviewers working on this repository
 
 1. **Build anywhere Go builds.** No cgo, no external binaries at runtime. Every package cross-compiles to every target BirdNET-Go ships on, including 32-bit ARM and little-endian MIPS.
 2. **Be fast without being fragile.** Hot loops go through `github.com/tphakala/simd` (AVX, NEON) with a portable Go fallback that gives the same result. Streaming blocks allocate nothing in steady state.
-3. **Be measurably correct.** Output is checked against reference implementations (ffmpeg `ebur128` and `afftdn`, librosa mel filterbanks, scipy Dolph-Chebyshev windows), not just against itself. ffmpeg is a test oracle, never a runtime dependency.
+3. **Be measurably correct.** Output is checked against reference implementations (ffmpeg `ebur128` and `afftdn`, librosa mel filterbanks, scipy Dolph-Chebyshev windows, sox `spectrogram` renders), not just against itself. ffmpeg and sox are test oracles, never runtime dependencies.
 
 Packages:
 
@@ -22,7 +22,7 @@ Packages:
 | `equalizer` | beta | RBJ biquad filter chain as a streaming block, plus frequency response for a UI curve; Butterworth band-pass and caller-supplied biquad sections as a `Filter` |
 | `gain` | beta | Fixed decibel gain as a streaming block, saturating int16 entry points |
 | `stft` | beta | Shared STFT layer: whole-clip `Plan`, streaming `Analyzer`, overlap-add `Synthesizer`, `EdgeAnalyzer` (sox-schedule frames with edge-adapted windows and a window cache), windows |
-| `spectrogram` | beta | Magnitude, power or dB spectrogram matrix, whole clip or streaming columns |
+| `spectrogram` | beta | Magnitude, power or dB spectrogram matrix, whole clip or streaming columns; `Fit`, a sox-compatible fit-to-width producer (step and block geometry, block-mean columns, unclamped dB) |
 | `mel` | beta | Per-frame (log-)mel columns; normalization, stacking and tensor layout are the consumer's job |
 | `octave` | beta | Streaming 1/3-octave band level meter (a meter, not a `Processor`): ISO 266 / IEC 61260-1 bands, mean square per period, built on `equalizer` filters (RBJ BandPass by default, an optional Butterworth band-pass profile) |
 | `internal/dspshared` | | Helpers shared by `denoiser` and `denoiser/gate` (floor guard, geometry defaults, emission arithmetic, the overlap-add stream driver) so a fix lands once |
@@ -67,6 +67,7 @@ chain_alloc_test.go      Steady-state chain allocation test
 <pkg>/contract_test.go   Processor conformance (denoiser, equalizer, gain)
 <pkg>/alloc_test.go      Allocation guards (build tag !race)
 <pkg>/ffmpeg_test.go     ffmpeg oracle tests (loudnorm, denoiser)
+spectrogram/testdata/sox/  committed sox 14.4.2 spectrogram renders and their input clip (Fit oracle)
 denoiser/corpus_test.go  A/B against afftdn on a local real-clip corpus
 mel/testdata/            librosa mel filterbank golden values
 stft/testdata/           scipy chebwin golden values
@@ -77,12 +78,12 @@ examples/streaming/      Runnable chain example
 
 ## Testing approach
 
-Unit tests run without external tools; the oracle tests skip when ffmpeg is not on PATH.
+Unit tests run without external tools; the oracle tests skip when ffmpeg (or, for the live sox comparison, sox) is not on PATH.
 
 - **Regression tests.** New behaviour gets a test. A bug fix gets a regression test that fails before the fix. A test must be able to fail: break the line it pins and confirm it fails, and avoid fixtures where every path gives the same result (silence, DC, a single sine for a frequency-dependent change).
 - **Contract tests.** Every streaming block is tested against the `Processor` contract: `MaxOutputLen` holds for every chunk size, `ErrBufferTooSmall` leaves state untouched, output length equals input length after flush, chunking does not change the result, and `Reset` starts a clean stream. Some of this lives in `contract_test.go`, the rest in chunk-invariance and reset tests next to the block; a new block covers all of it.
 - **Allocation tests.** `testing.AllocsPerRun` guards steady-state paths; they carry `//go:build !race` because the race detector allocates. A change on a hot path keeps them at zero.
-- **Reference oracles.** `loudnorm` is checked against ffmpeg `ebur128`, `denoiser` against `afftdn`, `mel` against librosa golden data, `stft` Dolph-Chebyshev windows against scipy `chebwin` golden data, `octave`'s Butterworth profile against the IEC 61260:1995 class 1 and 2 relative attenuation template (IS 6964:2001 Table 1, Annex B), `equalizer`'s Butterworth band-pass against the analytic Butterworth magnitude. Tolerances are stated in the test; tighten them when the implementation improves, do not loosen them to make a change pass without explaining why in the PR.
+- **Reference oracles.** `loudnorm` is checked against ffmpeg `ebur128`, `denoiser` against `afftdn`, `mel` against librosa golden data, `stft` Dolph-Chebyshev windows against scipy `chebwin` golden data, `spectrogram` `Fit` against sox 14.4.2 `spectrogram` raw PNG palette indices (`spectrogram/testdata/sox`), `octave`'s Butterworth profile against the IEC 61260:1995 class 1 and 2 relative attenuation template (IS 6964:2001 Table 1, Annex B), `equalizer`'s Butterworth band-pass against the analytic Butterworth magnitude. Tolerances are stated in the test; tighten them when the implementation improves, do not loosen them to make a change pass without explaining why in the PR.
 - **Corpus A/B.** `task ab` runs `denoiser` and `denoiser/gate` against `afftdn` on real clips in `testdata/corpus/` and recorded noise beds in `testdata/noisebed/`. Both directories are local only and gitignored; the tests skip without them.
 - **Loudness corpus.** `task ab:loudnorm` runs `loudnorm.PlanBytes` against ffmpeg `loudnorm` on real clips in `loudnorm/testdata/corpus/` (or `LOUDNORM_CORPUS_DIR`), gitignored and local only; the test skips without the corpus or ffmpeg.
 - **Scalar path.** `task test:noasm` (`SIMD_DISABLE=all`, `-count=1` because the variable is read at init) runs the pure-Go kernels.
@@ -137,7 +138,7 @@ Intentional, do not flag:
 - `loudnorm` not implementing `Processor`: two-pass normalization needs the whole clip.
 - Scratch that grows to the largest chunk seen and never shrinks; that is the documented allocation model.
 - Alloc tests behind `//go:build !race`.
-- Oracle and corpus tests skipping without ffmpeg or without the local corpus.
+- Oracle and corpus tests skipping without ffmpeg, sox or the local corpus.
 - The `pcm` zero-copy reinterpret on little-endian hosts with safe unaligned access, and the byte-wise MIPS fallback.
 - gocritic `hugeParam` disabled; the shared lint standard keeps it off.
 - Breaking exported-API changes before v1.0.0 (see API stability), and the absence of deprecated aliases, adapters or shims for the old form.

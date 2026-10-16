@@ -1,6 +1,10 @@
 package spectrogram
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tphakala/go-audio-dsp/stft"
+)
 
 // benchClip benchmarks whole-clip ComputeInto for a fixed config and clip.
 func benchClip(b *testing.B, cfg Config, clipSamples int) {
@@ -56,4 +60,37 @@ func BenchmarkStreamFeed(b *testing.B) {
 		cs.Reset()
 	}
 	_ = sink
+}
+
+// BenchmarkFit: a warmed Fit.ComputeInto over a 15 s clip at 24 kHz with a 15 s
+// span, the BirdNET-Go clip shape, at the lg (1024) and xl (2048) frame sizes
+// with Hann and Dolph-Chebyshev windows.
+func BenchmarkFit(b *testing.B) {
+	const rate, samples = 24000, 15 * 24000
+	sig := sine(samples, rate, 3000, 0.5)
+	for _, g := range []struct {
+		name string
+		n    int
+	}{{"lg", 1024}, {"xl", 2048}} {
+		for _, w := range []struct {
+			name  string
+			shape stft.WindowShape
+		}{{hannName, hannShape}, {"dolph", dolphShape(100)}} {
+			b.Run(g.name+"/"+w.name, func(b *testing.B) {
+				f, err := NewFit(FitConfig{SampleRate: rate, FrameSize: g.n, Columns: g.n + 2, Window: w.shape})
+				if err != nil {
+					b.Fatal(err)
+				}
+				m := Matrix{Data: make([]float32, f.Bins()*(g.n+2))}
+				// One-time checked call: the loop discards its result.
+				if got, err := f.ComputeInto(&m, sig, samples); err != nil || got == 0 {
+					b.Fatalf("ComputeInto = (%d, %v)", got, err)
+				}
+				b.ReportAllocs()
+				for b.Loop() {
+					_, _ = f.ComputeInto(&m, sig, samples)
+				}
+			})
+		}
+	}
 }
