@@ -281,7 +281,11 @@ func TestButterworthTemplate(t *testing.T) {
 			rates = append(rates, rate)
 		}
 		for _, rate := range rates {
-			checkMeterTemplate(t, mustMeter(t, Config{SampleRate: rate, PeriodSamples: 1, Filter: FilterButterworth}), rate, coarseStep)
+			m := mustMeter(t, Config{SampleRate: rate, PeriodSamples: 1, Filter: FilterButterworth})
+			if bands := m.Bands(); rate == 47131 && bands[len(bands)-1].Nominal != 20000 {
+				t.Fatalf("%d Hz: top band %v, want the 20 kHz band that the case exists to cover", rate, bands[len(bands)-1].Nominal)
+			}
+			checkMeterTemplate(t, m, rate, coarseStep)
 		}
 	})
 	for _, rate := range []int{96000, 192000, 256000, 384000} {

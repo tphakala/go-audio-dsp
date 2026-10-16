@@ -112,6 +112,25 @@ func TestButterworthNoiseBias(t *testing.T) {
 	}
 }
 
+// TestButterworthEdgeLevels pins the edge placement the documentation states:
+// the gain at each band edge, relative to the centre, is -3.0103 dB to within
+// 0.002 dB for every band the meter includes (measured worst 0.0004 dB, in the
+// 20 kHz band at 48 kHz; an upper edge at exactly 0.95 of Nyquist reads 0.0011
+// dB). The default range of each tested rate is covered.
+func TestButterworthEdgeLevels(t *testing.T) {
+	for _, rate := range testRates {
+		m := mustMeter(t, Config{SampleRate: rate, PeriodSamples: 1, Filter: FilterButterworth})
+		for i, b := range m.Bands() {
+			p := m.filters[i].Response([]float64{b.Exact, b.Lower, b.Upper})
+			for _, e := range p[1:] {
+				if d := math.Abs(e.GainDB - p[0].GainDB - (-3.0103)); d > 0.002 {
+					t.Errorf("%d Hz band %v: gain at %.1f Hz is %.4f dB below the centre, want 3.0103 within 0.002", rate, b.Nominal, e.Hz, p[0].GainDB-e.GainDB)
+				}
+			}
+		}
+	}
+}
+
 // TestButterworthMatchesFilterReference pins that the meter's Butterworth bands
 // are the equalizer's Butterworth band-pass of the documented prototype order
 // over each band's edges: the per-period mean square equals a reference that

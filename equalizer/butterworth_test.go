@@ -127,6 +127,30 @@ func TestButterworthBandPassLevels(t *testing.T) {
 	}
 }
 
+// TestButterworthBandPassEdgeLevelNearNyquist pins what the constructor
+// documents about the edge level: the gain is normalized at the geometric
+// centre, which lies a little below the peak, so an edge reads above -3.0103 dB.
+// For order 4 and a one-third-octave band at 0.95 of Nyquist the difference is
+// within 0.002 dB; for order 1 and an upper edge of 21 kHz at 48 kHz it is
+// 0.22 dB.
+func TestButterworthBandPassEdgeLevelNearNyquist(t *testing.T) {
+	const rate = 48000
+	edge := func(order int, upper float64) float64 {
+		lower := upper * math.Pow(10, -0.1)
+		f, err := NewButterworthBandPass(lower, upper, order, rate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f.Response([]float64{upper})[0].GainDB
+	}
+	if g := edge(4, 0.95*rate/2); math.Abs(g-(-3.0103)) > 0.002 || g < -3.0103 {
+		t.Errorf("order 4 at 0.95 of Nyquist: upper edge reads %.4f dB, want -3.0103 within 0.002 and not below it", g)
+	}
+	if g := edge(1, 21000); math.Abs(g-(-2.787)) > 0.005 {
+		t.Errorf("order 1, upper edge 21 kHz at 48 kHz: reads %.4f dB, want about -2.787", g)
+	}
+}
+
 // TestButterworthBandPassInvalid pins the construction checks: every rejection
 // wraps ErrInvalidConfig and returns no filter.
 func TestButterworthBandPassInvalid(t *testing.T) {
