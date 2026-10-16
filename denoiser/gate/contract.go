@@ -29,4 +29,4 @@ func (g *Gate) HopSize() int { return g.hop }
 // time-smoothing lookahead delays emission, so a small input can produce fewer
 // samples, even zero). Sizing an output buffer with it guarantees ProcessInto
 // never returns ErrBufferTooSmall.
-func (g *Gate) MaxOutputLen(inputLen int) int { return inputLen + g.hop }
+func (g *Gate) MaxOutputLen(inputLen int) int { return g.st.MaxOutputLen(inputLen) }

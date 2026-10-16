@@ -17,10 +17,8 @@ type Denoiser struct {
 	ovl        int // n/hop: frames overlapping any sample
 	bins       int // n/2+1
 
-	plan     *stft.Plan        // whole-clip transform, for noise-profile measurement
-	an       *stft.Analyzer    // streaming analysis: framing, window, RFFT, |X|^2
-	syn      *stft.Synthesizer // WOLA overlap-add over the analyzer's window
-	prezeros []float32         // len n-hop: the leading-zero preroll fed on Reset
+	plan *stft.Plan // whole-clip transform, for noise-profile measurement
+	st   dspshared.Stream
 
 	gains    *gainState
 	noise    []float32 // active noise power: noiseBuf (fixed profile) or tracker.noise
@@ -28,11 +26,7 @@ type Denoiser struct {
 	profile  *NoiseProfile
 	tracker  *mcra
 
-	// stream state
-	gain              []float32 // per-bin real gain, reused each frame
-	zeros             []float32 // len hop, fed by Flush
-	frames            int64     // frames processed in this stream
-	totalIn, totalOut int64
+	gain []float32 // per-bin real gain, reused each frame
 }
 
 // New returns a Denoiser for cfg. Until SetNoiseProfile is called the noise
@@ -69,18 +63,13 @@ func New(cfg Config) (*Denoiser, error) {
 		ovl:        rc.FrameSize / rc.HopSize,
 		bins:       plan.NumBins(),
 		plan:       plan,
-		an:         an,
 	}
-	syn, err := stft.NewSynthesizer(an)
-	if err != nil {
+	if err := d.st.Init(an, 0, d.frame, d.resetState); err != nil {
 		return nil, err
 	}
-	d.syn = syn
-	d.prezeros = make([]float32, d.n-d.hop)
 	d.gains = newGainState(d.bins, p)
 	d.noiseBuf = make([]float32, d.bins)
 	d.gain = make([]float32, d.bins)
-	d.zeros = make([]float32, d.hop)
 	d.initNoiseSource()
 	d.Reset()
 	return d, nil
@@ -99,20 +88,16 @@ func (d *Denoiser) initNoiseSource() {
 // Latency returns how many samples the output lags the input in steady state:
 // FrameSize - HopSize. Output is emitted in whole hop blocks, so between block
 // boundaries the lag is up to HopSize-1 samples more; Flush drains the rest.
-func (d *Denoiser) Latency() int { return d.n - d.hop }
+func (d *Denoiser) Latency() int { return d.st.Latency() }
 
 // Reset clears the stream state (analysis buffer, overlap-add accumulator,
 // decision-directed and tracker state, sample counters) so the next Process
 // starts a new stream. The configuration and any set noise profile are kept.
-func (d *Denoiser) Reset() {
-	// The stream is modelled as n-hop leading zeros ++ input. Prime the analyzer
-	// with that preroll so the first output sample aligns with the first input
-	// sample; n-hop < n, so no frame completes and NoEmit is never called.
-	d.an.Reset()
-	d.an.Feed(d.prezeros, dspshared.NoEmit)
-	d.syn.Reset()
-	d.frames = 0
-	d.totalIn, d.totalOut = 0, 0
+func (d *Denoiser) Reset() { d.st.Reset() }
+
+// resetState clears the decision-directed gain and tracker state; the stream
+// driver calls it from Reset.
+func (d *Denoiser) resetState() {
 	d.gains.reset()
 	if d.tracker != nil {
 		d.tracker.reset()
@@ -122,52 +107,24 @@ func (d *Denoiser) Reset() {
 // Process denoises the next chunk of the stream and returns the output samples
 // that became final, in a freshly allocated slice (possibly empty). Output is
 // aligned sample-for-sample with input and lags by Latency(); see Flush.
-func (d *Denoiser) Process(in []float32) ([]float32, error) {
-	out := make([]float32, d.pendingOutput(len(in)))
-	n, err := d.ProcessInto(in, out)
-	return out[:n], err
-}
+func (d *Denoiser) Process(in []float32) ([]float32, error) { return d.st.Process(in) }
 
 // ProcessInto is Process without allocation: it writes the output samples that
 // become final into out and returns their count. The count is known before
 // any work is done; if len(out) is smaller, ErrBufferTooSmall is returned and
 // nothing is consumed. len(out) >= MaxOutputLen(len(in)) always suffices.
-func (d *Denoiser) ProcessInto(in, out []float32) (int, error) {
-	need := d.pendingOutput(len(in))
-	if len(out) < need {
-		return 0, ErrBufferTooSmall
-	}
-	n := d.feed(in, out[:need], false)
-	d.totalIn += int64(len(in))
-	d.totalOut += int64(n)
-	return n, nil
-}
+func (d *Denoiser) ProcessInto(in, out []float32) (int, error) { return d.st.ProcessInto(in, out) }
 
 // Flush ends the stream: it completes the frames overlapping the last input
 // samples (with a frozen noise estimate), returns the remaining output so the
 // total output length equals the total input length, and resets the stream
 // state so the Denoiser can start a new stream.
-func (d *Denoiser) Flush() ([]float32, error) {
-	out := make([]float32, int(d.totalIn-d.totalOut))
-	n, err := d.FlushInto(out)
-	return out[:n], err
-}
+func (d *Denoiser) Flush() ([]float32, error) { return d.st.Flush() }
 
 // FlushInto is Flush without allocation. It returns ErrBufferTooSmall (and
 // does nothing) if len(out) is smaller than the remaining output;
-// len(out) >= FrameSize() always suffices.
-func (d *Denoiser) FlushInto(out []float32) (int, error) {
-	need := int(d.totalIn - d.totalOut)
-	if len(out) < need {
-		return 0, ErrBufferTooSmall
-	}
-	written := 0
-	for written < need {
-		written += d.feed(d.zeros, out[written:need], true)
-	}
-	d.Reset()
-	return written, nil
-}
+// len(out) >= Latency()+HopSize() (which is FrameSize()) always suffices.
+func (d *Denoiser) FlushInto(out []float32) (int, error) { return d.st.FlushInto(out) }
 
 // Denoise denoises a whole clip held in memory: it measures the noise profile
 // from the clip's quietest window (EstimateNoiseProfile), falling back to
@@ -181,7 +138,7 @@ func Denoise(x []float32, cfg Config) ([]float32, error) {
 	if p, err := d.EstimateNoiseProfile(x); err == nil {
 		_ = d.SetNoiseProfile(p) // same Denoiser, same FrameSize: cannot mismatch
 	}
-	return d.denoiseAll(x)
+	return d.st.ProcessAll(x)
 }
 
 // DenoiseWithNoise denoises a whole clip using a profile measured from the
@@ -199,7 +156,7 @@ func DenoiseWithNoise(x, noise []float32, cfg Config) ([]float32, error) {
 	if err := d.SetNoiseProfile(p); err != nil {
 		return nil, err
 	}
-	return d.denoiseAll(x)
+	return d.st.ProcessAll(x)
 }
 
 // DenoiseWithProfile denoises a whole clip with an existing profile (for
@@ -213,20 +170,5 @@ func DenoiseWithProfile(x []float32, p *NoiseProfile, cfg Config) ([]float32, er
 	if err := d.SetNoiseProfile(p); err != nil {
 		return nil, err
 	}
-	return d.denoiseAll(x)
-}
-
-// denoiseAll runs x through the stream and flushes into one exact-length
-// result.
-func (d *Denoiser) denoiseAll(x []float32) ([]float32, error) {
-	out := make([]float32, len(x))
-	n, err := d.ProcessInto(x, out)
-	if err != nil {
-		return nil, err
-	}
-	m, err := d.FlushInto(out[n:])
-	if err != nil {
-		return nil, err
-	}
-	return out[:n+m], nil
+	return d.st.ProcessAll(x)
 }

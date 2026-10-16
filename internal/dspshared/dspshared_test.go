@@ -83,7 +83,7 @@ func TestResolveFrame(t *testing.T) {
 }
 
 // pendingRef counts the emitted output by simulating the analyzer fill loop
-// sample by sample, the definition PendingOutput must match in closed form.
+// sample by sample, the definition pendingOutput must match in closed form.
 func pendingRef(inFill, extra, n, hop int, frames, warm int64) int {
 	fill, out := inFill, 0
 	for range extra {
@@ -106,7 +106,7 @@ func TestPendingOutput(t *testing.T) {
 			for inFill := 0; inFill < n; inFill += 37 {
 				for extra := 0; extra <= 3*n; extra += 23 {
 					want := pendingRef(inFill, extra, n, hop, frames, warm)
-					if got := PendingOutput(inFill, extra, n, hop, frames, warm); got != want {
+					if got := pendingOutput(inFill, extra, n, hop, frames, warm); got != want {
 						t.Fatalf("warm=%d frames=%d inFill=%d extra=%d: got %d, want %d", warm, frames, inFill, extra, got, want)
 					}
 				}
@@ -123,5 +123,5 @@ func TestSTFTConfig(t *testing.T) {
 }
 
 func TestNoEmit(t *testing.T) {
-	NoEmit(nil, nil) // must be callable with any arguments and do nothing
+	noEmit(nil, nil) // must be callable with any arguments and do nothing
 }

@@ -86,7 +86,9 @@ sink(tail)
 
 `ProcessInto` and `FlushInto` are the allocation-free variants: they write into
 a caller-supplied buffer and return the sample count, returning
-`ErrBufferTooSmall` (and consuming nothing) if it is too short.
+`ErrBufferTooSmall` (and consuming nothing) if it is too short. A buffer of
+`MaxOutputLen(len(in))` always fits `ProcessInto`, and one of
+`Latency()+HopSize()` (equal to `FrameSize()` here) always fits `FlushInto`.
 
 One `Denoiser` serves one stream at a time and is not safe for concurrent use.
 Process stereo as two `Denoiser`s, one per channel.

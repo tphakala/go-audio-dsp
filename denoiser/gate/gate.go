@@ -37,12 +37,9 @@ type Gate struct {
 	bins       int // n/2+1
 	lookahead  int // L = TimeSmoothFrames/2: frames of time-smoothing lookahead
 	freqR      int // R = FreqSmoothBins/2: SNR frequency-smoothing half-width
-	warm       int // ovl-1+L: frames whose output block is discarded (leading zeros + lookahead priming)
 
-	plan     *stft.Plan        // whole-clip transform for the learned floor; built lazily on first LearnNoise, nil until then
-	an       *stft.Analyzer    // streaming analysis: framing, window, RFFT, |X|^2
-	syn      *stft.Synthesizer // WOLA overlap-add over the analyzer's window
-	prezeros []float32         // len n-hop: the leading-zero preroll fed on Reset
+	plan *stft.Plan // whole-clip transform for the learned floor; built lazily on first LearnNoise, nil until then
+	st   dspshared.Stream
 
 	gFloor        float32 // residual gain floor, FactorFromDB(-MaxAttenuationDB)
 	slope, offset float32 // affine map from log10 power ratio to the sigmoid knee argument
@@ -58,12 +55,8 @@ type Gate struct {
 	tmp      []float32   // frequency-smoothing accumulator
 	invCount []float32   // 1 / (bins in the frequency box at k), for edge-aware averaging
 	gain     []float32   // final per-bin gain for the output frame
-	zeros    []float32   // len hop, fed by Flush
 	maskRing []float32   // (2L+1)*bins: the last 2L+1 frames' masks, for time smoothing
 	specRing []complex64 // (L+1)*bins: the last L+1 frames' spectra, awaiting their delayed output
-
-	frames            int64 // frames processed in this stream
-	totalIn, totalOut int64
 }
 
 // New returns a Gate for cfg. Until LearnNoise or SetNoiseFloor is called the
@@ -101,15 +94,10 @@ func New(cfg Config) (*Gate, error) {
 		bins:       bins,
 		lookahead:  l,
 		freqR:      r,
-		warm:       ovl - 1 + l,
-		an:         an,
 	}
-	syn, err := stft.NewSynthesizer(an)
-	if err != nil {
+	if err := g.st.Init(an, l, g.frame, g.resetState); err != nil {
 		return nil, err
 	}
-	g.syn = syn
-	g.prezeros = make([]float32, g.n-g.hop)
 	g.gFloor = float32(dsp.FactorFromDB(-float64(p.MaxAttenuationDB)))
 	// knee argument = 4*(snrDB - ThresholdDB)/TransitionDB, with
 	// snrDB = 10*log10(power/noise). After Log10Floored gives log10(power/noise),
@@ -121,7 +109,6 @@ func New(cfg Config) (*Gate, error) {
 	g.mask = make([]float32, bins)
 	g.tmp = make([]float32, bins)
 	g.gain = make([]float32, bins)
-	g.zeros = make([]float32, g.hop)
 	g.maskRing = make([]float32, (2*l+1)*bins)
 	g.specRing = make([]complex64, (l+1)*bins)
 	g.invCount = make([]float32, bins)
@@ -149,18 +136,16 @@ func (g *Gate) initNoiseSource() {
 // (FrameSize - HopSize) + L*HopSize, where L = TimeSmoothFrames/2 is the
 // time-smoothing lookahead. Output is emitted in whole hop blocks, so between
 // block boundaries the lag is up to HopSize-1 samples more; Flush drains the rest.
-func (g *Gate) Latency() int { return (g.n - g.hop) + g.lookahead*g.hop }
+func (g *Gate) Latency() int { return g.st.Latency() }
 
 // Reset clears the stream state (analysis buffer, overlap-add accumulator, the
 // smoothing rings, the blind tracker, sample counters) so the next Process starts
 // a new stream. The configuration and any learned floor are kept.
-func (g *Gate) Reset() {
-	// The stream is modelled as n-hop leading zeros ++ input. Prime the analyzer
-	// with that preroll so the first output sample aligns with the first input
-	// sample; n-hop < n, so no frame completes and NoEmit is never called.
-	g.an.Reset()
-	g.an.Feed(g.prezeros, dspshared.NoEmit)
-	g.syn.Reset()
+func (g *Gate) Reset() { g.st.Reset() }
+
+// resetState clears the smoothing rings and the blind tracker; the stream
+// driver calls it from Reset.
+func (g *Gate) resetState() {
 	// Prime the mask ring to unity gain, not zero: the pre-stream frames a
 	// start-edge output frame averages over represent "no gating yet"
 	// (pass-through), so a unity-floor stream reconstructs exactly and real gating
@@ -169,8 +154,6 @@ func (g *Gate) Reset() {
 		g.maskRing[i] = 1
 	}
 	clear(g.specRing)
-	g.frames = 0
-	g.totalIn, g.totalOut = 0, 0
 	if g.tracker != nil {
 		g.tracker.reset()
 	}
@@ -179,52 +162,24 @@ func (g *Gate) Reset() {
 // Process gates the next chunk of the stream and returns the output samples that
 // became final, in a freshly allocated slice (possibly empty). Output is aligned
 // sample-for-sample with input and lags by Latency(); see Flush.
-func (g *Gate) Process(in []float32) ([]float32, error) {
-	out := make([]float32, g.pendingOutput(len(in)))
-	n, err := g.ProcessInto(in, out)
-	return out[:n], err
-}
+func (g *Gate) Process(in []float32) ([]float32, error) { return g.st.Process(in) }
 
 // ProcessInto is Process without allocation: it writes the output samples that
 // become final into out and returns their count. The count is known before any
 // work is done; if len(out) is smaller, ErrBufferTooSmall is returned and nothing
 // is consumed. len(out) >= MaxOutputLen(len(in)) always suffices.
-func (g *Gate) ProcessInto(in, out []float32) (int, error) {
-	need := g.pendingOutput(len(in))
-	if len(out) < need {
-		return 0, ErrBufferTooSmall
-	}
-	n := g.feed(in, out[:need], false)
-	g.totalIn += int64(len(in))
-	g.totalOut += int64(n)
-	return n, nil
-}
+func (g *Gate) ProcessInto(in, out []float32) (int, error) { return g.st.ProcessInto(in, out) }
 
 // Flush ends the stream: it completes the frames overlapping the last input
 // samples (with a frozen noise floor), returns the remaining output so the total
 // output length equals the total input length, and resets the stream state so the
 // Gate can start a new stream.
-func (g *Gate) Flush() ([]float32, error) {
-	out := make([]float32, int(g.totalIn-g.totalOut))
-	n, err := g.FlushInto(out)
-	return out[:n], err
-}
+func (g *Gate) Flush() ([]float32, error) { return g.st.Flush() }
 
 // FlushInto is Flush without allocation. It returns ErrBufferTooSmall (and does
 // nothing) if len(out) is smaller than the remaining output;
 // len(out) >= Latency()+HopSize() always suffices.
-func (g *Gate) FlushInto(out []float32) (int, error) {
-	need := int(g.totalIn - g.totalOut)
-	if len(out) < need {
-		return 0, ErrBufferTooSmall
-	}
-	written := 0
-	for written < need {
-		written += g.feed(g.zeros, out[written:need], true)
-	}
-	g.Reset()
-	return written, nil
-}
+func (g *Gate) FlushInto(out []float32) (int, error) { return g.st.FlushInto(out) }
 
 // Denoise gates a whole clip held in memory with the blind noise-floor
 // estimator, streamed to completion. Before streaming it measures the clip's
@@ -248,7 +203,7 @@ func Denoise(x []float32, cfg Config) ([]float32, error) {
 	if err := g.prescan(x); err != nil {
 		return nil, err
 	}
-	return g.denoiseAll(x)
+	return g.st.ProcessAll(x)
 }
 
 // prescan measures x's quietest window with the flagship estimator, at the
@@ -319,7 +274,7 @@ func DenoiseWithNoise(x, noise []float32, cfg Config) ([]float32, error) {
 	if err := g.LearnNoise(noise); err != nil {
 		return nil, err
 	}
-	return g.denoiseAll(x)
+	return g.st.ProcessAll(x)
 }
 
 // DenoiseWithFloor gates a whole clip with an explicit per-bin noise power floor
@@ -334,19 +289,5 @@ func DenoiseWithFloor(x, floor []float32, cfg Config) ([]float32, error) {
 	if err := g.SetNoiseFloor(floor); err != nil {
 		return nil, err
 	}
-	return g.denoiseAll(x)
-}
-
-// denoiseAll runs x through the stream and flushes into one exact-length result.
-func (g *Gate) denoiseAll(x []float32) ([]float32, error) {
-	out := make([]float32, len(x))
-	n, err := g.ProcessInto(x, out)
-	if err != nil {
-		return nil, err
-	}
-	m, err := g.FlushInto(out[n:])
-	if err != nil {
-		return nil, err
-	}
-	return out[:n+m], nil
+	return g.st.ProcessAll(x)
 }
