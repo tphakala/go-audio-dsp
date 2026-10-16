@@ -72,3 +72,61 @@ func TestSynthesizerZeroAlloc(t *testing.T) {
 		t.Errorf("Synthesizer Add/Finish allocates %v per pass, want 0", allocs)
 	}
 }
+
+// A warmed EdgeAnalyzer allocates nothing across Reset, Feed and Finish, with the
+// cached edge windows (N=256, hop 127, whose drain needs edge windows) and with
+// the per-frame rebuild past the cache cap (hop 1 needs more windows than the
+// slabs hold).
+func TestEdgeAnalyzerZeroAlloc(t *testing.T) {
+	cases := []struct {
+		name      string
+		shape     WindowShape
+		n, hop, l int
+	}{
+		{"hann-cached", WindowShape{Family: ShapeHann}, 256, 127, 24000},
+		{"dolph-cached", WindowShape{Family: ShapeDolphChebyshev, AttenuationDB: 106.5}, 256, 127, 24000},
+		{"hann-past-cap", WindowShape{Family: ShapeHann}, 128, 1, 400},
+		{"dolph-past-cap", WindowShape{Family: ShapeDolphChebyshev, AttenuationDB: 106.5}, 128, 1, 400},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a, err := NewEdgeAnalyzer(EdgeConfig{FrameSize: c.n, Shape: c.shape})
+			if err != nil {
+				t.Fatal(err)
+			}
+			in := testSignal(c.l)
+			var sink float64
+			onFrame := func(power []float32) { sink += float64(power[1]) }
+			run := func() {
+				if err := a.Reset(c.hop); err != nil {
+					t.Fatal(err)
+				}
+				a.Feed(in, onFrame)
+				a.Finish(onFrame)
+			}
+			// Checked warm-up: a regression that emits no frames must fail here
+			// rather than pass AllocsPerRun, which ignores emissions.
+			emitted := 0
+			count := func([]float32) { emitted++ }
+			if err := a.Reset(c.hop); err != nil {
+				t.Fatal(err)
+			}
+			a.Feed(in, count)
+			a.Finish(count)
+			if want := a.NumFrames(int64(c.l)); int64(emitted) != want {
+				t.Fatalf("warm-up emitted %d frames, want %d", emitted, want)
+			}
+			before := a.windowBuilds
+			if got := testing.AllocsPerRun(20, run); got != 0 {
+				t.Errorf("Reset+Feed+Finish allocated %v times, want 0", got)
+			}
+			// The cached cases must rebuild nothing; the hop-1 cases exceed the
+			// cache cap, so they must rebuild (else they would not test that path).
+			rebuilt := a.windowBuilds != before
+			if cached := c.hop != 1; rebuilt == cached {
+				t.Errorf("warmed repeat runs rebuilt windows = %v, want %v", rebuilt, !cached)
+			}
+			_ = sink
+		})
+	}
+}

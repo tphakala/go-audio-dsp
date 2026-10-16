@@ -53,8 +53,8 @@ const defaultOverlap = 4 // hop = frame/4 when HopSize is 0
 
 // resolve fills defaults and validates, returning the effective Config.
 func (c Config) resolve() (Config, error) {
-	if c.FrameSize < 2 || c.FrameSize&(c.FrameSize-1) != 0 {
-		return c, fmt.Errorf("%w: FrameSize must be a power of two >= 2, got %d", ErrInvalidConfig, c.FrameSize)
+	if err := checkFrameSize(c.FrameSize); err != nil {
+		return c, err
 	}
 	if c.HopSize == 0 {
 		c.HopSize = max(1, c.FrameSize/defaultOverlap)
@@ -119,4 +119,13 @@ func (c Config) buildWindow() []float32 {
 	}
 	copy(framed[off:], w)
 	return framed
+}
+
+// checkFrameSize rejects a transform size that is not a power of two >= 2. It is
+// shared by Config.resolve and NewEdgeAnalyzer so the rule has one home.
+func checkFrameSize(n int) error {
+	if n < 2 || n&(n-1) != 0 {
+		return fmt.Errorf("%w: FrameSize must be a power of two >= 2, got %d", ErrInvalidConfig, n)
+	}
+	return nil
 }

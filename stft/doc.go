@@ -2,7 +2,7 @@
 // audio: it owns framing, analysis windows, the padding/centering convention, and
 // the per-frame real-input transform, built on github.com/tphakala/simd.
 //
-// Three entry points:
+// Four entry points:
 //
 //   - Plan (New) is the whole-clip transform. Spectrum writes one complex
 //     half-spectrum per frame; PowerInto writes the frame-contiguous |X|^2 power,
@@ -20,6 +20,17 @@
 //     accumulates the windowed frame, and Finish releases each finished hop
 //     block divided by the WOLA normalization, so an unmodified pass
 //     reconstructs the input.
+//   - EdgeAnalyzer (NewEdgeAnalyzer) is a streaming power analyzer with the frame
+//     schedule and edge handling of the sox 14.4.2 spectrogram effect (named as
+//     the behavioural reference only): lead zeros so frames are centred on hop
+//     blocks, drain zeros added by Finish, an edge-adapted symmetric window on every
+//     frame that includes padding, and a per-frame amplitude factor so a full-scale
+//     sinusoid centred on a bin away from DC and Nyquist reads close to power 1.
+//     WindowShape selects the Hann or
+//     Dolph-Chebyshev family (centre-normalized, which sets FullWindowSum). It
+//     caches the edge windows across Reset calls: a repeat run on the same geometry
+//     builds none, and the cache holds at most 32 windows per kind, so memory is
+//     bounded by the frame size alone, not the input length.
 //
 // The analysis window may be shorter than the transform: Config.WindowLength in
 // [1, FrameSize] with Config.WindowAlign selects a window zero-padded into the
@@ -32,9 +43,10 @@
 // (periodic, the default form) and DolphChebyshevSymmetric generate the
 // parameterized Dolph-Chebyshev window, which feeds Config.CustomWindow.
 //
-// A Plan and an Analyzer each hold per-transform scratch through their simd plan,
-// so neither is safe for concurrent use; build one per goroutine. Distinct Plans
-// and Analyzers share no state; a Synthesizer shares its Analyzer's window and
-// inverse-transform scratch, so the pair belongs to one goroutine. The transforms run through simd's AVX/NEON paths
-// where available and portable Go elsewhere; there is no CGo.
+// A Plan, an Analyzer and an EdgeAnalyzer each hold per-transform scratch through
+// their simd plan, so none is safe for concurrent use; build one per goroutine.
+// Distinct Plans, Analyzers and EdgeAnalyzers share no state; a Synthesizer shares
+// its Analyzer's window and inverse-transform scratch, so the pair belongs to one
+// goroutine. The transforms run through simd's AVX/NEON paths where available and
+// portable Go elsewhere; there is no CGo.
 package stft
