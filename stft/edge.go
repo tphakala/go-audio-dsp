@@ -47,14 +47,7 @@ type EdgeConfig struct {
 //
 // Each window is scaled by 2/sum * ((m-1)/N)^2, where sum adds the points the
 // frame uses (m-1 for a lead frame, m for a drain frame). A full-scale sinusoid
-// centred on a bin therefore reads power 1 (0 dBFS) in a frame with no padding, up
-// to the leakage of its negative-frequency image. That leakage grows toward DC and
-// Nyquist and can be larger at low attenuation, and it adds to or subtracts from
-// the reading depending on the sinusoid's phase in the frame. Measured for a cosine
-// whose image adds to the bin: below 0.01 dB at bin N/8 for Hann and for
-// Dolph-Chebyshev at 86.4 dB and above (N from 256 to 2048); +1.05 dB at bin 1 of
-// 256 for Dolph-Chebyshev at 86.4 dB; +0.21 dB at bin 32 of 256 for 26.1 dB; +6.02
-// dB at DC and Nyquist, where the image lands on the bin.
+// centred on a bin therefore reads power 1 (0 dBFS) in a frame with no padding.
 // This is an amplitude normalization, unlike the energy normalization of the
 // spectrogram package's Spectrogram.
 //

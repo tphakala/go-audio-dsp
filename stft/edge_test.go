@@ -361,8 +361,7 @@ func TestEdgeShortClipUsesDrainRule(t *testing.T) {
 }
 
 // A full-scale cosine centred on a bin reads power 1 (0 dBFS) in a frame with no
-// padding, for Hann and Dolph-Chebyshev at 86.4, 106.5 and 126.6 dB with N from 256
-// to 2048 at bin N/8. Without the amplitude factor
+// padding, for every window, size and attenuation. Without the amplitude factor
 // the level is several tens of dB higher. The measured worst error is 0.0002 dB
 // on every kernel tier tried (it is leakage from the cosine's negative-frequency
 // image, a property of the window), so the 0.01 dB bound leaves a 50x margin.
