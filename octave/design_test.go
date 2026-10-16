@@ -31,6 +31,26 @@ func filterNoiseMS(f *equalizer.Filter, rate int, variance float64) float64 {
 	return variance * sum / nyq
 }
 
+// referencePeriods runs in through f in one call and returns the mean square of
+// each period of the given length, accumulating the squares sample by sample, the
+// arithmetic the meter uses.
+func referencePeriods(f *equalizer.Filter, in []float32, period int) []float64 {
+	y := make([]float64, len(in))
+	for i, v := range in {
+		y[i] = float64(v)
+	}
+	f.ApplyFloat64(y)
+	out := make([]float64, len(in)/period)
+	for p := range out {
+		var acc float64
+		for _, v := range y[p*period : (p+1)*period] {
+			acc += v * v
+		}
+		out[p] = acc / float64(period)
+	}
+	return out
+}
+
 func TestFilterDesignString(t *testing.T) {
 	cases := []struct {
 		d    FilterDesign
@@ -108,17 +128,8 @@ func TestButterworthMatchesFilterReference(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			y := make([]float64, len(in))
-			for j, v := range in {
-				y[j] = float64(v)
-			}
-			f.ApplyFloat64(y)
-			for p := range ps {
-				var acc float64
-				for _, v := range y[p*rate : (p+1)*rate] {
-					acc += v * v
-				}
-				if want := acc / float64(rate); ps[p][i] != want {
+			for p, want := range referencePeriods(f, in, rate) {
+				if ps[p][i] != want {
 					t.Errorf("%d Hz band %v period %d: %.17g, reference %.17g", rate, b.Nominal, p, ps[p][i], want)
 				}
 			}
@@ -179,17 +190,8 @@ func TestDefaultDesignUnchanged(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		y := make([]float64, len(in))
-		for j, v := range in {
-			y[j] = float64(v)
-		}
-		f.ApplyFloat64(y)
-		for p := range want {
-			var acc float64
-			for _, v := range y[p*rate : (p+1)*rate] {
-				acc += v * v
-			}
-			if ref := acc / rate; want[p][i] != ref {
+		for p, ref := range referencePeriods(f, in, rate) {
+			if want[p][i] != ref {
 				t.Errorf("band %v period %d: %.17g, equalizer reference %.17g", b.Nominal, p, want[p][i], ref)
 			}
 		}

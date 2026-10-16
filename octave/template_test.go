@@ -304,7 +304,6 @@ func TestTemplateCatchesNonCompliantDesigns(t *testing.T) {
 		t.Logf("class 1 margin %.3f dB at Omega %.5g", worst, at)
 		return worst
 	}
-	band := func(centre float64) Band { return bandAt(int(math.Round(10 * math.Log10(centre/1000)))) }
 
 	t.Run("default biquad design", func(t *testing.T) {
 		m := mustMeter(t, Config{SampleRate: 48000, PeriodSamples: 1})
@@ -314,7 +313,7 @@ func TestTemplateCatchesNonCompliantDesigns(t *testing.T) {
 		}
 	})
 	t.Run("prototype order 3 at the 20 kHz band", func(t *testing.T) {
-		b := band(19952.623149688792)
+		b := bandAt(13) // 20 kHz
 		f, err := equalizer.NewButterworthBandPass(b.Lower, b.Upper, 3, 48000)
 		if err != nil {
 			t.Fatal(err)
@@ -325,7 +324,7 @@ func TestTemplateCatchesNonCompliantDesigns(t *testing.T) {
 	})
 	for _, k := range []float64{0.9, 1.1} {
 		t.Run("misplaced edges "+strconv.FormatFloat(k, 'g', -1, 64), func(t *testing.T) {
-			b := band(1000)
+			b := bandAt(0) // 1 kHz
 			// Edges at 10^(+-0.05*k) around the centre instead of 10^(+-0.05).
 			f, err := equalizer.NewButterworthBandPass(b.Exact*math.Pow(10, -0.05*k), b.Exact*math.Pow(10, 0.05*k), butterworthOrder, 48000)
 			if err != nil {

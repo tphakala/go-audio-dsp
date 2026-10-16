@@ -377,12 +377,10 @@ func TestNoiseLevelMatchesNoiseBandwidth(t *testing.T) {
 		for ci, c := range cases {
 			cfg := c.cfg
 			cfg.SampleRate, cfg.PeriodSamples = rate, rate
+			cfg.MinFreq = 1000 // lower bands are too narrow for 30 s of noise to pin the level
 			m := mustMeter(t, cfg)
 			ps := periods(m, noise(30*rate, uint64(rate+ci), amp))
 			for i, b := range m.Bands() {
-				if b.Nominal < 1000 {
-					continue
-				}
 				var mean float64
 				for _, p := range ps[1:] {
 					mean += p[i]

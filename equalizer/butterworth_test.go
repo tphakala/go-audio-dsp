@@ -31,14 +31,13 @@ func butterworthDB(lower, upper, fs float64, n int, f float64) float64 {
 // section gain moves the response off the oracle.
 func TestButterworthBandPassMatchesAnalytic(t *testing.T) {
 	type bandSpec struct {
-		name         string
-		lower, upper func(fs float64) float64
+		name  string
+		edges func(fs float64) (lower, upper float64)
 	}
 	third := func(centre float64) bandSpec {
 		return bandSpec{
 			name:  "third-octave " + strconv.FormatFloat(centre, 'g', -1, 64),
-			lower: func(float64) float64 { l, _ := thirdOctave(centre); return l },
-			upper: func(float64) float64 { _, u := thirdOctave(centre); return u },
+			edges: func(float64) (float64, float64) { return thirdOctave(centre) },
 		}
 	}
 	// nearNyquist is the third-octave band whose upper edge sits at frac of the
@@ -46,9 +45,11 @@ func TestButterworthBandPassMatchesAnalytic(t *testing.T) {
 	// roots, the regime a complex-roots-only design would get wrong.
 	nearNyquist := func(frac float64) bandSpec {
 		return bandSpec{
-			name:  "third-octave at " + strconv.FormatFloat(frac, 'g', -1, 64) + " of Nyquist",
-			lower: func(fs float64) float64 { l, _ := thirdOctave(frac * fs / 2 / math.Pow(10, 0.05)); return l },
-			upper: func(fs float64) float64 { return frac * fs / 2 },
+			name: "third-octave at " + strconv.FormatFloat(frac, 'g', -1, 64) + " of Nyquist",
+			edges: func(fs float64) (float64, float64) {
+				upper := frac * fs / 2
+				return upper * math.Pow(10, -0.1), upper
+			},
 		}
 	}
 	specs := []bandSpec{
@@ -56,7 +57,7 @@ func TestButterworthBandPassMatchesAnalytic(t *testing.T) {
 		third(1000),
 		nearNyquist(0.95),
 		nearNyquist(0.99),
-		{"wide 100 Hz to 10 kHz", func(float64) float64 { return 100 }, func(float64) float64 { return 10000 }},
+		{"wide 100 Hz to 10 kHz", func(float64) (float64, float64) { return 100, 10000 }},
 	}
 	for _, order := range []int{1, 2, 3, 4, 8} {
 		for _, rate := range []int{44100, 48000, 96000, 192000, 384000} {
@@ -64,7 +65,7 @@ func TestButterworthBandPassMatchesAnalytic(t *testing.T) {
 				t.Run(strconv.Itoa(order)+"/"+strconv.Itoa(rate)+"/"+sp.name, func(t *testing.T) {
 					t.Parallel()
 					fs := float64(rate)
-					lower, upper := sp.lower(fs), sp.upper(fs)
+					lower, upper := sp.edges(fs)
 					f, err := NewButterworthBandPass(lower, upper, order, rate)
 					if err != nil {
 						t.Fatal(err)
