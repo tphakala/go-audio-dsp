@@ -141,7 +141,7 @@ func (c Config) validate() error {
 // scaler maps a frame's magnitude-squared power (length NumBins, Analyzer-owned)
 // to one output column over the selected bin sub-range [lo, hi), in the
 // configured scale. It is shared by the whole-clip and streaming engines, so
-// both produce identical columns.
+// both produce identical columns. Fit uses only the DB path.
 type scaler struct {
 	scale  Scale
 	lo, hi int     // output covers power[lo:hi]; hi-lo == bins

@@ -181,9 +181,9 @@ func TestFitSoxParityDolph(t *testing.T) {
 }
 
 // TestFitSoxEdges covers the clip edges: a span shorter than the clip (columns
-// truncated at the limit), clips shorter than a frame (drain-only frames that
-// still hold lead zeros), and, in the Hann and Dolph tests above, a span longer
-// than the clip.
+// truncated at the limit), clips shorter than a frame (every frame holds lead
+// zeros, drain zeros or both), and, in the Hann and Dolph tests above, a span
+// longer than the clip.
 func TestFitSoxEdges(t *testing.T) {
 	runParity(t, func(n string) bool { return n == "hann-sm-trunc" || strings.HasPrefix(n, "short") })
 }

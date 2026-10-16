@@ -50,7 +50,7 @@ sox clip.wav -n spectrogram -x 10000 -y 129 -d 1 -z 100 -w hann -o live-hann-sm-
 sox clip.wav -n spectrogram -x 514 -y 257 -d 2 -z 100 -w hann -o live-hann-md-d2.png -r
 ```
 
-`-y` is the number of bins, so the transform size is `2*(y-1)`: 256, 512, 1024 and 2048 for `sm`, `md`, `lg` and `xl`. `-x` is the column limit and `-d` the span the picture covers. A span of `6000s` is 6000 samples (0.25 s). The `short` images cut the clip to 175, 200 or 1000 samples with `trim`, which is shorter than one frame for the first two.
+`-y` is the number of bins, so the transform size is `2*(y-1)`: 256, 512, 1024 and 2048 for `sm`, `md`, `lg` and `xl`. `-x` is the column limit and `-d` the span the picture covers. A span of `6000s` is 6000 samples (0.25 s). The `short` images cut the clip to 175, 200 or 1000 samples with `trim`, each shorter than one frame.
 
 `TestSoxReadmeListsCommands` checks that every command above is the one the tests run.
 

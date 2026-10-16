@@ -1,6 +1,6 @@
 // Package spectrogram turns mono float32 audio into the numeric magnitude,
 // power, or dB matrix behind a spectrogram, layered on the shared short-time
-// transform in package stft. It provides two producers over one scale
+// transform in package stft. It provides two per-frame producers over one scale
 // implementation: a whole-clip Spectrogram (New, ComputeInto) for rendering a
 // clip to an image, and a streaming ColumnSource (NewColumnSource, Feed) that
 // emits one finished column per completed frame for a live waterfall. Because

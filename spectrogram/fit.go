@@ -210,7 +210,7 @@ func (f *Fit) Reset(spanSamples int64) error {
 // NumColumns returns how many columns a run over signalLen samples emits at the
 // current geometry: min(Columns, ceil(frames/BlockSteps)), where frames is the
 // stft.EdgeAnalyzer frame count. It is 0 before the first Reset and for a clip
-// too short to complete a frame.
+// shorter than Hop/2 samples (integer division), which yields no frame.
 func (f *Fit) NumColumns(signalLen int64) int {
 	if !f.ready {
 		return 0
@@ -297,8 +297,8 @@ func (f *Fit) resolveSpan(signalLen int, spanSamples int64) int64 {
 // Bins()*NumColumns(len(signal)) values, or ComputeInto returns ErrBufferTooSmall
 // and writes nothing (the Fit is left reset for that span). On success dst.Data
 // is resliced to the exact length and dst.Bins and dst.Frames are set. It resets
-// the stream first, so calls are independent. Allocation-free when dst.Data has
-// the capacity.
+// the stream first, so calls are independent. Allocation-free once the window
+// cache is warm and dst.Data has the capacity.
 func (f *Fit) ComputeInto(dst *Matrix, signal []float32, spanSamples int64) (int, error) {
 	if err := f.Reset(f.resolveSpan(len(signal), spanSamples)); err != nil {
 		return 0, err
