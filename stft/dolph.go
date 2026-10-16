@@ -28,8 +28,9 @@ const (
 //
 // attenuationDB is the sidelobe attenuation of the underlying symmetric window.
 // Dropping the last sample breaks its equiripple shape, so the periodic window's
-// highest sidelobe sits a few dB above -attenuationDB (about 3.5 to 4 dB from
-// n = 512 up, far more for short high-attenuation windows); use
+// highest sidelobe sits a few dB above -attenuationDB (about 3.4 to 4.2 dB at
+// n = 512 and 1024 for attenuations from 50 to 126.6 dB, more at higher
+// attenuation and far more for short windows); use
 // DolphChebyshevSymmetric when the bound itself matters. Below about 45 dB the
 // window's noise bandwidth stops shrinking with attenuation, and long windows
 // peak at their endpoints rather than the center.
@@ -45,10 +46,11 @@ func DolphChebyshev(n int, attenuationDB float64) ([]float32, error) {
 
 // DolphChebyshevSymmetric returns the symmetric Dolph-Chebyshev window of length
 // n, w[i] == w[n-1-i], peak normalized to 1: the equiripple window whose highest
-// sidelobe is exactly -attenuationDB, matching
+// sidelobe is at -attenuationDB in float64, matching
 // scipy.signal.windows.chebwin(n, attenuationDB) (scipy 1.18.1). Preferred for
 // pure analysis where the sidelobe bound matters; DolphChebyshev is the periodic
-// form. The domain, errors and cost are those of DolphChebyshev.
+// form. The domain, errors, cost and float32 depth limit are those of
+// DolphChebyshev.
 func DolphChebyshevSymmetric(n int, attenuationDB float64) ([]float32, error) {
 	return dolphWindow(n, n, attenuationDB)
 }
