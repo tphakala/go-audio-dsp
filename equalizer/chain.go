@@ -104,7 +104,7 @@ func (c *FilterChain) Reset() {
 }
 
 // NumSections returns the total number of biquad sections across all filters,
-// counting each filter's Passes.
+// counting every filter's sections.
 func (c *FilterChain) NumSections() int {
 	n := 0
 	for _, f := range c.filters {

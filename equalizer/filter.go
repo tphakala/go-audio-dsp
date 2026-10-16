@@ -11,16 +11,17 @@ import (
 // contract drifts.
 var _ dsp.Processor = (*Filter)(nil)
 
-// Filter is one RBJ biquad band, cascaded over its Passes, as a streaming
+// Filter is a cascade of biquad sections, built by NewFilter (one RBJ band over
+// its Passes) or NewBiquadFilter (caller-supplied sections), as a streaming
 // dsp.Processor over mono float32 audio. Like Equalizer it uses float64
-// coefficients and float64 state with float32 I/O, has zero latency (output
-// aligns sample-for-sample with input) and no tail (so it does not implement
-// dsp.Flusher), and Reset clears the state between streams. Its float32 path
-// (ProcessInto) is bit-identical to an Equalizer of the same single band, so a
-// FilterChain of Filters equals an Equalizer of the same bands. Unlike an
-// Equalizer, whose bands are fixed at construction, a Filter is a single
-// reusable stage a caller composes into a FilterChain. A Filter is not safe for
-// concurrent use; run one instance per stream (for example one per channel).
+// coefficients and float64 state with float32 I/O, has zero latency (output aligns sample-for-sample with input) and no tail
+// (so it does not implement dsp.Flusher), and Reset clears the state between
+// streams. The float32 path (ProcessInto) of a NewFilter filter is bit-identical
+// to an Equalizer of the same single band, so a FilterChain of such Filters
+// equals an Equalizer of the same bands. Unlike an Equalizer, whose bands are
+// fixed at construction, a Filter is a single reusable stage a caller composes
+// into a FilterChain. A Filter is not safe for concurrent use; run one instance
+// per stream (for example one per channel).
 type Filter struct {
 	sampleRate int // the rate the coefficients were computed for; a FilterChain enforces one rate across its filters
 	sections   []section
@@ -95,13 +96,13 @@ func (f *Filter) MaxOutputLen(inputLen int) int { return inputLen }
 func (f *Filter) Latency() int { return 0 }
 
 // Reset clears the filter state of every section so the next call starts a new
-// stream. The configured band is kept.
+// stream. The coefficients are kept.
 func (f *Filter) Reset() {
 	for i := range f.sections {
 		f.sections[i].reset()
 	}
 }
 
-// NumSections returns the number of biquad sections (this band's Passes, with 0
-// counted as 1).
+// NumSections returns the number of biquad sections (for NewFilter, the band's
+// Passes with 0 counted as 1).
 func (f *Filter) NumSections() int { return len(f.sections) }
