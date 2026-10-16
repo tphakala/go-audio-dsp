@@ -47,13 +47,16 @@ type EdgeConfig struct {
 //
 // Each window is scaled by 2/sum * ((m-1)/N)^2, where sum adds the points the
 // frame uses (m-1 for a lead frame, m for a drain frame). A full-scale sinusoid
-// centred on a bin therefore reads power 1 (0 dBFS) in a frame with no padding.
+// centred on a bin therefore reads close to power 1 (0 dBFS) in a frame with no
+// padding. The reading is off by the leakage of the sinusoid's negative-frequency
+// image, which depends on its phase and grows toward DC and Nyquist and at low
+// attenuation; at DC and Nyquist the image lands on the bin itself.
 // This is an amplitude normalization, unlike the energy normalization of the
 // spectrogram package's Spectrogram.
 //
 // The Dolph-Chebyshev shape is normalized so its centre sample is 1, not its peak
-// (DolphChebyshevSymmetric normalizes the peak); the two differ below about 86 dB
-// attenuation, and FullWindowSum depends on the choice.
+// (DolphChebyshevSymmetric normalizes the peak); the two differ at low attenuation,
+// where the window peaks at its endpoints, and FullWindowSum depends on the choice.
 //
 // Edge windows depend only on the hop, the shape and, for drain frames, on the
 // drain geometry, so the analyzer caches them across Reset calls: the start-edge

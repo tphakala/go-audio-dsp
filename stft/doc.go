@@ -25,7 +25,8 @@
 //     the behavioural reference only): lead zeros so frames are centred on hop
 //     blocks, drain zeros added by Finish, an edge-adapted symmetric window on every
 //     frame that includes padding, and a per-frame amplitude factor so a full-scale
-//     sinusoid centred on a bin reads power 1. WindowShape selects the Hann or
+//     sinusoid centred on a bin away from DC and Nyquist reads close to power 1.
+//     WindowShape selects the Hann or
 //     Dolph-Chebyshev family (centre-normalized, which sets FullWindowSum). It
 //     caches the edge windows across Reset calls: a repeat run on the same geometry
 //     builds none, and the cache holds at most 32 windows per kind, so memory is

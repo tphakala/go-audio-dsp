@@ -95,7 +95,8 @@ func ExampleDolphChebyshev() {
 
 // EdgeAnalyzer: the sox 14.4.2 frame schedule with edge-adapted windows. A
 // Dolph-Chebyshev shape at 106.5 dB, hop 350 and 48000 samples gives 137 frames,
-// and a full-scale cosine centred on a bin reads 0 dBFS in a frame without padding.
+// and a full-scale cosine centred on bin N/8 reads 0 dBFS within 0.01 dB in a frame
+// without padding.
 func ExampleEdgeAnalyzer() {
 	const n, hop, k0 = 1024, 350, 128
 	a, err := stft.NewEdgeAnalyzer(stft.EdgeConfig{
