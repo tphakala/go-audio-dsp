@@ -26,8 +26,9 @@ go get github.com/tphakala/go-audio-dsp
 
 The simplest path denoises a clip already in memory. `Denoise` measures the
 noise profile from the clip's quietest window and falls back to an adaptive
-tracker when there is no distinct quiet region, so it needs nothing but the
-audio and a sample rate:
+tracker when it finds no usable quiet window (none distinctly quiet, or the
+quietest holds digital silence), so it needs nothing but the audio and a sample
+rate:
 
 ```go
 import "github.com/tphakala/go-audio-dsp/denoiser"
@@ -124,7 +125,7 @@ sources:
    (`EstimateNoiseProfile`), which `Denoise` uses. For a clip that arrives in
    chunks or is held as 16-bit PCM, `NewNoiseProfileEstimator` returns the same
    profile from `AddFloat32` / `AddInt16` calls in bounded memory (a fixed
-   buffer of about 0.4 MB at 48 kHz plus one float32 per hop block), without
+   buffer of about 0.3 MB at 48 kHz plus one float32 per hop block), without
    ever holding the clip as float32.
 3. An adaptive minima-controlled recursive averaging (MCRA) tracker that runs
    when no profile is set, so the estimate follows slowly changing noise.

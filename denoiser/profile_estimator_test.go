@@ -12,9 +12,11 @@ import (
 	"github.com/tphakala/simd/f32"
 )
 
-// referenceEstimate is a verbatim copy of EstimateNoiseProfile as of 7f76d8c
-// (before the streaming estimator), the parity oracle for the estimator and
-// the EstimateNoiseProfile wrapper. Do not edit it to follow the production code.
+// referenceEstimate is a copy of EstimateNoiseProfile as of 7f76d8c (before the
+// streaming estimator), the parity oracle for the estimator and the
+// EstimateNoiseProfile wrapper. It is amended in two marked places for the
+// block-aligned, silence-free measured range; the rest is not to be edited to
+// follow the production code.
 func referenceEstimate(d *Denoiser, x []float32) (*NoiseProfile, error) {
 	if len(x) < d.n {
 		return nil, ErrProfileTooShort
@@ -51,11 +53,21 @@ func referenceEstimate(d *Denoiser, x []float32) (*NoiseProfile, error) {
 		}
 	}
 
+	// Amendment 1: the measured range ends at the last whole hop block, so every
+	// block in it has an energy.
+	total := nb * hop
 	start := best * hop
-	end := min(len(x), start+w*hop)
+	end := min(total, start+w*hop)
 	if end-start < d.n {
-		end = min(len(x), start+d.n)
+		end = min(total, start+d.n)
 		start = max(0, end-d.n)
+	}
+	// Amendment 2: a silent block anywhere in the measured range, from the
+	// window or from widening it to one frame, rejects the window.
+	for _, e := range energy[start/hop : end/hop] {
+		if e < silencePower {
+			return nil, ErrNoQuietRegion
+		}
 	}
 	p, err := d.NoiseProfileFromSamples(x[start:end])
 	if err != nil {
@@ -145,10 +157,10 @@ func quietBlockClip(hop, nblocks, tail, quiet int, seed uint64) []float32 {
 }
 
 const (
-	caseUnmaskedFallback = "unmasked-fallback"
-	caseEarlyQuiet       = "early-quiet-then-loud"
-	caseQuietAtEnd       = "quiet-at-end"
-	caseWidenMidLong     = "widen-48k-mid-long"
+	caseSilentBlockEveryWindow = "silent-block-every-window"
+	caseEarlyQuiet             = "early-quiet-then-loud"
+	caseQuietAtEnd             = "quiet-at-end"
+	caseWidenMidLong           = "widen-48k-mid-long"
 )
 
 func profileCases() []profileCase {
@@ -196,12 +208,13 @@ func profileCases() []profileCase {
 
 	// Every window touches digital silence, yet the clip has dynamic range:
 	// quiet noise first, loud tone after, one zeroed hop block every 0.25 s.
+	// The estimate is ErrNoQuietRegion.
 	dyn := whiteNoise(8*sr, 0.01, 77)
 	toneAt(dyn, sr, sr, 8*sr, 1000, 0.1*math.Sqrt2)
 	for at := 0; at+256 <= len(dyn); at += 12000 {
 		clear(dyn[at/256*256 : at/256*256+256])
 	}
-	add(caseUnmaskedFallback, def, dyn)
+	add(caseSilentBlockEveryWindow, def, dyn)
 	flatSilent := whiteNoise(8*sr, 0.01, 78)
 	for at := 0; at+256 <= len(flatSilent); at += 12000 {
 		clear(flatSilent[at/256*256 : at/256*256+256])
@@ -373,12 +386,10 @@ func TestNoiseProfileEstimatorEvictionPathCovered(t *testing.T) {
 	tests := []struct {
 		name         string
 		wantResident bool
-		useUnmasked  bool
 	}{
-		{caseEarlyQuiet, false, false},
-		{caseUnmaskedFallback, false, true},
-		{caseWidenMidLong, false, false},
-		{caseQuietAtEnd, true, false},
+		{caseEarlyQuiet, false},
+		{caseWidenMidLong, false},
+		{caseQuietAtEnd, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -392,16 +403,9 @@ func TestNoiseProfileEstimatorEvictionPathCovered(t *testing.T) {
 			if gotErr != nil {
 				t.Fatalf("case must produce a profile, got %v", gotErr)
 			}
-			idx := 0
-			if tt.useUnmasked {
-				idx = 1
-				if e.masked.best >= 0 {
-					t.Fatal("masked tracker found a window; case does not exercise the unmasked fallback")
-				}
-			}
-			cand := e.cand[idx]
+			cand := e.cand
 			if !cand.active {
-				t.Fatalf("candidate %d is not active", idx)
+				t.Fatal("candidate is not active")
 			}
 			if cand.resident != tt.wantResident {
 				t.Fatalf("candidate resident = %v, want %v", cand.resident, tt.wantResident)
@@ -589,5 +593,85 @@ func TestNoiseProfileEstimatorProfileUsableBySetNoiseProfile(t *testing.T) {
 	other := mustDenoiser(t, Config{SampleRate: 48000, FrameSize: 2048})
 	if err := other.SetNoiseProfile(p); !errors.Is(err, ErrProfileMismatch) {
 		t.Fatalf("SetNoiseProfile on another FrameSize: err = %v, want ErrProfileMismatch", err)
+	}
+}
+
+// assertAutoRangeInvariant fails t unless the range measured by p, a profile
+// returned for x, lies on the hop grid inside the whole blocks of x, spans at
+// least one frame, and holds no block of digital silence. The block energies
+// are recomputed from x, independently of the estimator's own record.
+func assertAutoRangeInvariant(t *testing.T, d *Denoiser, x []float32, p *NoiseProfile) {
+	t.Helper()
+	sr := float64(d.sampleRate)
+	start := int(math.Round(p.Info().StartSec * sr))
+	end := start + int(math.Round(p.Info().DurationSec*sr))
+	if start%d.hop != 0 || end%d.hop != 0 {
+		t.Fatalf("range [%d, %d) is off the hop grid (hop %d)", start, end, d.hop)
+	}
+	if whole := len(x) / d.hop * d.hop; end > whole {
+		t.Fatalf("range [%d, %d) reaches past the last whole block at %d", start, end, whole)
+	}
+	if end-start < d.n {
+		t.Fatalf("range [%d, %d) is shorter than the frame %d", start, end, d.n)
+	}
+	for b := start / d.hop; b < end/d.hop; b++ {
+		if e := f32.SumOfSquares(x[b*d.hop:(b+1)*d.hop]) / float32(d.hop); e < silencePower {
+			t.Fatalf("block %d of range [%d, %d) is digital silence (energy %g)", b, start, end, e)
+		}
+	}
+}
+
+// TestAutoProfileRangeInvariant pins that every auto profile measures a
+// block-aligned stretch free of digital silence: for the named cases and 200
+// random clips through EstimateNoiseProfile, and, on the first 50 random clips,
+// for every provisional Profile taken while the clip streams in, which must
+// also equal EstimateNoiseProfile of the prefix.
+func TestAutoProfileRangeInvariant(t *testing.T) {
+	profiles := 0
+	for _, c := range profileCases() {
+		d := mustDenoiser(t, c.cfg)
+		p, err := d.EstimateNoiseProfile(c.x)
+		if err != nil {
+			continue
+		}
+		profiles++
+		t.Run(c.name, func(t *testing.T) { assertAutoRangeInvariant(t, d, c.x, p) })
+	}
+	for seed := range uint64(200) {
+		rng := rand.New(rand.NewPCG(seed, 99))
+		x, cfg := randomClip(rng)
+		d := mustDenoiser(t, cfg)
+		p, err := d.EstimateNoiseProfile(x)
+		if err == nil {
+			profiles++
+			t.Run(fmt.Sprintf("seed-%d", seed), func(t *testing.T) { assertAutoRangeInvariant(t, d, x, p) })
+		}
+		if seed >= 50 {
+			continue
+		}
+		t.Run(fmt.Sprintf("prefixes/seed-%d", seed), func(t *testing.T) {
+			e := d.NewNoiseProfileEstimator()
+			next := randomSizes(seed, 3*d.hop)
+			step := cfg.SampleRate / 4
+			for boundary, rest := step, x; len(rest) > 0; {
+				k := min(max(1, next()), len(rest))
+				e.AddFloat32(rest[:k])
+				rest = rest[k:]
+				if e.Len() < boundary {
+					continue
+				}
+				boundary = (e.Len()/step + 1) * step
+				prefix := x[:e.Len()]
+				got, gotErr := e.Profile()
+				want, wantErr := d.EstimateNoiseProfile(prefix)
+				sameProfile(t, got, gotErr, want, wantErr)
+				if gotErr == nil {
+					assertAutoRangeInvariant(t, d, prefix, got)
+				}
+			}
+		})
+	}
+	if profiles == 0 {
+		t.Fatal("no clip produced a profile, so the invariant was never checked")
 	}
 }

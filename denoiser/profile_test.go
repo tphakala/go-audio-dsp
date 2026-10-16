@@ -2,8 +2,10 @@ package denoiser
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/rand/v2"
+	"slices"
 	"testing"
 
 	dsp "github.com/tphakala/go-audio-dsp"
@@ -307,14 +309,171 @@ func TestEstimateNoiseProfileSkipsDigitalSilence(t *testing.T) {
 	if p.Info().StartSec < 1.0-0.006 {
 		t.Errorf("window at %.3f s lies in the digital silence", p.Info().StartSec)
 	}
-	// All-silent input: no error, epsPower profile.
-	p, err = d.EstimateNoiseProfile(make([]float32, 4*sr))
-	if err != nil {
-		t.Fatal(err)
+	// All-silent input has no usable window: its measured stretch is silence.
+	if _, err := d.EstimateNoiseProfile(make([]float32, 4*sr)); !errors.Is(err, ErrNoQuietRegion) {
+		t.Fatalf("all-silent clip: err = %v, want ErrNoQuietRegion", err)
 	}
-	for k, v := range p.Spectrum() {
-		if v != epsPower {
-			t.Fatalf("silent clip bin %d = %g, want epsPower", k, v)
+}
+
+// mostlySilentClip is 8 s of -30 dBFS white noise with a 1 s run of digital
+// silence at 5 s and a 20 ms zero gap every 0.4 s, so every 0.5 s window holds
+// silence and the gaps and the long run leave nothing that is silence-free.
+func mostlySilentClip(sr int) []float32 {
+	x := whiteNoise(8*sr, 0.0316, 61)
+	clear(x[5*sr : 6*sr])
+	for at := 0; at+sr/50 <= len(x); at += 2 * sr / 5 {
+		clear(x[at : at+sr/50])
+	}
+	return x
+}
+
+// wideFrameClip is 12 loud blocks (-30 dBFS), quiet quiet blocks (-50 dBFS),
+// one zero block and 20 loud blocks, for a frame of 4 blocks that is longer
+// than the 0.5 s window: the window is silence-free but widening it to one
+// frame reaches the zero block.
+func wideFrameClip(hop, quiet int) []float32 {
+	loud := whiteNoise(32*hop, 0.0316, 21)
+	q := whiteNoise(quiet*hop, 0.00316, 22)
+	x := make([]float32, 0, (33+quiet)*hop)
+	x = append(x, loud[:12*hop]...)
+	x = append(x, q...)
+	x = append(x, make([]float32, hop)...)
+	return append(x, loud[12*hop:]...)
+}
+
+// silentRangeCase is a clip whose quiet window, as measured, holds a block of
+// digital silence.
+type silentRangeCase struct {
+	name string
+	cfg  Config
+	x    []float32
+}
+
+func silentRangeCases(t *testing.T) []silentRangeCase {
+	t.Helper()
+	cs := make([]silentRangeCase, 0, 11)
+	for _, sr := range []int{16000, 48000, 192000} {
+		cs = append(cs, silentRangeCase{fmt.Sprintf("mostly-silent/%d", sr), Config{SampleRate: sr}, mostlySilentClip(sr)})
+	}
+	for _, sr := range []int{16000, 48000, 192000} {
+		cfg := Config{SampleRate: sr}
+		hop := mustDenoiser(t, cfg).hop
+		x := whiteNoise(4*sr, 0.0316, 62)
+		noiseSpan(x, 5*sr/2, 7*sr/2, 0.00562, 63)
+		for k := 0; int(float64(k)*0.3*float64(sr)) < len(x)-hop; k++ {
+			at := int(float64(k)*0.3*float64(sr)) / hop * hop
+			clear(x[at : at+hop])
 		}
+		cs = append(cs, silentRangeCase{fmt.Sprintf("one-silent-block-per-window/%d", sr), cfg, x})
+	}
+	short := whiteNoise(48000*2/5, 0.0316, 64)
+	clear(short[30*256 : 31*256])
+	cs = append(cs, silentRangeCase{"short-clip-silent-block", Config{SampleRate: 48000}, short})
+	for _, w := range []struct{ sr, frame, hop, quiet int }{
+		{16000, 16384, 4096, 2}, {48000, 32768, 8192, 3}, {192000, 131072, 32768, 3},
+	} {
+		cs = append(cs, silentRangeCase{
+			fmt.Sprintf("wide-frame-mid/%d", w.sr),
+			Config{SampleRate: w.sr, FrameSize: w.frame, HopSize: w.hop},
+			wideFrameClip(w.hop, w.quiet),
+		})
+	}
+	const hop = 8192
+	end := slices.Concat(whiteNoise(32*hop, 0.0316, 65), make([]float32, hop), whiteNoise(3*hop+4096, 0.00316, 66))
+	cs = append(cs, silentRangeCase{"wide-frame-clip-end-off-grid", Config{SampleRate: 48000, FrameSize: 32768, HopSize: hop}, end})
+	return cs
+}
+
+func TestEstimateNoiseProfileRejectsSilentMeasuredRange(t *testing.T) {
+	for _, c := range silentRangeCases(t) {
+		t.Run(c.name, func(t *testing.T) {
+			d := mustDenoiser(t, c.cfg)
+			if _, err := d.EstimateNoiseProfile(c.x); !errors.Is(err, ErrNoQuietRegion) {
+				t.Fatalf("EstimateNoiseProfile: err = %v, want ErrNoQuietRegion", err)
+			}
+			for name, next := range map[string]func() int{
+				"chunk-hop-1": fixed(d.hop - 1),
+				"chunk-4801":  fixed(4801),
+				"whole-clip":  fixed(len(c.x)),
+			} {
+				e := d.NewNoiseProfileEstimator()
+				feedFloat(e, c.x, next)
+				if _, err := e.Profile(); !errors.Is(err, ErrNoQuietRegion) {
+					t.Errorf("%s: Profile err = %v, want ErrNoQuietRegion", name, err)
+				}
+			}
+		})
+	}
+}
+
+// TestEstimateNoiseProfileRangeOnHopGrid pins that a window widened to one
+// frame at the end of the clip is cut at the last whole hop block rather than
+// at the last sample: the 5000 samples after the last block are never measured.
+func TestEstimateNoiseProfileRangeOnHopGrid(t *testing.T) {
+	c := findCase(t, "widen-48k-end-left")
+	d := mustDenoiser(t, c.cfg)
+	const wantStart, wantLen = 16 * 16384, 65536
+	check := func(t *testing.T, p *NoiseProfile, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := int(math.Round(p.Info().StartSec * 48000))
+		n := int(math.Round(p.Info().DurationSec * 48000))
+		if start != wantStart || n != wantLen {
+			t.Fatalf("measured [%d, +%d), want [%d, +%d)", start, n, wantStart, wantLen)
+		}
+	}
+	t.Run("whole-clip", func(t *testing.T) {
+		p, err := d.EstimateNoiseProfile(c.x)
+		check(t, p, err)
+	})
+	t.Run("streaming", func(t *testing.T) {
+		e := d.NewNoiseProfileEstimator()
+		feedFloat(e, c.x, fixed(4801))
+		p, err := e.Profile()
+		check(t, p, err)
+	})
+}
+
+// TestEstimateNoiseProfileDoesNotSearchPastSilentWideRange pins that when the
+// quietest window's widened range reaches digital silence the estimate is
+// ErrNoQuietRegion, although a slightly louder clean window that passes the
+// acceptance test exists elsewhere. At 48 kHz with FrameSize 32768 and
+// HopSize 8192 the 0.5 s window is three blocks and is widened to four. The
+// clip is three clean blocks (-45 dBFS), nine loud blocks (-30 dBFS), the
+// quietest three blocks (-50 dBFS) followed by one zero block, and 20 loud
+// blocks. The loud blocks set the percentile reference, so both quiet windows
+// are accepted on their own; the control clip loses the quietest blocks and
+// the zero block and gets the clean window.
+func TestEstimateNoiseProfileDoesNotSearchPastSilentWideRange(t *testing.T) {
+	const sr, frame, hop = 48000, 32768, 8192
+	d := mustDenoiser(t, Config{SampleRate: sr, FrameSize: frame, HopSize: hop})
+	clean := whiteNoise(3*hop, 0.00562, 41)
+	loud := whiteNoise(9*hop, 0.0316, 42)
+	quietest := whiteNoise(3*hop, 0.00316, 43)
+	tail := whiteNoise(20*hop, 0.0316, 44)
+	x := slices.Concat(clean, loud, quietest, make([]float32, hop), tail)
+
+	e := d.NewNoiseProfileEstimator()
+	feedFloat(e, x, fixed(4801))
+	best, _, err := e.selectWindow()
+	if err != nil || best != 12 {
+		t.Fatalf("precondition: selectWindow = block %d, err %v; want the quietest window at block 12, accepted", best, err)
+	}
+	if _, err := e.Profile(); !errors.Is(err, ErrNoQuietRegion) {
+		t.Errorf("Profile: err = %v, want ErrNoQuietRegion", err)
+	}
+	if _, err := d.EstimateNoiseProfile(x); !errors.Is(err, ErrNoQuietRegion) {
+		t.Errorf("EstimateNoiseProfile: err = %v, want ErrNoQuietRegion", err)
+	}
+
+	control := slices.Concat(clean, loud, whiteNoise(4*hop, 0.0316, 45), tail)
+	p, err := d.EstimateNoiseProfile(control)
+	if err != nil {
+		t.Fatalf("control: the clean window is not accepted on its own: %v", err)
+	}
+	if start := int(math.Round(p.Info().StartSec * sr)); start != 0 {
+		t.Errorf("control: measured start %d, want the clean window at 0", start)
 	}
 }

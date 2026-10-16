@@ -2,13 +2,11 @@ package gate
 
 import (
 	"errors"
-	"math"
 
 	dsp "github.com/tphakala/go-audio-dsp"
 	"github.com/tphakala/go-audio-dsp/denoiser"
 	"github.com/tphakala/go-audio-dsp/internal/dspshared"
 	"github.com/tphakala/go-audio-dsp/stft"
-	"github.com/tphakala/simd/f32"
 )
 
 // epsPower floors every noise power estimate so SNR ratios stay finite. It is
@@ -209,12 +207,12 @@ func Denoise(x []float32, cfg Config) ([]float32, error) {
 // prescan measures x's quietest window with the flagship estimator, at the
 // gate's resolved frame geometry so both sides share one power scale, and caps
 // the blind floor with it. ErrNoQuietRegion (about 1 s or more of non-silent
-// audio with no distinct quiet window), ErrProfileTooShort (under one frame),
-// or a measured stretch that holds a digital-silence block (no 0.5 s window
-// free of silence exists, or a FrameSize longer than 0.5 s reaches into it)
-// leaves the plain blind tracker in place. Any other error is unexpected
-// (denoiser.New resolves the same geometry the gate already accepted) and is
-// returned rather than silently dropping the cap.
+// audio with no distinct quiet window, or a measured stretch that holds digital
+// silence: no 0.5 s window free of it exists, or a FrameSize longer than 0.5 s
+// reaches into it) or ErrProfileTooShort (under one frame) leaves the plain
+// blind tracker in place. Any other error is unexpected (denoiser.New resolves
+// the same geometry the gate already accepted) and is returned rather than
+// silently dropping the cap.
 func (g *Gate) prescan(x []float32) error {
 	d, err := denoiser.New(denoiser.Config{SampleRate: g.sampleRate, FrameSize: g.n, HopSize: g.hop})
 	if err != nil {
@@ -226,21 +224,6 @@ func (g *Gate) prescan(x []float32) error {
 		return nil
 	case err != nil:
 		return err
-	}
-	// With no window free of digital silence the estimator falls back to one
-	// that holds silence, and a frame longer than the window can reach into
-	// silence too. Silence pulls the measured profile below the real noise (to
-	// the epsPower floor for an all-zero window, where a cap would stop all
-	// gating). Keep the plain median whenever any hop block of the measured
-	// stretch is below the estimator's silence threshold, however much of the
-	// stretch is real noise.
-	info := p.Info()
-	start := int(math.Round(info.StartSec * float64(g.sampleRate)))
-	end := min(len(x), start+int(math.Round(info.DurationSec*float64(g.sampleRate))))
-	for b := start; b+g.hop <= end; b += g.hop {
-		if f32.SumOfSquares(x[b:b+g.hop])/float32(g.hop) < dspshared.SilencePower {
-			return nil
-		}
 	}
 	return g.setBlindCap(p.Spectrum())
 }

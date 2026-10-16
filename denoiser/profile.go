@@ -150,15 +150,19 @@ const (
 
 // EstimateNoiseProfile scans a clip for its quietest autoWindowSec window and
 // measures the noise profile there (Tier 1, zero-click). Blocks of digital
-// silence (zero padding) are skipped when anything else exists. The window is
-// accepted only if the clip has dynamic range: its mean energy must be at
-// least quietMarginDB below the quietPercentile of block energies, otherwise
+// silence (zero padding) never make up the window. The window is accepted only
+// if the clip has dynamic range: its mean energy must be at least
+// quietMarginDB below the quietPercentile of block energies, otherwise
 // ErrNoQuietRegion is returned (continuous song, or featureless noise, where
-// the adaptive tracker does as well). Clips shorter than about two windows
-// accept the quietest window unconditionally. Info() on the result reports
-// the window position. Returns ErrProfileTooShort for inputs shorter than one
-// frame. For a clip that arrives in chunks, or is held as int16, use
-// NewNoiseProfileEstimator, which returns the same result in bounded memory.
+// the adaptive tracker does as well). Clips shorter than about two windows skip
+// that test. The stretch measured for the window (widened to one frame when
+// FrameSize is longer than the window, and ending at the last whole hop block)
+// must hold no block of digital silence (below -90 dBFS RMS), otherwise
+// ErrNoQuietRegion is returned: a silent block would pull the profile below
+// the real noise. Info() on the result reports the measured stretch. Returns
+// ErrProfileTooShort for inputs shorter than one frame. For a clip that
+// arrives in chunks, or is held as int16, use NewNoiseProfileEstimator, which
+// returns the same result in bounded memory.
 func (d *Denoiser) EstimateNoiseProfile(x []float32) (*NoiseProfile, error) {
 	if len(x) < d.n {
 		return nil, ErrProfileTooShort
@@ -172,11 +176,14 @@ func (d *Denoiser) EstimateNoiseProfile(x []float32) (*NoiseProfile, error) {
 		e.addBlock(f32.SumOfSquares(x[b*d.hop:(b+1)*d.hop]) / float32(d.hop))
 	}
 	e.pos = len(x)
-	best, w, _, err := e.selectWindow()
+	best, w, err := e.selectWindow()
 	if err != nil {
 		return nil, err
 	}
-	start, end := profileRange(best, w, d.hop, d.n, len(x))
+	start, end, err := e.measuredRange(best, w)
+	if err != nil {
+		return nil, err
+	}
 	return e.buildProfile(x[start:end], start, end)
 }
 
@@ -184,21 +191,20 @@ func (d *Denoiser) EstimateNoiseProfile(x []float32) (*NoiseProfile, error) {
 // time. The statements in push are the sliding-sum scan of quietestWindow, so
 // a stream of pushes and a whole-slice scan select identical windows.
 type windowTracker struct {
-	w           int
-	maskSilence bool
-	sum         float64
-	silent      int
-	best        int // start block of the best window so far, -1 if none
-	bestSum     float64
+	w       int
+	sum     float64
+	silent  int
+	best    int // start block of the best window so far, -1 if none
+	bestSum float64
 }
 
-func newWindowTracker(w int, maskSilence bool) windowTracker {
-	return windowTracker{w: w, maskSilence: maskSilence, best: -1, bestSum: math.Inf(1)}
+func newWindowTracker(w int) windowTracker {
+	return windowTracker{w: w, best: -1, bestSum: math.Inf(1)}
 }
 
-// reset returns the tracker to its initial state, keeping w and maskSilence.
+// reset returns the tracker to its initial state, keeping w.
 func (t *windowTracker) reset() {
-	*t = newWindowTracker(t.w, t.maskSilence)
+	*t = newWindowTracker(t.w)
 }
 
 // push accounts for the last element of energy (block len(energy)-1, with the
@@ -218,7 +224,7 @@ func (t *windowTracker) push(energy []float32) (improved bool) {
 			t.silent--
 		}
 	}
-	if b >= t.w-1 && (!t.maskSilence || t.silent == 0) && t.sum < t.bestSum {
+	if b >= t.w-1 && t.silent == 0 && t.sum < t.bestSum {
 		t.bestSum, t.best = t.sum, b-t.w+1
 		return true
 	}
@@ -226,11 +232,10 @@ func (t *windowTracker) push(energy []float32) (improved bool) {
 }
 
 // quietestWindow returns the start block and energy sum of the minimum-energy
-// window of w blocks; with maskSilence it considers only windows containing
-// no digital-silence block, returning -1 if there is none. Ties go to the
-// earliest window.
-func quietestWindow(energy []float32, w int, maskSilence bool) (start int, energySum float64) {
-	t := newWindowTracker(w, maskSilence)
+// window of w blocks that contains no digital-silence block, or -1 if there is
+// none. Ties go to the earliest window.
+func quietestWindow(energy []float32, w int) (start int, energySum float64) {
+	t := newWindowTracker(w)
 	for b := range energy {
 		t.push(energy[:b+1])
 	}

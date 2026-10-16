@@ -19,8 +19,9 @@ var (
 	// block's undersize error with a single errors.Is.
 	ErrBufferTooSmall = dsp.ErrBufferTooSmall
 	// ErrNoQuietRegion reports that EstimateNoiseProfile or
-	// NoiseProfileEstimator.Profile found no window distinctly quieter than the
-	// rest of the clip.
+	// NoiseProfileEstimator.Profile found no usable quiet window: none distinctly
+	// quieter than the rest of the clip, or the quietest one's measured stretch
+	// holds digital silence.
 	ErrNoQuietRegion = errors.New("denoiser: no distinct quiet region found")
 	// ErrProfileTooShort reports a noise sample shorter than one frame.
 	ErrProfileTooShort = errors.New("denoiser: noise sample shorter than one frame")
