@@ -1,8 +1,9 @@
 // Package dspshared holds the small helpers the flagship denoiser and the
 // denoiser/gate method both need: the noise-power floor guard, the analysis
 // configuration, frame-size and geometry defaults, the tracker window
-// conversion, and the streaming emission arithmetic. They live here so a fix
-// lands once; each caller keeps its own config type.
+// conversion, the streaming emission arithmetic, and the overlap-add stream
+// driver (Stream). They live here so a fix lands once; each caller keeps its
+// own config type.
 package dspshared
 
 import (
@@ -87,15 +88,15 @@ func STFTConfig(frame, hop int) stft.Config {
 	return stft.Config{FrameSize: frame, HopSize: hop, Window: stft.Hann}
 }
 
-// NoEmit is the no-op frame callback used to feed an analyzer's leading-zero
+// noEmit is the no-op frame callback used to feed an analyzer's leading-zero
 // preroll, during which no frame completes.
-func NoEmit(spec []complex64, power []float32) {}
+func noEmit(spec []complex64, power []float32) {}
 
-// PendingOutput reports how many output samples feeding extra more input
+// pendingOutput reports how many output samples feeding extra more input
 // samples will emit. inFill is the analyzer's buffered sample count, frames the
 // frames completed so far, and warm the number of leading frames whose output
 // block is discarded. Emission count after F frames is max(0, F-warm).
-func PendingOutput(inFill, extra, n, hop int, frames, warm int64) int {
+func pendingOutput(inFill, extra, n, hop int, frames, warm int64) int {
 	total := inFill + extra
 	if total < n {
 		return 0

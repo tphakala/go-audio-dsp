@@ -25,4 +25,4 @@ func (d *Denoiser) HopSize() int { return d.hop }
 // bound, not the exact count (output is emitted in whole HopSize blocks, so a
 // small input can produce fewer samples, even zero). Sizing an output buffer
 // with it guarantees ProcessInto never returns ErrBufferTooSmall.
-func (d *Denoiser) MaxOutputLen(inputLen int) int { return inputLen + d.hop }
+func (d *Denoiser) MaxOutputLen(inputLen int) int { return d.st.MaxOutputLen(inputLen) }
