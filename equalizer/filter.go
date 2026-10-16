@@ -47,7 +47,7 @@ func NewFilter(b Band, sampleRate int) (*Filter, error) {
 	return &Filter{sampleRate: sampleRate, sections: sections}, nil
 }
 
-// ProcessInto writes in filtered through this band's cascade into out and
+// ProcessInto writes in filtered through the filter's cascade into out and
 // returns the number of samples written (len(in)). out must have room for
 // len(in) samples (see MaxOutputLen); a shorter out returns ErrBufferTooSmall
 // and leaves the filter state unchanged so the caller can retry. out may be
@@ -67,7 +67,7 @@ func (f *Filter) ProcessInto(in, out []float32) (int, error) {
 	return n, nil
 }
 
-// ApplyFloat64 filters buf in place through this band's cascade, keeping full
+// ApplyFloat64 filters buf in place through the filter's cascade, keeping full
 // float64 precision between passes (no float32 truncation between sections).
 // This is a numerically DIFFERENT filter from ProcessInto, which truncates to
 // float32 at each stage: use ApplyFloat64 when the caller carries a float64
