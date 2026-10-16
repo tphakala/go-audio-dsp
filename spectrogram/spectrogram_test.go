@@ -433,11 +433,11 @@ func TestCustomWindowScaleInvariant(t *testing.T) {
 			if a.Frames != b.Frames || a.Bins != b.Bins {
 				t.Fatalf("shape mismatch: %dx%d vs %dx%d", a.Bins, a.Frames, b.Bins, b.Frames)
 			}
+			compared := 0
 			for f := range a.Frames {
-				peak := 0.0
-				for bin := range a.Bins {
-					peak = math.Max(peak, math.Abs(float64(a.At(bin, f))))
-				}
+				// Signed maximum: dB values are mostly negative, so the largest
+				// magnitude would be the quietest bin, not the column peak.
+				peak := float64(slices.Max(a.Column(f)))
 				for bin := range a.Bins {
 					x, y := float64(a.At(bin, f)), float64(b.At(bin, f))
 					if sc == DB {
@@ -445,6 +445,7 @@ func TestCustomWindowScaleInvariant(t *testing.T) {
 						if x < peak-40 {
 							continue
 						}
+						compared++
 						if math.Abs(x-y) > 1e-4 {
 							t.Fatalf("db frame %d bin %d: %g vs %g", f, bin, x, y)
 						}
@@ -454,6 +455,9 @@ func TestCustomWindowScaleInvariant(t *testing.T) {
 						t.Fatalf("%s frame %d bin %d: %g vs %g (peak %g)", sc, f, bin, x, y, peak)
 					}
 				}
+			}
+			if sc == DB && compared == 0 {
+				t.Fatal("no dB bin was compared; the peak-relative threshold selects nothing")
 			}
 		})
 	}
