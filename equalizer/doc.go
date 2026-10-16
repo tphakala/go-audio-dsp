@@ -25,9 +25,10 @@
 //
 // Filter is one reusable stage of such a cascade, composed with FilterChain.
 // NewFilter builds one RBJ band; NewButterworthBandPass builds a Butterworth
-// band-pass whose -3 dB points are exactly on the given edges at the actual
-// sample rate; NewBiquadFilter runs caller-designed second-order sections after
-// checking that they are finite and stable.
+// band-pass with the given edges, prewarped for the actual sample rate (the
+// edge level is documented on the constructor); NewBiquadFilter runs
+// caller-designed second-order sections after checking that they are finite and
+// stable.
 //
 // Response (on Equalizer and on Filter) and LogSweep report the steady-state
 // magnitude and phase for drawing a response curve; they allocate and are meant

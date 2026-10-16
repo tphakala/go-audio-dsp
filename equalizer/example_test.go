@@ -24,7 +24,7 @@ func ExampleEqualizer_Response() {
 	// Output: 6.0 dB at 1000 Hz
 }
 
-// A Butterworth band-pass has its -3 dB points exactly on the band edges and
+// A Butterworth band-pass reads about -3 dB on the band edges and
 // 0 dB at the geometric centre; Response reads the realised attenuation at all
 // three for a one-third-octave band at 1 kHz.
 func ExampleNewButterworthBandPass() {

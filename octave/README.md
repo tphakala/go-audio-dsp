@@ -68,10 +68,10 @@ plain RBJ band-pass (see the package documentation for the numbers).
 | `FilterButterworth` | -3.01 dB | +0.11 dB (+0.085 dB in the top band at 48 kHz) | about 3x |
 
 `FilterButterworth` is an eight-pole Butterworth band-pass per band whose -3 dB
-points are exactly on the band edges at the actual sample rate, with 0 dB at the
-centre. Its relative attenuation is within the class 1 template of IEC 61260:1995
-(identical national adoption IS 6964:2001, Table 1 and Annex B) for every band
-the meter includes, at any sample rate, from 0 Hz to Nyquist. This is not a claim
+points are on the band edges (within 0.002 dB) at the actual sample rate, with
+0 dB at the centre. Its relative attenuation is within the class 1 template of
+IEC 61260:1995 (identical national adoption IS 6964:2001, Table 1 and Annex B)
+for every band the meter includes, at any sample rate, from 0 Hz to Nyquist. This is not a claim
 of IEC 61260-1:2014 conformance: the 2014 acceptance limits were not checked, nor
 were effective bandwidth, linearity, time invariance or any other requirement of
 either edition. Levels from the two designs are not comparable: broadband noise

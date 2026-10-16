@@ -56,12 +56,12 @@
 // FilterButterworth is an opt-in profile for a flatter and steeper response.
 // Each band is an eight-pole Butterworth band-pass of four biquad sections
 // (equalizer.NewButterworthBandPass) designed for the actual sample rate: its
-// -3 dB points sit exactly on Band.Lower and Band.Upper, with the edge
-// frequencies prewarped for the bilinear transform, so the band keeps its width
-// at 44.1, 48 and 192 kHz and near Nyquist alike, and its gain is 0 dB at the
-// band centre. Order must be 0
-// (the order is fixed) and NyquistMargin at most 0.95. Compared with the default
-// at Order 1 it reads broadband noise about 1.8 dB lower:
+// -3 dB points sit on Band.Lower and Band.Upper to within 0.002 dB, with the
+// edge frequencies prewarped for the bilinear transform, so the band keeps its
+// width at 44.1, 48 and 192 kHz and near Nyquist alike, and its gain is 0 dB at
+// the band centre. Order must be 0 (the order is fixed) and NyquistMargin at
+// most 0.95. Compared with the default at Order 1 it reads broadband noise about
+// 1.8 dB lower:
 //
 //	Filter       edge level  white noise vs the rectangular band
 //	Biquad (1)   -3.01 dB    +1.93 dB

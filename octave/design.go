@@ -11,7 +11,7 @@ const (
 	// sections per band, each with its -3 dB points at the band edges.
 	FilterBiquad FilterDesign = iota
 	// FilterButterworth is an eight-pole Butterworth band-pass per band with its
-	// -3 dB points exactly on the band edges and 0 dB at the band centre; see the
+	// -3 dB points on the band edges and 0 dB at the band centre; see the
 	// package documentation for what it meets and what it costs.
 	FilterButterworth
 )

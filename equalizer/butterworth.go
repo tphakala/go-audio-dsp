@@ -8,19 +8,23 @@ import (
 	"slices"
 )
 
-// NewButterworthBandPass builds a Butterworth band-pass Filter whose -3.01 dB
-// points are exactly lower and upper (Hz) at sampleRate, with 0 dB gain at the
-// geometric centre sqrt(lower*upper). order is the prototype (low-pass) order N:
-// the band-pass has 2N poles, realised as N biquad sections, and falls off at
-// 6N dB per octave far from the band. Order 1 is the second-order band-pass,
-// order 4 an eight-pole one.
+// NewButterworthBandPass builds a Butterworth band-pass Filter whose half-power
+// edges are lower and upper (Hz) at sampleRate, with 0 dB gain at the
+// geometric centre sqrt(lower*upper). The peak lies at the prewarped centre, a
+// little above the geometric one, so the gain at an edge is -3.01 dB plus that
+// excess: within 0.002 dB for order 4 and a one-third-octave band up to 0.95 of
+// Nyquist, further off for low orders and wide bands near Nyquist (order 1 reads
+// -2.79 dB at an upper edge of 21 kHz at 48 kHz). order is the prototype
+// (low-pass) order N: the band-pass has 2N poles, realised as N biquad sections,
+// and falls off at 6N dB per octave far from the band. Order 1 is the
+// second-order band-pass, order 4 an eight-pole one.
 //
 // The design is the classical one: the Butterworth low-pass prototype poles
 // exp(j*pi*(2k+N+1)/(2N)) are mapped to a band-pass by the low-pass to
 // band-pass substitution, then to the z plane with the bilinear transform whose
-// band edges are prewarped, tan(pi*f/sampleRate), so the -3.01 dB points land on
-// lower and upper at any sample rate, including near Nyquist, where an
-// unwarped design would be pulled in. Each section is normalized to unit gain at
+// band edges are prewarped, tan(pi*f/sampleRate), so the prototype's half-power
+// points land on lower and upper at any sample rate, including near Nyquist,
+// where an unwarped design would be pulled in. Each section is normalized to unit gain at
 // the geometric centre, so the cascade reads 0 dB there. The sections run the
 // same float64 recurrence as the other Filters. Filter.Response gives the
 // realised response.

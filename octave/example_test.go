@@ -39,7 +39,7 @@ func Example() {
 	// bands: 30
 }
 
-// The Butterworth profile has its -3 dB points exactly on the band edges and
+// The Butterworth profile has its -3 dB points on the band edges and
 // reads the same -3.01 dB for a centre sine; it is opt-in through Config.Filter.
 func Example_butterworth() {
 	const rate = 48000

@@ -67,11 +67,13 @@ the magnitude evaluates to exactly zero. A `Filter` has the same method.
 an RBJ band:
 
 - `NewButterworthBandPass(lower, upper, order, sampleRate)` designs a Butterworth
-  band-pass whose -3 dB points are exactly `lower` and `upper` at the actual
-  sample rate (the band edges are prewarped for the bilinear transform), with
-  0 dB at the geometric centre. `order` is the low-pass prototype order, so the
-  band-pass has `2*order` poles in `order` biquad sections. The upper edge must
-  be below Nyquist.
+  band-pass with edges `lower` and `upper` (half-power points of the prototype)
+  at the actual sample rate (the band edges are prewarped for the bilinear
+  transform), with 0 dB at the geometric centre; the gain at an edge is -3.01 dB
+  to within 0.002 dB for order 4 and a one-third-octave band up to 0.95 of
+  Nyquist, and further off for low orders and wide bands near Nyquist. `order`
+  is the low-pass prototype order, so the band-pass has `2*order` poles in
+  `order` biquad sections. The upper edge must be below Nyquist.
 - `NewBiquadFilter(sections, sampleRate)` runs caller-designed second-order
   sections. A `Biquad` holds `B0, B1, B2, A1, A2` normalized so `a0` is 1, in the
   recurrence `y[n] = B0*x[n] + B1*x[n-1] + B2*x[n-2] - A1*y[n-1] - A2*y[n-2]`.
