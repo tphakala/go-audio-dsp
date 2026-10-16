@@ -41,12 +41,31 @@ func songClip(sr int, durSec, leadSec float64) []float32 {
 // the song level and the gate eats the song (5 to 20 dB on main). Rows with
 // FreqSmoothBins=0 isolate the cap from the SNR smoothing.
 func TestDenoisePrescanKeepsDenseSong(t *testing.T) {
-	const sr, frame, hop = 48000, 1024, 256
+	// Rows with frame 0 use the auto geometry for the rate (frame 256 at 16 kHz,
+	// 4096 at 192 kHz), which keeps the 3 kHz tone on bin.
+	for _, row := range []struct{ sr, frame, hop int }{
+		{48000, 1024, 256},
+		{16000, 0, 0},
+		{192000, 0, 0},
+	} {
+		t.Run(fmt.Sprintf("%d", row.sr), func(t *testing.T) {
+			testPrescanKeepsDenseSong(t, row.sr, row.frame, row.hop)
+		})
+	}
+}
+
+func testPrescanKeepsDenseSong(t *testing.T, sr, frame, hop int) {
+	t.Helper()
 	clip := songClip(sr, 4, 1)
 
 	// Precondition: the pre-scan finds its quiet window inside the noise-only
 	// lead-in, otherwise the test would not exercise the cap.
-	prof, err := profileFor(t, sr, frame, hop, clip)
+	scanFrame, scanHop := frame, hop
+	if frame == 0 {
+		scanFrame = autoGeometry(t, sr)
+		scanHop = scanFrame / 4
+	}
+	prof, err := profileFor(t, sr, scanFrame, scanHop, clip)
 	if err != nil {
 		t.Fatalf("EstimateNoiseProfile: %v", err)
 	}
@@ -128,36 +147,73 @@ func TestDenoiseFallsBackToBlind(t *testing.T) {
 
 // TestDenoiseMatchesManualPrescanSequence pins that Denoise is exactly New +
 // setBlindCap(profile) + ProcessInto + FlushInto, with the profile measured at the
-// gate's resolved frame geometry (explicit 512/128 here, not the 1024/256 default).
-// A pre-scan at the wrong geometry fails setBlindCap's length check or diverges;
-// dropping the cap call leaves the plain blind path.
+// gate's resolved sample rate and frame geometry. The rows use HopSize frame/8
+// (not the frame/4 default) at three rates, so a pre-scan that dropped HopSize or
+// assumed 48 kHz measures a different profile and diverges, as does one at the
+// wrong frame (setBlindCap's length check); dropping the cap call leaves the
+// plain blind path.
 func TestDenoiseMatchesManualPrescanSequence(t *testing.T) {
-	const sr, frame, hop = 48000, 512, 128
-	clip := songClip(sr, 4, 1)
-	cfg := Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Strength: denoiser.Medium}
+	for _, row := range []struct{ sr, frame, hop int }{
+		{48000, 512, 64},
+		{16000, 256, 32},
+		{192000, 4096, 512},
+	} {
+		t.Run(fmt.Sprintf("%d", row.sr), func(t *testing.T) {
+			clip := songClip(row.sr, 4, 1)
+			cfg := Config{SampleRate: row.sr, FrameSize: row.frame, HopSize: row.hop, Strength: denoiser.Medium}
 
-	auto, err := Denoise(clip, cfg)
-	if err != nil {
-		t.Fatal(err)
+			auto, err := Denoise(clip, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prof, err := profileFor(t, row.sr, row.frame, row.hop, clip)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plain, capped := plainAndCapped(t, cfg, clip, prof)
+			assertBitExact(t, "Denoise vs manual pre-scan sequence", auto, capped)
+			if slices.Equal(auto, plain) {
+				t.Fatal("precondition: the cap changed nothing, so this test cannot tell Denoise from the plain blind path")
+			}
+		})
 	}
-	prof, err := profileFor(t, sr, frame, hop, clip)
-	if err != nil {
-		t.Fatal(err)
-	}
-	g, err := New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := g.setBlindCap(prof.Spectrum()); err != nil {
-		t.Fatal(err)
-	}
-	assertBitExact(t, "Denoise vs manual pre-scan sequence", auto, streamAll(t, g, clip))
-	plain, err := New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if slices.Equal(auto, streamAll(t, plain, clip)) {
-		t.Fatal("precondition: the cap changed nothing, so this test cannot tell Denoise from the plain blind path")
+}
+
+// TestDenoiseShortClipTakesQuietestWindow pins the pre-scan on clips too short
+// to be judged for dynamic range. The 0.9 s rows have fewer than two windows of
+// non-silent audio, so the acceptance test is skipped; the 0.4 s rows are
+// shorter than one window, so the whole clip is the window. Both take the
+// quietest window as is and cap with it. The clip is -40 dBFS noise with a
+// -20 dBFS 3 kHz tone from toneSec on, and FloorWindowSec is shortened so the
+// blind median engages within the clip.
+func TestDenoiseShortClipTakesQuietestWindow(t *testing.T) {
+	for _, sr := range []int{16000, 48000, 192000} {
+		for _, row := range []struct{ durSec, toneSec, floorSec float64 }{
+			{0.9, 0.55, 0.2},
+			{0.4, 0.24, 0.1},
+		} {
+			t.Run(fmt.Sprintf("%d/%.1fs", sr, row.durSec), func(t *testing.T) {
+				x := songClip(sr, row.durSec, row.toneSec)
+				frame := autoGeometry(t, sr)
+				p := ParamsFor(denoiser.Medium)
+				p.FloorWindowSec = float32(row.floorSec)
+				cfg := Config{SampleRate: sr, Params: &p}
+
+				prof, err := profileFor(t, sr, frame, frame/4, x)
+				if err != nil {
+					t.Fatalf("precondition: EstimateNoiseProfile: %v", err)
+				}
+				plain, capped := plainAndCapped(t, cfg, x, prof)
+				if slices.Equal(plain, capped) {
+					t.Fatal("precondition: the cap changed nothing, so this test cannot tell a cap from the plain blind path")
+				}
+				got, err := Denoise(x, cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertBitExact(t, "Denoise vs manual capped stream", got, capped)
+			})
+		}
 	}
 }
 
