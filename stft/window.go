@@ -166,8 +166,7 @@ const (
 	ShapeHann ShapeFamily = iota
 	// ShapeDolphChebyshev is the symmetric Dolph-Chebyshev window with its centre
 	// sample normalized to 1 (DolphChebyshevSymmetric normalizes the peak
-	// instead; the two differ only where the window peaks away from its centre, at
-	// low attenuation).
+	// instead; the two differ below about 86 dB attenuation).
 	ShapeDolphChebyshev
 )
 
