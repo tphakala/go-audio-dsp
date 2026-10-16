@@ -20,8 +20,8 @@ const EpsPower = 1e-12
 
 // SilencePower is the block mean-square below which audio counts as digital
 // silence (-90 dBFS RMS): zero padding, a recorder pre-roll or a dropout. The
-// flagship's quietest-window scan masks such blocks, and the gate refuses a
-// pre-scan window that holds one.
+// flagship's quietest-window scan masks such blocks, and it rejects a quiet
+// window whose measured stretch holds one.
 const SilencePower = 1e-9
 
 const (

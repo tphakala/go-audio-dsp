@@ -171,8 +171,9 @@ input sample are not themselves sanitized (garbage in, garbage out, localized).
   (median-to-mean corrected) and ignores a sparse loud tone.
   `Denoise` keeps continuous on-bin song that fills most of the median window
   (the cap), caps nothing and equals the plain blind stream when a clip long
-  enough to be judged has no distinct quiet window or the clip is under one frame, and the capped path is chunk-invariant and
-  allocation-free.
+  enough to be judged has no distinct quiet window, when its quiet window holds
+  digital silence, or when the clip is under one frame, and the capped path is
+  chunk-invariant and allocation-free.
 - **Zero-allocation** steady state and a gating benchmark.
 
 ```sh
