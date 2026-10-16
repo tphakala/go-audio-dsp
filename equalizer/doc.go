@@ -23,8 +23,15 @@
 // band-reject and peaking take a bandwidth in Hz. A band whose width would put
 // the lower band edge at or below 0 Hz is rejected rather than clamped.
 //
-// Response and LogSweep report the steady-state magnitude and phase for drawing
-// a response curve; they allocate and are meant for visualization, not the audio
-// path. The biquad recurrence is serial (each output depends on the previous
-// one), so it has no SIMD form; it runs in scalar float64. There is no CGo.
+// Filter is one reusable stage of such a cascade, composed with FilterChain.
+// NewFilter builds one RBJ band; NewButterworthBandPass builds a Butterworth
+// band-pass whose -3 dB points are exactly on the given edges at the actual
+// sample rate; NewBiquadFilter runs caller-designed second-order sections after
+// checking that they are finite and stable.
+//
+// Response (on Equalizer and on Filter) and LogSweep report the steady-state
+// magnitude and phase for drawing a response curve; they allocate and are meant
+// for visualization, not the audio path. The biquad recurrence is serial (each
+// output depends on the previous one), so it has no SIMD form; it runs in scalar
+// float64. There is no CGo.
 package equalizer

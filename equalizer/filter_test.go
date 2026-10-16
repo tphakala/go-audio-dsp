@@ -138,6 +138,15 @@ func filterCases() []filterCase {
 			}
 			return f
 		}},
+		{"NewButterworthBandPass", func(t *testing.T) *Filter {
+			t.Helper()
+			lower, upper := thirdOctave(1000)
+			f, err := NewButterworthBandPass(lower, upper, 4, 48000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return f
+		}},
 	}
 }
 

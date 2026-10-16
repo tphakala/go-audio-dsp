@@ -12,9 +12,10 @@ import (
 var _ dsp.Processor = (*Filter)(nil)
 
 // Filter is a cascade of biquad sections, built by NewFilter (one RBJ band over
-// its Passes) or NewBiquadFilter (caller-supplied sections), as a streaming
-// dsp.Processor over mono float32 audio. Like Equalizer it uses float64
-// coefficients and float64 state with float32 I/O, has zero latency (output aligns sample-for-sample with input) and no tail
+// its Passes), NewBiquadFilter (caller-supplied sections) or
+// NewButterworthBandPass, as a streaming dsp.Processor over mono float32 audio.
+// Like Equalizer it uses float64 coefficients and float64 state with float32
+// I/O, has zero latency (output aligns sample-for-sample with input) and no tail
 // (so it does not implement dsp.Flusher), and Reset clears the state between
 // streams. The float32 path (ProcessInto) of a NewFilter filter is bit-identical
 // to an Equalizer of the same single band, so a FilterChain of such Filters

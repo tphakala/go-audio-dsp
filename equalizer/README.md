@@ -58,7 +58,33 @@ for _, p := range e.Response(freqs) {
 `Response` allocates its result and is a visualization helper, not an audio-path
 method; it does not touch the filter state, so it is safe to call while
 streaming. A deep notch reports a large finite attenuation, not `-Inf`, unless
-the magnitude evaluates to exactly zero.
+the magnitude evaluates to exactly zero. A `Filter` has the same method.
+
+## Filters beyond one RBJ band
+
+`NewFilter` builds one band as a streaming `Filter` that composes into a
+`FilterChain`. Two more constructors build a `Filter` from sections that are not
+an RBJ band:
+
+- `NewButterworthBandPass(lower, upper, order, sampleRate)` designs a Butterworth
+  band-pass whose -3 dB points are exactly `lower` and `upper` at the actual
+  sample rate (the band edges are prewarped for the bilinear transform), with
+  0 dB at the geometric centre. `order` is the low-pass prototype order, so the
+  band-pass has `2*order` poles in `order` biquad sections. The upper edge must
+  be below Nyquist.
+- `NewBiquadFilter(sections, sampleRate)` runs caller-designed second-order
+  sections. A `Biquad` holds `B0, B1, B2, A1, A2` normalized so `a0` is 1, in the
+  recurrence `y[n] = B0*x[n] + B1*x[n-1] + B2*x[n-2] - A1*y[n-1] - A2*y[n-2]`.
+  Non-finite, out-of-range or unstable sections (poles on or outside the unit
+  circle) are rejected at construction.
+
+```go
+f, err := equalizer.NewButterworthBandPass(891.25, 1122.02, 4, 48000)
+if err != nil {
+	// an edge is out of range, or the coefficients would be unstable
+}
+f.ApplyFloat64(buf) // float64 samples, in place
+```
 
 ## Notes
 
