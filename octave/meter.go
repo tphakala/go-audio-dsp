@@ -37,12 +37,19 @@ type Config struct {
 	// [MinFreq, MaxFreq] Hz. Defaults 25 and 20000.
 	MinFreq, MaxFreq float64
 	// NyquistMargin is the fraction of the Nyquist frequency that a band's upper
-	// edge must stay below for the band to be included, in (0, 1]. Default 0.95.
+	// edge must stay below for the band to be included, in (0, 1]. Default 0.95,
+	// which is also the largest value FilterButterworth accepts.
 	NyquistMargin float64
-	// Order is the number of identical biquad sections cascaded per band, 0 meaning
-	// 1, at most 8. See the package documentation for what Order does to the
-	// level and the bandwidth.
+	// Order is the number of identical biquad sections cascaded per band with
+	// FilterBiquad, 0 meaning 1, at most 8. See the package documentation for what
+	// Order does to the level and the bandwidth. It must be 0 with
+	// FilterButterworth, whose order is fixed.
 	Order int
+	// Filter selects the band-pass design. The zero value, FilterBiquad, is the
+	// design of earlier releases; FilterButterworth is an opt-in profile whose
+	// relative attenuation is within the IEC 61260:1995 class 1 template. See the
+	// package documentation.
+	Filter FilterDesign
 }
 
 // Meter is a streaming 1/3-octave band level meter. It is not a dsp.Processor:
@@ -91,7 +98,12 @@ func New(cfg Config) (*Meter, error) {
 	if !(margin > 0 && margin <= 1) {
 		return nil, fmt.Errorf("%w: NyquistMargin must be in (0, 1], got %g", ErrInvalidConfig, cfg.NyquistMargin)
 	}
-	if order < 1 || order > maxOrder {
+	if err := validateDesign(cfg, margin); err != nil {
+		return nil, err
+	}
+	// Order applies to the biquad design only; validateDesign requires 0 with
+	// FilterButterworth.
+	if cfg.Filter == FilterBiquad && (order < 1 || order > maxOrder) {
 		return nil, fmt.Errorf("%w: Order must be in [1, %d], got %d", ErrInvalidConfig, maxOrder, cfg.Order)
 	}
 
@@ -100,18 +112,26 @@ func New(cfg Config) (*Meter, error) {
 		return nil, fmt.Errorf("%w: no band in [%g, %g] Hz fits below %g of the Nyquist frequency at %d Hz", ErrInvalidConfig, minF, maxF, margin, cfg.SampleRate)
 	}
 
-	// The equalizer BandPass takes its width in Hz and converts it to octaves as
-	// log2((f+W/2)/(f-W/2)). Choose W so that this equals log2(Upper/Lower), the
-	// band's own octave width, instead of Upper-Lower (which is off by about 0.2%).
+	// For FilterBiquad, the equalizer BandPass takes its width in Hz and converts
+	// it to octaves as log2((f+W/2)/(f-W/2)). Choose W so that this equals
+	// log2(Upper/Lower), the band's own octave width, instead of Upper-Lower (which
+	// is off by about 0.2%).
 	r := math.Pow(10, 0.1)
 	filters := make([]*equalizer.Filter, len(bands))
 	for i, b := range bands {
-		f, err := equalizer.NewFilter(equalizer.Band{
-			Type:      equalizer.BandPass,
-			Frequency: b.Exact,
-			WidthHz:   2 * b.Exact * (r - 1) / (r + 1),
-			Passes:    order,
-		}, cfg.SampleRate)
+		var f *equalizer.Filter
+		var err error
+		switch cfg.Filter {
+		case FilterButterworth:
+			f, err = equalizer.NewButterworthBandPass(b.Lower, b.Upper, butterworthOrder, cfg.SampleRate)
+		case FilterBiquad:
+			f, err = equalizer.NewFilter(equalizer.Band{
+				Type:      equalizer.BandPass,
+				Frequency: b.Exact,
+				WidthHz:   2 * b.Exact * (r - 1) / (r + 1),
+				Passes:    order,
+			}, cfg.SampleRate)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("octave: band %g Hz: %w", b.Nominal, err)
 		}

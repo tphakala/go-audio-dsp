@@ -19,12 +19,12 @@ Packages:
 | `pcm` | stable | int16 <-> float32 conversion at the chain edges, saturating `ScaleInt16` |
 | `denoiser` | beta | Spectral denoiser (measured or adaptive noise profile, Wiener / MMSE-LSA gain, overlap-add), `NoiseProfileEstimator` |
 | `denoiser/gate` | beta | Spectral soft-gate waveform denoiser, the lighter second denoise method |
-| `equalizer` | beta | RBJ biquad filter chain as a streaming block, plus frequency response for a UI curve |
+| `equalizer` | beta | RBJ biquad filter chain as a streaming block, plus frequency response for a UI curve; Butterworth band-pass and caller-supplied biquad sections as a `Filter` |
 | `gain` | beta | Fixed decibel gain as a streaming block, saturating int16 entry points |
 | `stft` | beta | Shared STFT layer: whole-clip `Plan`, streaming `Analyzer`, overlap-add `Synthesizer`, windows |
 | `spectrogram` | beta | Magnitude, power or dB spectrogram matrix, whole clip or streaming columns |
 | `mel` | beta | Per-frame (log-)mel columns; normalization, stacking and tensor layout are the consumer's job |
-| `octave` | beta | Streaming 1/3-octave band level meter (a meter, not a `Processor`): ISO 266 / IEC 61260-1 bands, mean square per period, built on `equalizer` BandPass filters |
+| `octave` | beta | Streaming 1/3-octave band level meter (a meter, not a `Processor`): ISO 266 / IEC 61260-1 bands, mean square per period, built on `equalizer` filters (RBJ BandPass by default, an optional Butterworth band-pass profile) |
 | `internal/dspshared` | | Helpers shared by `denoiser` and `denoiser/gate` (floor guard, geometry defaults, emission arithmetic, the overlap-add stream driver) so a fix lands once |
 | `internal/audiotest` | | Test-only: synthetic signals, metrics, ffmpeg `afftdn` A/B harness, noise-bed mixing |
 | `rules` | | gocritic ruleguard matchers (build tag `ruleguard`, lint-only) |
@@ -82,7 +82,7 @@ Unit tests run without external tools; the oracle tests skip when ffmpeg is not 
 - **Regression tests.** New behaviour gets a test. A bug fix gets a regression test that fails before the fix. A test must be able to fail: break the line it pins and confirm it fails, and avoid fixtures where every path gives the same result (silence, DC, a single sine for a frequency-dependent change).
 - **Contract tests.** Every streaming block is tested against the `Processor` contract: `MaxOutputLen` holds for every chunk size, `ErrBufferTooSmall` leaves state untouched, output length equals input length after flush, chunking does not change the result, and `Reset` starts a clean stream. Some of this lives in `contract_test.go`, the rest in chunk-invariance and reset tests next to the block; a new block covers all of it.
 - **Allocation tests.** `testing.AllocsPerRun` guards steady-state paths; they carry `//go:build !race` because the race detector allocates. A change on a hot path keeps them at zero.
-- **Reference oracles.** `loudnorm` is checked against ffmpeg `ebur128`, `denoiser` against `afftdn`, `mel` against librosa golden data, `stft` Dolph-Chebyshev windows against scipy `chebwin` golden data. Tolerances are stated in the test; tighten them when the implementation improves, do not loosen them to make a change pass without explaining why in the PR.
+- **Reference oracles.** `loudnorm` is checked against ffmpeg `ebur128`, `denoiser` against `afftdn`, `mel` against librosa golden data, `stft` Dolph-Chebyshev windows against scipy `chebwin` golden data, `octave`'s Butterworth profile against the IEC 61260:1995 class 1 and 2 relative attenuation template (IS 6964:2001 Table 1, Annex B), `equalizer`'s Butterworth band-pass against the analytic Butterworth magnitude. Tolerances are stated in the test; tighten them when the implementation improves, do not loosen them to make a change pass without explaining why in the PR.
 - **Corpus A/B.** `task ab` runs `denoiser` and `denoiser/gate` against `afftdn` on real clips in `testdata/corpus/` and recorded noise beds in `testdata/noisebed/`. Both directories are local only and gitignored; the tests skip without them.
 - **Loudness corpus.** `task ab:loudnorm` runs `loudnorm.PlanBytes` against ffmpeg `loudnorm` on real clips in `loudnorm/testdata/corpus/` (or `LOUDNORM_CORPUS_DIR`), gitignored and local only; the test skips without the corpus or ffmpeg.
 - **Scalar path.** `task test:noasm` (`SIMD_DISABLE=all`, `-count=1` because the variable is read at init) runs the pure-Go kernels.

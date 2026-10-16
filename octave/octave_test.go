@@ -14,6 +14,10 @@ import (
 
 var testRates = []int{44100, 48000, 96000, 192000, 256000}
 
+// designs lists the filter profiles that the meter-level contract tests run
+// over.
+var designs = []FilterDesign{FilterBiquad, FilterButterworth}
+
 // isoNominal is the ISO 266 1/3-octave series from 25 Hz to 20 kHz.
 var isoNominal = []float64{
 	25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800,
@@ -131,6 +135,13 @@ func TestNewErrors(t *testing.T) {
 		{"negative margin", Config{SampleRate: 48000, PeriodSamples: 1, NyquistMargin: -0.1}},
 		{"order too high", Config{SampleRate: 48000, PeriodSamples: 1, Order: 9}},
 		{"negative order", Config{SampleRate: 48000, PeriodSamples: 1, Order: -1}},
+		{"unknown design", Config{SampleRate: 48000, PeriodSamples: 1, Filter: FilterDesign(2)}},
+		{"negative design", Config{SampleRate: 48000, PeriodSamples: 1, Filter: -1}},
+		{"Butterworth with Order 1", Config{SampleRate: 48000, PeriodSamples: 1, Filter: FilterButterworth, Order: 1}},
+		{"Butterworth with Order 4", Config{SampleRate: 48000, PeriodSamples: 1, Filter: FilterButterworth, Order: 4}},
+		{"Butterworth with negative Order", Config{SampleRate: 48000, PeriodSamples: 1, Filter: FilterButterworth, Order: -1}},
+		{"Butterworth margin 0.96", Config{SampleRate: 48000, PeriodSamples: 1, Filter: FilterButterworth, NyquistMargin: 0.96}},
+		{"Butterworth margin 1", Config{SampleRate: 48000, PeriodSamples: 1, Filter: FilterButterworth, NyquistMargin: 1}},
 		{"no band fits", Config{SampleRate: 40, PeriodSamples: 1}},
 		{"range between bands", Config{SampleRate: 48000, PeriodSamples: 1, MinFreq: 26, MaxFreq: 30}},
 	}
@@ -143,20 +154,23 @@ func TestNewErrors(t *testing.T) {
 }
 
 // TestSineAtEachCentre pins the reference level: a full scale sine at a band's
-// exact centre reads -3.01 dB in that band (the peak gain is 0 dB) at every rate.
+// exact centre reads -3.01 dB in that band (the peak gain is 0 dB) at every rate,
+// in both filter profiles.
 func TestSineAtEachCentre(t *testing.T) {
-	for _, rate := range []int{44100, 48000, 96000, 256000} {
-		for _, b := range mustMeter(t, Config{SampleRate: rate, PeriodSamples: rate}).Bands() {
-			m := mustMeter(t, Config{SampleRate: rate, PeriodSamples: rate, MinFreq: b.Nominal, MaxFreq: b.Nominal})
-			ps := periods(m, sine(b.Exact, rate, 3*rate))
-			if len(ps) != 3 {
-				t.Fatalf("%d Hz: %d periods, want 3", rate, len(ps))
-			}
-			i := 0
-			// A band below 100 Hz holds a fractional number of cycles of its centre
-			// sine in a one second period, which shifts the mean square slightly.
-			if got := db(ps[2][i]); math.Abs(got-(-3.0103)) > 0.01+0.7/b.Exact {
-				t.Errorf("%d Hz band %v: centre sine reads %.4f dB, want -3.0103", rate, b.Nominal, got)
+	for _, design := range designs {
+		for _, rate := range []int{44100, 48000, 96000, 256000} {
+			for _, b := range mustMeter(t, Config{SampleRate: rate, PeriodSamples: rate, Filter: design}).Bands() {
+				m := mustMeter(t, Config{SampleRate: rate, PeriodSamples: rate, MinFreq: b.Nominal, MaxFreq: b.Nominal, Filter: design})
+				ps := periods(m, sine(b.Exact, rate, 3*rate))
+				if len(ps) != 3 {
+					t.Fatalf("%v %d Hz: %d periods, want 3", design, rate, len(ps))
+				}
+				i := 0
+				// A band below 100 Hz holds a fractional number of cycles of its centre
+				// sine in a one second period, which shifts the mean square slightly.
+				if got := db(ps[2][i]); math.Abs(got-(-3.0103)) > 0.01+0.7/b.Exact {
+					t.Errorf("%v %d Hz band %v: centre sine reads %.4f dB, want -3.0103", design, rate, b.Nominal, got)
+				}
 			}
 		}
 	}
@@ -345,15 +359,26 @@ func analyticNoiseMS(t *testing.T, rate int, b Band, order int, variance float64
 
 // TestNoiseLevelMatchesNoiseBandwidth checks the white noise level of the upper
 // bands against the numerically integrated noise bandwidth of the design, at
-// two rates and Orders 1 and 3. The bands used are wide enough that 30 s of
-// noise pins the level to about 0.1 dB.
+// two rates, for the biquad profile at Orders 1 and 3 and for the Butterworth
+// profile. The bands used are wide enough that 30 s of noise pins the level to
+// about 0.1 dB.
 func TestNoiseLevelMatchesNoiseBandwidth(t *testing.T) {
 	const amp = 0.5
 	variance := amp * amp / 3 // uniform on [-amp, amp]
+	cases := []struct {
+		name string
+		cfg  Config
+	}{
+		{"biquad order 1", Config{Order: 1}},
+		{"biquad order 3", Config{Order: 3}},
+		{"butterworth", Config{Filter: FilterButterworth}},
+	}
 	for _, rate := range []int{48000, 96000} {
-		for _, order := range []int{1, 3} {
-			m := mustMeter(t, Config{SampleRate: rate, PeriodSamples: rate, Order: order})
-			ps := periods(m, noise(30*rate, uint64(rate+order), amp))
+		for ci, c := range cases {
+			cfg := c.cfg
+			cfg.SampleRate, cfg.PeriodSamples = rate, rate
+			m := mustMeter(t, cfg)
+			ps := periods(m, noise(30*rate, uint64(rate+ci), amp))
 			for i, b := range m.Bands() {
 				if b.Nominal < 1000 {
 					continue
@@ -363,9 +388,17 @@ func TestNoiseLevelMatchesNoiseBandwidth(t *testing.T) {
 					mean += p[i]
 				}
 				mean /= float64(len(ps) - 1)
-				want := analyticNoiseMS(t, rate, b, order, variance)
+				// The biquad profiles are checked against an independent equalizer
+				// built from the documented design; the Butterworth profile against
+				// the integrated response of the meter's own filter.
+				var want float64
+				if cfg.Filter == FilterButterworth {
+					want = filterNoiseMS(m.filters[i], rate, variance)
+				} else {
+					want = analyticNoiseMS(t, rate, b, cfg.Order, variance)
+				}
 				if d := db(mean) - db(want); math.Abs(d) > 0.2 {
-					t.Errorf("%d Hz order %d band %v: noise reads %.2f dB, analytic %.2f dB (%.2f dB off)", rate, order, b.Nominal, db(mean), db(want), d)
+					t.Errorf("%d Hz %s band %v: noise reads %.2f dB, analytic %.2f dB (%.2f dB off)", rate, c.name, b.Nominal, db(mean), db(want), d)
 				}
 			}
 		}
@@ -393,30 +426,32 @@ func TestNoiseBiasOfSingleBiquad(t *testing.T) {
 func TestChunkInvariance(t *testing.T) {
 	const rate = 48000
 	in := noise(3*rate+4321, 11, 0.4)
-	for _, period := range []int{rate, 1000, 4096, 5} {
-		ref := mustMeter(t, Config{SampleRate: rate, PeriodSamples: period})
-		want := periods(ref, in)
-		r := rand.New(rand.NewPCG(3, 4))
-		for trial := range 4 {
-			m := mustMeter(t, Config{SampleRate: rate, PeriodSamples: period})
-			var got [][]float64
-			for rest := in; len(rest) > 0; {
-				n := min(1+r.IntN(2*chunk+500), len(rest))
-				if trial == 0 {
-					n = min(1, len(rest)) // single samples
-					if len(got) > 3 {
-						n = len(rest) // then everything else at once
+	for _, design := range designs {
+		for _, period := range []int{rate, 1000, 4096, 5} {
+			ref := mustMeter(t, Config{SampleRate: rate, PeriodSamples: period, Filter: design})
+			want := periods(ref, in)
+			r := rand.New(rand.NewPCG(3, 4))
+			for trial := range 4 {
+				m := mustMeter(t, Config{SampleRate: rate, PeriodSamples: period, Filter: design})
+				var got [][]float64
+				for rest := in; len(rest) > 0; {
+					n := min(1+r.IntN(2*chunk+500), len(rest))
+					if trial == 0 {
+						n = min(1, len(rest)) // single samples
+						if len(got) > 3 {
+							n = len(rest) // then everything else at once
+						}
 					}
+					got = append(got, periods(m, rest[:n])...)
+					rest = rest[n:]
 				}
-				got = append(got, periods(m, rest[:n])...)
-				rest = rest[n:]
-			}
-			if len(got) != len(want) {
-				t.Fatalf("period %d trial %d: %d periods, want %d", period, trial, len(got), len(want))
-			}
-			for p := range want {
-				if !slices.Equal(got[p], want[p]) {
-					t.Fatalf("period %d trial %d: period %d differs from the one-call result", period, trial, p)
+				if len(got) != len(want) {
+					t.Fatalf("%v period %d trial %d: %d periods, want %d", design, period, trial, len(got), len(want))
+				}
+				for p := range want {
+					if !slices.Equal(got[p], want[p]) {
+						t.Fatalf("%v period %d trial %d: period %d differs from the one-call result", design, period, trial, p)
+					}
 				}
 			}
 		}
@@ -426,20 +461,22 @@ func TestChunkInvariance(t *testing.T) {
 func TestResetAndEmpty(t *testing.T) {
 	const rate = 48000
 	in := noise(rate+100, 21, 0.5)
-	m := mustMeter(t, Config{SampleRate: rate, PeriodSamples: rate})
-	want := periods(m, in)
-	m.Process(nil, func([]float64) { t.Error("emit called for empty input") })
-	m.Process([]float32{}, nil)
-	m.Reset()
-	got := periods(m, in)
-	if len(got) != len(want) || !slices.Equal(got[0], want[0]) {
-		t.Error("a Reset meter does not repeat the first period of a fresh one")
-	}
-	// A partial period is dropped by Reset.
-	m.Process(in[:rate/2], nil)
-	m.Reset()
-	if got := periods(m, in); len(got) != len(want) || !slices.Equal(got[0], want[0]) {
-		t.Error("Reset kept part of a period")
+	for _, design := range designs {
+		m := mustMeter(t, Config{SampleRate: rate, PeriodSamples: rate, Filter: design})
+		want := periods(m, in)
+		m.Process(nil, func([]float64) { t.Error("emit called for empty input") })
+		m.Process([]float32{}, nil)
+		m.Reset()
+		got := periods(m, in)
+		if len(got) != len(want) || !slices.Equal(got[0], want[0]) {
+			t.Errorf("%v: a Reset meter does not repeat the first period of a fresh one", design)
+		}
+		// A partial period is dropped by Reset.
+		m.Process(in[:rate/2], nil)
+		m.Reset()
+		if got := periods(m, in); len(got) != len(want) || !slices.Equal(got[0], want[0]) {
+			t.Errorf("%v: Reset kept part of a period", design)
+		}
 	}
 }
 
@@ -448,17 +485,19 @@ func TestNonFiniteInputDoesNotPoison(t *testing.T) {
 	in := sine(1000, rate, 3*rate)
 	in[1000] = float32(math.NaN())
 	in[2000] = float32(math.Inf(1))
-	m := mustMeter(t, Config{SampleRate: rate, PeriodSamples: rate})
-	ps := periods(m, in)
-	for p := range ps {
-		for i, v := range ps[p] {
-			if math.IsNaN(v) || math.IsInf(v, 0) {
-				t.Fatalf("period %d band %d is %v", p, i, v)
+	for _, design := range designs {
+		m := mustMeter(t, Config{SampleRate: rate, PeriodSamples: rate, Filter: design})
+		ps := periods(m, in)
+		for p := range ps {
+			for i, v := range ps[p] {
+				if math.IsNaN(v) || math.IsInf(v, 0) {
+					t.Fatalf("%v: period %d band %d is %v", design, p, i, v)
+				}
 			}
 		}
-	}
-	if got := db(ps[2][16]); math.Abs(got-(-3.0103)) > 0.05 {
-		t.Errorf("1 kHz band reads %.3f dB after the bad samples, want -3.01", got)
+		if got := db(ps[2][16]); math.Abs(got-(-3.0103)) > 0.05 {
+			t.Errorf("%v: 1 kHz band reads %.3f dB after the bad samples, want -3.01", design, got)
+		}
 	}
 }
 
@@ -478,13 +517,15 @@ func TestDB(t *testing.T) {
 // TestNewRejectsUnstableBandPass covers the filter-design failure path: at a
 // sample rate so high that a 25 Hz band collapses toward DC the coefficients are
 // no longer stable, and New reports it as an invalid config instead of
-// returning a meter that cannot be trusted.
+// returning a meter that cannot be trusted, in both filter profiles.
 func TestNewRejectsUnstableBandPass(t *testing.T) {
 	if strconv.IntSize < 64 {
 		t.Skip("the rate needs a 64-bit int")
 	}
 	rate := int(math.Pow10(14))
-	if m, err := New(Config{SampleRate: rate, PeriodSamples: 1}); !errors.Is(err, ErrInvalidConfig) || m != nil {
-		t.Errorf("got (%v, %v), want an error wrapping ErrInvalidConfig", m, err)
+	for _, design := range designs {
+		if m, err := New(Config{SampleRate: rate, PeriodSamples: 1, Filter: design}); !errors.Is(err, ErrInvalidConfig) || m != nil {
+			t.Errorf("%v: got (%v, %v), want an error wrapping ErrInvalidConfig", design, m, err)
+		}
 	}
 }
