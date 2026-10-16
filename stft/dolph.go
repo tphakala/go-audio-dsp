@@ -40,14 +40,7 @@ const (
 // Construction costs O(n^2) arithmetic, so build a window once per (n,
 // attenuationDB) and reuse it.
 func DolphChebyshev(n int, attenuationDB float64) ([]float32, error) {
-	if err := validateDolph(n, attenuationDB); err != nil {
-		return nil, err
-	}
-	w, err := dolph64(n+1, attenuationDB)
-	if err != nil {
-		return nil, err
-	}
-	return toFloat32(w[:n]), nil
+	return dolphWindow(n, n+1, attenuationDB)
 }
 
 // DolphChebyshevSymmetric returns the symmetric Dolph-Chebyshev window of length
@@ -57,14 +50,20 @@ func DolphChebyshev(n int, attenuationDB float64) ([]float32, error) {
 // pure analysis where the sidelobe bound matters; DolphChebyshev is the periodic
 // form. The domain, errors and cost are those of DolphChebyshev.
 func DolphChebyshevSymmetric(n int, attenuationDB float64) ([]float32, error) {
+	return dolphWindow(n, n, attenuationDB)
+}
+
+// dolphWindow validates (n, attenuationDB), builds the symmetric m-point window
+// and returns its first n samples as float32.
+func dolphWindow(n, m int, attenuationDB float64) ([]float32, error) {
 	if err := validateDolph(n, attenuationDB); err != nil {
 		return nil, err
 	}
-	w, err := dolph64(n, attenuationDB)
+	w, err := dolph64(m, attenuationDB)
 	if err != nil {
 		return nil, err
 	}
-	return toFloat32(w), nil
+	return toFloat32(w[:n]), nil
 }
 
 func validateDolph(n int, attenuationDB float64) error {

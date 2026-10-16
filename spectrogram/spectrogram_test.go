@@ -3,6 +3,7 @@ package spectrogram
 import (
 	"errors"
 	"math"
+	"slices"
 	"testing"
 
 	"github.com/tphakala/go-audio-dsp/stft"
@@ -46,15 +47,48 @@ func sine(n, sampleRate int, freq, amp float64) []float32 {
 	return s
 }
 
+// checkAgainstNaiveDFT compares matrix m, computed in scale sc from sig with hop
+// advance, against the naive-DFT reference for window w, column by column.
+func checkAgainstNaiveDFT(t *testing.T, m Matrix, sig, w []float32, hop int, sc Scale) {
+	t.Helper()
+	for f := range m.Frames {
+		ref := naiveColumn(sig, w, f, hop)
+		peakPow := slices.Max(ref)
+		for b := range m.Bins {
+			got := float64(m.At(b, f))
+			switch sc {
+			case Power:
+				// Peak-relative tolerance: float32 FFT noise is a small
+				// fraction of the column peak, so comparing per bin against
+				// its own tiny value would fail at spectral nulls.
+				if math.Abs(got-ref[b]) > 1e-3*peakPow {
+					t.Fatalf("power frame %d bin %d: got %g, want %g (peak %g)", f, b, got, ref[b], peakPow)
+				}
+			case Magnitude:
+				want := math.Sqrt(ref[b])
+				if math.Abs(got-want) > 1e-3*math.Sqrt(peakPow) {
+					t.Fatalf("magnitude frame %d bin %d: got %g, want %g", f, b, got, want)
+				}
+			case DB:
+				// dB is only meaningful above the float32 FFT noise floor;
+				// compare bins within 40 dB of the column peak.
+				if ref[b] < peakPow*1e-4 {
+					continue
+				}
+				want := 10 * math.Log10(math.Max(ref[b], dbFloorPower))
+				if math.Abs(got-want) > 0.2 {
+					t.Fatalf("db frame %d bin %d: got %g, want %g", f, b, got, want)
+				}
+			}
+		}
+	}
+}
+
 // TestComputeAgainstNaiveDFT validates every scale against the independent
 // naive-DFT reference over the full frequency range.
 func TestComputeAgainstNaiveDFT(t *testing.T) {
 	const sr, n, hop = 16000, 512, 128
-	sig := sine(4096, sr, 1000, 0.8)
-	// Add a second partial so the spectrum is not a single spike.
-	for i, v := range sine(4096, sr, 3200, 0.3) {
-		sig[i] += v
-	}
+	sig := twoPartialSignal(sr)
 	w := stft.GenerateWindow(stft.Hann, n)
 
 	for _, sc := range []Scale{Magnitude, Power, DB} {
@@ -67,40 +101,7 @@ func TestComputeAgainstNaiveDFT(t *testing.T) {
 			if m.Frames != s.NumFrames(len(sig)) || m.Bins != n/2+1 {
 				t.Fatalf("matrix shape = %dx%d, want %dx%d", m.Bins, m.Frames, n/2+1, s.NumFrames(len(sig)))
 			}
-			for f := range m.Frames {
-				ref := naiveColumn(sig, w, f, hop)
-				peakPow := 0.0
-				for _, p := range ref {
-					peakPow = math.Max(peakPow, p)
-				}
-				for b := range m.Bins {
-					got := float64(m.At(b, f))
-					switch sc {
-					case Power:
-						// Peak-relative tolerance: float32 FFT noise is a small
-						// fraction of the column peak, so comparing per bin against
-						// its own tiny value would fail at spectral nulls.
-						if math.Abs(got-ref[b]) > 1e-3*peakPow {
-							t.Fatalf("power frame %d bin %d: got %g, want %g (peak %g)", f, b, got, ref[b], peakPow)
-						}
-					case Magnitude:
-						want := math.Sqrt(ref[b])
-						if math.Abs(got-want) > 1e-3*math.Sqrt(peakPow) {
-							t.Fatalf("magnitude frame %d bin %d: got %g, want %g", f, b, got, want)
-						}
-					case DB:
-						// dB is only meaningful above the float32 FFT noise floor;
-						// compare bins within 40 dB of the column peak.
-						if ref[b] < peakPow*1e-4 {
-							continue
-						}
-						want := 10 * math.Log10(math.Max(ref[b], dbFloorPower))
-						if math.Abs(got-want) > 0.2 {
-							t.Fatalf("db frame %d bin %d: got %g, want %g", f, b, got, want)
-						}
-					}
-				}
-			}
+			checkAgainstNaiveDFT(t, m, sig, w, hop, sc)
 		})
 	}
 }
@@ -392,42 +393,13 @@ func TestCustomWindowAgainstNaiveDFT(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	for _, sc := range []Scale{Magnitude, Power, DB} {
 		t.Run(sc.String(), func(t *testing.T) {
 			s, err := New(Config{SampleRate: sr, FrameSize: n, HopSize: hop, Scale: sc, CustomWindow: w})
 			if err != nil {
 				t.Fatal(err)
 			}
-			m := s.Compute(sig)
-			for f := range m.Frames {
-				ref := naiveColumn(sig, w, f, hop)
-				peakPow := 0.0
-				for _, p := range ref {
-					peakPow = math.Max(peakPow, p)
-				}
-				for b := range m.Bins {
-					got := float64(m.At(b, f))
-					switch sc {
-					case Power:
-						if math.Abs(got-ref[b]) > 1e-3*peakPow {
-							t.Fatalf("power frame %d bin %d: got %g, want %g (peak %g)", f, b, got, ref[b], peakPow)
-						}
-					case Magnitude:
-						if want := math.Sqrt(ref[b]); math.Abs(got-want) > 1e-3*math.Sqrt(peakPow) {
-							t.Fatalf("magnitude frame %d bin %d: got %g, want %g", f, b, got, want)
-						}
-					case DB:
-						if ref[b] < peakPow*1e-4 {
-							continue
-						}
-						want := 10 * math.Log10(math.Max(ref[b], dbFloorPower))
-						if math.Abs(got-want) > 0.2 {
-							t.Fatalf("db frame %d bin %d: got %g, want %g", f, b, got, want)
-						}
-					}
-				}
-			}
+			checkAgainstNaiveDFT(t, s.Compute(sig), sig, w, hop, sc)
 		})
 	}
 }
@@ -494,10 +466,8 @@ func TestCustomWindowScaleInvariant(t *testing.T) {
 // placements differently.
 func TestWindowLengthAlignForwarded(t *testing.T) {
 	const sr, n, hop, win = 16000, 512, 128, 256
-	sig := make([]float32, 4096)
-	for i := 1300; i < len(sig); i++ {
-		sig[i] = float32(0.8 * math.Sin(2*math.Pi*1000*float64(i)/sr))
-	}
+	sig := sine(4096, sr, 1000, 0.8)
+	clear(sig[:1300])
 	hann := stft.GenerateWindow(stft.Hann, win)
 	placed := func(off int) []float32 {
 		w := make([]float32, n)
@@ -516,34 +486,12 @@ func TestWindowLengthAlignForwarded(t *testing.T) {
 		}
 		m := s.Compute(sig)
 		mats[c.align] = m
-		w := placed(c.off)
-		for f := range m.Frames {
-			ref := naiveColumn(sig, w, f, hop)
-			peakPow := 0.0
-			for _, p := range ref {
-				peakPow = math.Max(peakPow, p)
-			}
-			for b := range m.Bins {
-				if got := float64(m.At(b, f)); math.Abs(got-ref[b]) > 1e-3*peakPow {
-					t.Fatalf("align %v frame %d bin %d: got %g, want %g (peak %g)", c.align, f, b, got, ref[b], peakPow)
-				}
-			}
-		}
+		checkAgainstNaiveDFT(t, m, sig, placed(c.off), hop, Power)
 	}
 
 	// The fixture must tell the placements apart, or the checks above could pass
 	// with the alignment ignored.
-	l, c := mats[stft.AlignLeft], mats[stft.AlignCenter]
-	differs := false
-	for f := 0; f < l.Frames && !differs; f++ {
-		for b := range l.Bins {
-			if l.At(b, f) != c.At(b, f) {
-				differs = true
-				break
-			}
-		}
-	}
-	if !differs {
+	if slices.Equal(mats[stft.AlignLeft].Data, mats[stft.AlignCenter].Data) {
 		t.Fatal("AlignLeft and AlignCenter matrices are identical; the signal does not discriminate")
 	}
 }

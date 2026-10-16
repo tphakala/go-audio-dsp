@@ -16,6 +16,15 @@ import (
 // dB and three values in the 80 to 130 dB range used for spectrogram windows.
 var dolphAttenuations = []float64{50, 86.4, 106.5, 126.6}
 
+// dolphGens are both generators, named for subtests.
+var dolphGens = []struct {
+	name string
+	gen  func(int, float64) ([]float32, error)
+}{
+	{"periodic", DolphChebyshev},
+	{"symmetric", DolphChebyshevSymmetric},
+}
+
 // TestDolphChebyshevAgainstScipyGolden compares both generators with scipy
 // chebwin output, so an agreement with the reference does not rest on the
 // in-test formula sharing code with the implementation. The fixture is static
@@ -227,10 +236,6 @@ func TestDolphChebyshevPeriodicSidelobeCost(t *testing.T) {
 }
 
 func TestDolphChebyshevInvalid(t *testing.T) {
-	gens := map[string]func(int, float64) ([]float32, error){
-		"periodic":  DolphChebyshev,
-		"symmetric": DolphChebyshevSymmetric,
-	}
 	check := func(t *testing.T, w []float32, err error, substr string) {
 		t.Helper()
 		if !errors.Is(err, dsp.ErrInvalidConfig) {
@@ -244,14 +249,14 @@ func TestDolphChebyshevInvalid(t *testing.T) {
 			t.Errorf("window = %v on error, want nil", w)
 		}
 	}
-	for name, gen := range gens {
-		t.Run(name, func(t *testing.T) {
+	for _, g := range dolphGens {
+		t.Run(g.name, func(t *testing.T) {
 			for _, n := range []int{0, -1, 32769} {
-				w, err := gen(n, 100)
+				w, err := g.gen(n, 100)
 				check(t, w, err, "length")
 			}
 			for _, att := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), 0, -10, 19.999, 200.001} {
-				w, err := gen(64, att)
+				w, err := g.gen(64, att)
 				check(t, w, err, "attenuationDB")
 			}
 		})
@@ -271,11 +276,9 @@ func TestDolphChebyshevDomainCorners(t *testing.T) {
 		if testing.Short() && c.n > 8192 {
 			continue
 		}
-		for name, gen := range map[string]func(int, float64) ([]float32, error){
-			"periodic":  DolphChebyshev,
-			"symmetric": DolphChebyshevSymmetric,
-		} {
-			w, err := gen(c.n, c.att)
+		for _, g := range dolphGens {
+			name := g.name
+			w, err := g.gen(c.n, c.att)
 			if err != nil {
 				t.Fatalf("%s n=%d att=%g: %v", name, c.n, c.att, err)
 			}
