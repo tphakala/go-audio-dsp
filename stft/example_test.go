@@ -78,7 +78,7 @@ func ExampleSynthesizer() {
 }
 
 // Dolph-Chebyshev window: a parameterized window is generated once and passed as
-// CustomWindow. The periodic form peaks at the center sample.
+// CustomWindow. At this length and attenuation the window peaks at the center sample.
 func ExampleDolphChebyshev() {
 	w, err := stft.DolphChebyshev(2048, 106.5)
 	if err != nil {

@@ -346,7 +346,7 @@ func TestConfigValidation(t *testing.T) {
 		{"empty bin range", Config{SampleRate: 16000, FrameSize: 256, MinHz: 7010, MaxHz: 7040}},
 		{"frame size", Config{SampleRate: 16000, FrameSize: 100}}, // not power of two, stft rejects
 		// The window fields are forwarded to stft, which rejects each of these;
-		// without forwarding all three configs would build.
+		// without forwarding each of these configs would build.
 		{"custom window length", Config{SampleRate: 16000, FrameSize: 256, CustomWindow: make([]float32, 100)}},
 		{"custom window nan", Config{SampleRate: 16000, FrameSize: 256, CustomWindow: nanWindow(256)}},
 		{"window length", Config{SampleRate: 16000, FrameSize: 256, WindowLength: 257}},
