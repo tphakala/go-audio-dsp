@@ -36,8 +36,10 @@ type Filter struct {
 // feature, in a new slice, or nil when there are none; pass them to
 // LogSweepWithMarks so a narrow feature is not missed between sweep points.
 // NewFilter marks Band.Frequency: the magnitude extremum of Peaking, BandPass and
-// BandReject, within 0.011 dB of the resonance peak of LowPass and HighPass at
-// Q >= 10, the phase centre of AllPass and the transition midpoint of a shelf.
+// BandReject, within 0.011 dB per cascaded section of the resonance peak of
+// LowPass and HighPass at Q >= 10 (the offset adds for each pass and for each
+// band sharing the frequency), the phase centre of AllPass and the transition
+// midpoint of a shelf.
 // NewButterworthBandPass marks the geometric centre of its edges. NewBiquadFilter
 // marks nothing, since caller-designed sections have no known frequency; pass
 // its design frequencies to LogSweepWithMarks directly.
