@@ -20,7 +20,8 @@ var _ dsp.Processor = (*FilterChain)(nil)
 // mixing rates would yield an incorrect combined response; AddFilter enforces
 // this by rejecting a filter whose rate differs from the chain's first. A
 // FilterChain is not safe for concurrent use; run one instance per stream (for
-// example one per channel).
+// example one per channel). Response and ResponseInto report the chain's
+// frequency response.
 type FilterChain struct {
 	sampleRate int // the rate of the first filter added; every later filter must match
 	filters    []*Filter
@@ -50,6 +51,11 @@ func (c *FilterChain) AddFilter(f *Filter) error {
 	c.filters = append(c.filters, f)
 	return nil
 }
+
+// SampleRate returns the sample rate of the chain's filters, which is the rate
+// of the first filter added and is shared by every later one; 0 for an empty
+// chain. The usable response range is [0, SampleRate()/2].
+func (c *FilterChain) SampleRate() int { return c.sampleRate }
 
 // Len returns the number of filters in the chain.
 func (c *FilterChain) Len() int { return len(c.filters) }

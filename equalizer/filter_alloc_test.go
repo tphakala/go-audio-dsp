@@ -101,3 +101,31 @@ func TestFilterChainApplyFloat64ZeroAlloc(t *testing.T) {
 		t.Errorf("FilterChain.ApplyFloat64 allocated %v times, want 0", a)
 	}
 }
+
+// TestFilterChainResponseIntoZeroAlloc checks ResponseInto allocates nothing,
+// for a populated and an empty chain.
+func TestFilterChainResponseIntoZeroAlloc(t *testing.T) {
+	freqs, err := LogSweep(20, 20000, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]*FilterChain{"chain": chainOf(t, testConfig()), "empty": NewFilterChain()} {
+		t.Run(name, func(t *testing.T) {
+			dst := make([]ResponsePoint, len(freqs))
+			// Positive control: the warm-up must write real points.
+			if _, err := c.ResponseInto(dst, freqs); err != nil {
+				t.Fatal(err)
+			}
+			if dst[0].Hz != freqs[0] {
+				t.Fatal("ResponseInto left dst unwritten; it did no real work")
+			}
+			if a := testing.AllocsPerRun(50, func() {
+				if _, err := c.ResponseInto(dst, freqs); err != nil {
+					t.Fatal(err)
+				}
+			}); a != 0 {
+				t.Errorf("ResponseInto allocated %v times, want 0", a)
+			}
+		})
+	}
+}

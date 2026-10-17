@@ -28,6 +28,10 @@ type Filter struct {
 	sections   []section
 }
 
+// SampleRate returns the sample rate the filter's coefficients were computed
+// for.
+func (f *Filter) SampleRate() int { return f.sampleRate }
+
 // NewFilter builds a Filter for one band at sampleRate. It validates sampleRate
 // and the band and returns an error wrapping ErrInvalidConfig for the first
 // invalid field. Passes == 0 means one section, matching Band's documented

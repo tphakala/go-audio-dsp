@@ -206,3 +206,17 @@ func TestFilterResponseMatchesEqualizer(t *testing.T) {
 		})
 	}
 }
+
+// TestEqualizerResponseEmptyNonFinite pins that a non-finite frequency yields
+// NaN even when the equalizer has no bands to produce it.
+func TestEqualizerResponseEmptyNonFinite(t *testing.T) {
+	e, err := New(Config{SampleRate: 48000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []float64{math.NaN(), math.Inf(1)} {
+		if p := e.Response([]float64{f})[0]; !math.IsNaN(p.GainDB) {
+			t.Errorf("Response(%g).GainDB = %g, want NaN", f, p.GainDB)
+		}
+	}
+}

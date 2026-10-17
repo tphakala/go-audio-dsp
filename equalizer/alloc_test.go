@@ -3,7 +3,8 @@
 // The race detector adds allocations to instrumented code, which makes
 // testing.AllocsPerRun report non-zero counts. This zero-allocation assertion is
 // therefore only meaningful without -race. Response is a visualization helper
-// that allocates its result by design and is not covered here.
+// that allocates its result by design and is not covered here; the zero-alloc
+// test for FilterChain.ResponseInto lives in filter_alloc_test.go.
 
 package equalizer
 

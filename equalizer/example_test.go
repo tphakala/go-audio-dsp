@@ -41,3 +41,32 @@ func ExampleNewButterworthBandPass() {
 	//  1000.0 Hz: 0.00 dB down
 	//  1122.0 Hz: 3.01 dB down
 }
+
+// A FilterChain reports the combined response of its filters: a 10 Hz
+// high-pass is 3 dB down at its corner and a +6 dB peak at 1 kHz reads 6 dB.
+func ExampleFilterChain_Response() {
+	chain := equalizer.NewFilterChain()
+	for _, b := range []equalizer.Band{
+		{Type: equalizer.HighPass, Frequency: 10, Q: 0.7071},
+		{Type: equalizer.Peaking, Frequency: 1000, WidthHz: 400, GainDB: 6},
+	} {
+		f, err := equalizer.NewFilter(b, 48000)
+		if err != nil {
+			panic(err)
+		}
+		if err := chain.AddFilter(f); err != nil {
+			panic(err)
+		}
+	}
+	freqs, err := equalizer.LogSweep(10, 1000, 3)
+	if err != nil {
+		panic(err)
+	}
+	for _, p := range chain.Response(freqs) {
+		fmt.Printf("%6.0f Hz: %+.1f dB\n", p.Hz, p.GainDB)
+	}
+	// Output:
+	//     10 Hz: -3.0 dB
+	//    100 Hz: +0.0 dB
+	//   1000 Hz: +6.0 dB
+}

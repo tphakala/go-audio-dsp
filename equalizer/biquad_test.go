@@ -115,7 +115,7 @@ func TestNewBiquadFilterInvalid(t *testing.T) {
 		{"zero rate", []Biquad{ok}, 0, false},
 		{"negative rate", []Biquad{ok}, -48000, false},
 		{"empty", nil, 48000, false},
-		{"too many sections", slices.Repeat([]Biquad{ok}, maxPasses+1), 48000, false},
+		{"too many sections", slices.Repeat([]Biquad{ok}, MaxPasses+1), 48000, false},
 		{"NaN B0", with(func(b *Biquad) { b.B0 = math.NaN() }), 48000, true},
 		{"Inf A1", with(func(b *Biquad) { b.A1 = math.Inf(1) }), 48000, true},
 		{"B1 beyond float32", with(func(b *Biquad) { b.B1 = 1e39 }), 48000, true},
@@ -146,8 +146,8 @@ func TestNewBiquadFilterInvalid(t *testing.T) {
 		t.Errorf("near-boundary stable section rejected: %v", err)
 	}
 	// The count limit is inclusive.
-	if _, err := NewBiquadFilter(slices.Repeat([]Biquad{ok}, maxPasses), 48000); err != nil {
-		t.Errorf("%d sections rejected: %v", maxPasses, err)
+	if _, err := NewBiquadFilter(slices.Repeat([]Biquad{ok}, MaxPasses), 48000); err != nil {
+		t.Errorf("%d sections rejected: %v", MaxPasses, err)
 	}
 }
 

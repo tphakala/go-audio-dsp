@@ -47,3 +47,27 @@ func BenchmarkResponse(b *testing.B) {
 		_ = e.Response(freqs)
 	}
 }
+
+func BenchmarkFilterChainResponseInto(b *testing.B) {
+	c := NewFilterChain()
+	for _, band := range testConfig().Bands {
+		f, err := NewFilter(band, 48000)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := c.AddFilter(f); err != nil {
+			b.Fatal(err)
+		}
+	}
+	freqs, err := LogSweep(20, 20000, 512)
+	if err != nil {
+		b.Fatal(err)
+	}
+	dst := make([]ResponsePoint, len(freqs))
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := c.ResponseInto(dst, freqs); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

@@ -164,7 +164,7 @@ func TestButterworthBandPassInvalid(t *testing.T) {
 		{"negative rate", 900, 1100, 3, -48000},
 		{"order 0", 900, 1100, 0, 48000},
 		{"negative order", 900, 1100, -1, 48000},
-		{"order too large", 900, 1100, maxPasses + 1, 48000},
+		{"order too large", 900, 1100, MaxPasses + 1, 48000},
 		{"lower 0", 0, 1100, 3, 48000},
 		{"lower negative", -5, 1100, 3, 48000},
 		{"lower NaN", math.NaN(), 1100, 3, 48000},

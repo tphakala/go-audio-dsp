@@ -34,7 +34,7 @@ n, err := e.ProcessInto(in, out) // n == len(in); out may be exactly in
 | `Q` | LowPass, HighPass, AllPass, LowShelf, HighShelf |
 | `WidthHz` (Hz) | BandPass, BandReject, Peaking |
 | `GainDB` | Peaking, LowShelf, HighShelf |
-| `Passes` | any (cascades that many identical sections; 0 means 1) |
+| `Passes` | any (cascades that many identical sections; 0 means 1, at most `MaxPasses`, which is 16) |
 
 A field a type does not use is ignored. `Frequency` must be in `(0, SampleRate/2)`;
 a `WidthHz` so wide that the lower band edge reaches 0 Hz is rejected rather than
@@ -45,8 +45,9 @@ example a filter placed too close to Nyquist) are rejected at construction.
 
 ## Frequency response
 
-`Response` returns the magnitude (dB) and phase (rad) at each requested
-frequency, and `LogSweep` builds a log-spaced frequency axis for a plot:
+`Response` returns the magnitude (`GainDB`, dB) and phase (`PhaseRad`, radians) at
+each requested frequency (Hz), and `LogSweep` builds a log-spaced frequency axis
+for a plot:
 
 ```go
 freqs, _ := equalizer.LogSweep(20, 20000, 256)
@@ -55,10 +56,30 @@ for _, p := range e.Response(freqs) {
 }
 ```
 
-`Response` allocates its result and is a visualization helper, not an audio-path
-method; it does not touch the filter state, so it is safe to call while
-streaming. A deep notch reports a large finite attenuation, not `-Inf`, unless
-the magnitude evaluates to exactly zero. A `Filter` has the same method.
+`Equalizer`, `Filter` and `FilterChain` all have `Response`. A chain's response
+is the cascade of its filters' sections in application order, the same cascade the
+audio path runs, and an empty chain is the identity (0 dB, 0 rad). `SampleRate()`
+on all three types gives the rate (0 for an empty chain), so the plot range is
+`[0, SampleRate()/2]`:
+
+```go
+if chain.Len() > 0 {
+	freqs, _ := equalizer.LogSweep(10, float64(chain.SampleRate())/2, 256)
+	pts := make([]equalizer.ResponsePoint, len(freqs))
+	_, _ = chain.ResponseInto(pts, freqs) // reuse pts across redraws, no allocation
+}
+```
+
+`ResponseInto` is the allocation-free form, and returns `ErrBufferTooSmall`
+without writing when `dst` is shorter than `freqs`. `Response` allocates its
+result and is a visualization helper, not an audio-path method; neither touches
+the filter state, so both are safe to call while streaming. The phase is wrapped
+to `[-pi, pi]`, so a deep cascade's phase wraps and unwrapping for a phase plot
+is the caller's job. The response is accumulated per section, adding each
+section's dB and phase, so a long cascade of high-gain or deep-attenuation
+sections stays finite instead of overflowing; `GainDB` is `-Inf` only when a
+section's magnitude is exactly zero (a deep notch reports a large finite
+attenuation, not `-Inf`). A non-finite frequency gives NaN.
 
 ## Filters beyond one RBJ band
 
