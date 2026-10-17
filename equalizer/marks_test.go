@@ -118,3 +118,22 @@ func TestEqualizerMarksMatchChain(t *testing.T) {
 		t.Errorf("empty chain Marks = %v, want nil", got)
 	}
 }
+
+// TestEqualizerMarksDedupeAndCopy pins that two bands of different types at one
+// frequency give one mark, and that the returned slice is a copy.
+func TestEqualizerMarksDedupeAndCopy(t *testing.T) {
+	e, err := New(Config{SampleRate: 48000, Bands: []Band{
+		{Type: Peaking, Frequency: 1000, WidthHz: 100, GainDB: 3},
+		{Type: BandReject, Frequency: 1000, WidthHz: 50},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.Marks(); !slices.Equal(got, []float64{1000}) {
+		t.Fatalf("Marks = %v, want [1000]", got)
+	}
+	e.Marks()[0] = 5
+	if got := e.Marks(); !slices.Equal(got, []float64{1000}) {
+		t.Errorf("Marks after mutating a returned slice = %v, want [1000]", got)
+	}
+}

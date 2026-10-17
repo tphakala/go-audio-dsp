@@ -82,6 +82,7 @@ func TestLogSweepRejectsDegenerateRanges(t *testing.T) {
 		n      int
 	}{
 		{"fHigh +Inf", 20, math.Inf(1), 10},
+		{"fHigh +Inf, two points", 20, math.Inf(1), 2}, // without the guard this is [20 +Inf]
 		{"one ulp wide", 20, math.Nextafter(20, 21), 5},
 		{"1e-11 wide", 1000, 1000 + 1e-11, 256},
 		{"float64 limit", math.Nextafter(math.MaxFloat64, 0), math.MaxFloat64, 3},

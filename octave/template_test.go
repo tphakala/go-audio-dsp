@@ -185,7 +185,7 @@ func checkMeterTemplate(t *testing.T, m *Meter, rate int, step float64) {
 			}
 		}
 		dc := m.filters[i].Response([]float64{0, b.Exact})
-		if dc[1].GainDB-dc[0].GainDB < 70 {
+		if !(dc[1].GainDB-dc[0].GainDB >= 70) { // negated so a NaN fails
 			t.Errorf("%d Hz band %v: response at 0 Hz is %.2f dB, only %.2f dB below the centre, want >= 70 dB", rate, b.Nominal, dc[0].GainDB, dc[1].GainDB-dc[0].GainDB)
 		}
 	}
