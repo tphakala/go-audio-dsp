@@ -172,8 +172,8 @@ const (
 
 // checkMeterTemplate asserts class 1 and class 2 for every band of m. It also
 // asserts that the response at 0 Hz is at least 70 dB down (a null reads a
-// multiple of equalizer.SectionFloorDB), so
-// the range from 0 Hz is covered and not only (0.5 Hz, Nyquist).
+// multiple of equalizer.SectionFloorDB), so the range from 0 Hz is covered and
+// not only (0.5 Hz, Nyquist).
 func checkMeterTemplate(t *testing.T, m *Meter, rate int, step float64) {
 	t.Helper()
 	for i, b := range m.Bands() {

@@ -2,7 +2,6 @@ package equalizer
 
 import (
 	"fmt"
-	"slices"
 
 	dsp "github.com/tphakala/go-audio-dsp"
 )
@@ -59,12 +58,14 @@ func (c *FilterChain) AddFilter(f *Filter) error {
 // Pass it to LogSweepWithMarks so a narrow filter is not missed between sweep
 // points; see Filter.Marks for the rule per constructor.
 func (c *FilterChain) Marks() []float64 {
-	var marks []float64
+	marks := make([]float64, 0, len(c.filters))
 	for _, f := range c.filters {
 		marks = append(marks, f.marks...)
 	}
-	slices.Sort(marks)
-	return slices.Compact(marks)
+	if len(marks) == 0 {
+		return nil
+	}
+	return sortedUnique(marks)
 }
 
 // SampleRate returns the sample rate of the chain's filters, which is the rate

@@ -46,7 +46,8 @@
 // centre, nothing for caller-designed biquads) and LogSweepWithMarks merges them
 // into the log grid. Each section's dB contribution is floored at SectionFloorDB
 // (-200 dB), so GainDB is finite, and encodes as JSON, at every finite
-// frequency; a frequency beyond SampleRate is evaluated modulo SampleRate. The biquad recurrence is serial
-// (each output depends on the previous one), so it has no SIMD form; it runs in
-// scalar float64. There is no CGo.
+// frequency; a frequency beyond SampleRate is evaluated modulo SampleRate.
+//
+// The biquad recurrence is serial (each output depends on the previous one), so
+// it has no SIMD form; it runs in scalar float64. There is no CGo.
 package equalizer

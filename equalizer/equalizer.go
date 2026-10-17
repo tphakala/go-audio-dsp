@@ -39,7 +39,7 @@ func New(cfg Config) (*Equalizer, error) {
 	// before the inner loop, so the cascade is built in a single validation pass
 	// with no intermediate plan slice.
 	sections := make([]section, 0, len(cfg.Bands))
-	var marks []float64
+	marks := make([]float64, 0, len(cfg.Bands))
 	for i := range cfg.Bands {
 		b := cfg.Bands[i]
 		c, err := newCoeffs(b, cfg.SampleRate)
@@ -51,8 +51,10 @@ func New(cfg Config) (*Equalizer, error) {
 		}
 		marks = append(marks, b.Frequency)
 	}
-	slices.Sort(marks)
-	return &Equalizer{sampleRate: cfg.SampleRate, sections: sections, marks: slices.Compact(marks)}, nil
+	if len(marks) == 0 {
+		marks = nil
+	}
+	return &Equalizer{sampleRate: cfg.SampleRate, sections: sections, marks: sortedUnique(marks)}, nil
 }
 
 // ProcessInto writes in filtered through the cascade into out and returns the

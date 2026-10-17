@@ -40,8 +40,9 @@ func ExampleLogSweepWithMarks() {
 	if err != nil {
 		panic(err)
 	}
-	deepest := chain.Response(freqs)[0]
-	for _, p := range chain.Response(freqs) {
+	pts := chain.Response(freqs)
+	deepest := pts[0]
+	for _, p := range pts {
 		if p.GainDB < deepest.GainDB {
 			deepest = p
 		}

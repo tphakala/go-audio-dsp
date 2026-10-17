@@ -12,10 +12,9 @@ import (
 // GainDB is finite at every finite frequency and encodes as JSON. Float64
 // round-off alone puts an RBJ notch's value at its own centre anywhere from
 // -Inf to about -300 dB, so the floor also makes that reading the same on every
-// platform. The value is amplitude dB, a magnitude of 1e-10, and matches the
-// -200 dB floor the octave and spectrogram packages use. It applies per
-// section, not to the total: a cascade of k sections at the floor reads
-// k*SectionFloorDB, and a long cascade's exact dB sum is kept.
+// platform. It is amplitude dB (a magnitude of 1e-10), matching the -200 dB
+// floor of the octave and spectrogram packages, and applies per section, not to
+// the total: k sections at the floor read k*SectionFloorDB.
 const SectionFloorDB = -200.0
 
 // ResponsePoint is a cascade's steady-state response at one frequency: the
@@ -55,8 +54,8 @@ func (e *Equalizer) Response(freqs []float64) []ResponsePoint {
 
 // Response evaluates the filter's magnitude and phase at each frequency in
 // freqs (Hz), with the same conventions as Equalizer.Response: one
-// ResponsePoint per input frequency in order, each section's GainDB contribution
-// floored at SectionFloorDB and NaN for a non-finite frequency. It is a visualization and
+// ResponsePoint per input frequency in order, each section floored at
+// SectionFloorDB and NaN for a non-finite frequency. It is a visualization and
 // measurement helper, not an audio-path method: it allocates the returned slice
 // and does not touch the filter state, so it is safe to call while streaming.
 func (f *Filter) Response(freqs []float64) []ResponsePoint {
@@ -69,7 +68,10 @@ func (f *Filter) Response(freqs []float64) []ResponsePoint {
 // overflows 2*pi*f and the response turns NaN. A non-finite f stays NaN.
 func omega(f float64, sampleRate int) float64 {
 	rate := float64(sampleRate)
-	return 2 * math.Pi * math.Mod(f, rate) / rate
+	if math.Abs(f) >= rate {
+		f = math.Mod(f, rate)
+	}
+	return 2 * math.Pi * f / rate
 }
 
 // addSections adds the response of each section at w, in order, to the running
@@ -115,17 +117,16 @@ func sectionsResponse(sections []section, sampleRate int, freqs []float64) []Res
 // Response evaluates the chain's magnitude (GainDB, in dB) and phase (PhaseRad,
 // in radians) at each frequency in freqs (Hz), returning one ResponsePoint per
 // input frequency in order. The response is that of every filter's sections in
-// application order, the same cascade ProcessInto and ApplyFloat64
-// run. The dB and phase of each section are summed rather than multiplying
-// complex responses, so a deep cascade of high-gain or deep-attenuation
-// sections stays finite; each section's contribution is floored at
-// SectionFloorDB, so GainDB is finite for every finite frequency. An empty chain is the identity: 0 dB and 0 rad at every finite
-// frequency. A non-finite frequency yields NaN. PhaseRad is the summed phase
-// wrapped to [-pi, pi], so a deep cascade's phase wraps and unwrapping is the
-// caller's job. Only frequencies in [0, SampleRate()/2] are meaningful; others
-// are evaluated modulo SampleRate(). It allocates the
-// returned slice (use ResponseInto to avoid that) and does not touch the filter
-// state, so it is safe to call while streaming.
+// application order, the same cascade ProcessInto and ApplyFloat64 run. The dB
+// and phase of each section are summed rather than multiplying complex
+// responses, so a deep cascade stays finite (see SectionFloorDB for the
+// per-section floor). An empty chain is the identity: 0 dB and 0 rad at every
+// finite frequency. A non-finite frequency yields NaN. PhaseRad is the summed
+// phase wrapped to [-pi, pi], so unwrapping is the caller's job. Only
+// frequencies in [0, SampleRate()/2] are meaningful; others are evaluated
+// modulo SampleRate(). It allocates the returned slice (use ResponseInto to
+// avoid that) and does not touch the filter state, so it is safe to call while
+// streaming.
 func (c *FilterChain) Response(freqs []float64) []ResponsePoint {
 	pts := make([]ResponsePoint, len(freqs))
 	_, _ = c.ResponseInto(pts, freqs) // cannot fail: pts is sized exactly
@@ -163,7 +164,7 @@ func (c *FilterChain) ResponseInto(dst []ResponsePoint, freqs []float64) (int, e
 // A narrow feature such as a deep notch or a high-Q peak can fall between grid
 // points; LogSweepWithMarks adds the filters' own frequencies to the grid.
 func LogSweep(fLow, fHigh float64, n int) ([]float64, error) {
-	return logGrid(fLow, fHigh, n, 0)
+	return logGrid(fLow, fHigh, n)
 }
 
 // LogSweepWithMarks returns LogSweep(fLow, fHigh, n) with every mark in
@@ -175,21 +176,28 @@ func LogSweep(fLow, fHigh float64, n int) ([]float64, error) {
 // Pass FilterChain.Marks, Filter.Marks or Equalizer.Marks, plus any frequencies
 // of a caller-designed filter. Errors are those of LogSweep.
 func LogSweepWithMarks(fLow, fHigh float64, n int, marks []float64) ([]float64, error) {
-	freqs, err := logGrid(fLow, fHigh, n, len(marks))
+	freqs, err := logGrid(fLow, fHigh, n)
 	if err != nil {
 		return nil, err
 	}
+	freqs = slices.Grow(freqs, len(marks))
 	for _, m := range marks {
 		if fLow <= m && m <= fHigh { // false for NaN; +/-Inf is out of range
 			freqs = append(freqs, m)
 		}
 	}
-	slices.Sort(freqs)
-	return slices.Compact(freqs), nil
+	return sortedUnique(freqs), nil
 }
 
-// logGrid builds the LogSweep grid with room for extra more points.
-func logGrid(fLow, fHigh float64, n, extra int) ([]float64, error) {
+// sortedUnique sorts s in place and drops duplicates; it is the one definition
+// of "sorted and duplicate-free" for every marks list and sweep.
+func sortedUnique(s []float64) []float64 {
+	slices.Sort(s)
+	return slices.Compact(s)
+}
+
+// logGrid builds the LogSweep grid.
+func logGrid(fLow, fHigh float64, n int) ([]float64, error) {
 	if !(fLow > 0) {
 		return nil, fmt.Errorf("%w: fLow must be > 0, got %g", ErrInvalidConfig, fLow)
 	}
@@ -199,7 +207,7 @@ func logGrid(fLow, fHigh float64, n, extra int) ([]float64, error) {
 	if n < 2 {
 		return nil, fmt.Errorf("%w: n must be >= 2, got %d", ErrInvalidConfig, n)
 	}
-	freqs := make([]float64, n, n+extra)
+	freqs := make([]float64, n)
 	logLow := math.Log(fLow)
 	step := (math.Log(fHigh) - logLow) / float64(n-1)
 	for i := range freqs {
