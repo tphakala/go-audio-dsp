@@ -24,6 +24,32 @@ func ExampleEqualizer_Response() {
 	// Output: 6.0 dB at 1000 Hz
 }
 
+// LogSweepWithMarks adds each filter's own frequency to the log grid, so a
+// narrow notch is sampled at its centre instead of missed between points. The
+// null reads the per-section floor, SectionFloorDB.
+func ExampleLogSweepWithMarks() {
+	f, err := equalizer.NewFilter(equalizer.Band{Type: equalizer.BandReject, Frequency: 1000, WidthHz: 1000.0 / 30}, 48000)
+	if err != nil {
+		panic(err)
+	}
+	chain := equalizer.NewFilterChain()
+	if err := chain.AddFilter(f); err != nil {
+		panic(err)
+	}
+	freqs, err := equalizer.LogSweepWithMarks(20, 20000, 4, chain.Marks())
+	if err != nil {
+		panic(err)
+	}
+	deepest := chain.Response(freqs)[0]
+	for _, p := range chain.Response(freqs) {
+		if p.GainDB < deepest.GainDB {
+			deepest = p
+		}
+	}
+	fmt.Printf("%d points, deepest %.1f dB at %.0f Hz\n", len(freqs), deepest.GainDB, deepest.Hz)
+	// Output: 5 points, deepest -200.0 dB at 1000 Hz
+}
+
 // A Butterworth band-pass reads about -3 dB on the band edges and
 // 0 dB at the geometric centre; Response reads the realised attenuation at all
 // three for a one-third-octave band at 1 kHz.

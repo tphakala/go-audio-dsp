@@ -38,7 +38,15 @@
 // section's dB and phase are added, so a long cascade stays finite.
 // SampleRate on all three types reports the rate (0 for an empty chain), which
 // bounds the meaningful frequencies at SampleRate()/2. Response allocates and is
-// meant for visualization, not the audio path. The biquad recurrence is serial
+// meant for visualization, not the audio path.
+//
+// A narrow notch, peak or resonance can fall between the points of a plain
+// LogSweep, so each filter records its marks (Marks on Equalizer, Filter and
+// FilterChain: an RBJ band's Frequency, a Butterworth band-pass's geometric
+// centre, nothing for caller-designed biquads) and LogSweepWithMarks merges them
+// into the log grid. Each section's dB contribution is floored at SectionFloorDB
+// (-200 dB), so GainDB is finite, and encodes as JSON, at every finite
+// frequency; a frequency beyond SampleRate is evaluated modulo SampleRate. The biquad recurrence is serial
 // (each output depends on the previous one), so it has no SIMD form; it runs in
 // scalar float64. There is no CGo.
 package equalizer

@@ -10,7 +10,8 @@ import (
 
 // NewButterworthBandPass builds a Butterworth band-pass Filter whose half-power
 // edges are lower and upper (Hz) at sampleRate, with 0 dB gain at the
-// geometric centre sqrt(lower*upper). The peak lies at the prewarped centre, a
+// geometric centre sqrt(lower*upper), which is also the filter's only mark (see
+// Filter.Marks). The peak lies at the prewarped centre, a
 // little above the geometric one, so the gain at an edge is -3.01 dB plus that
 // excess: within 0.002 dB for order 4 and a one-third-octave band up to 0.95 of
 // Nyquist, further off for low orders and wide bands near Nyquist (order 1 reads
@@ -57,6 +58,7 @@ func NewButterworthBandPass(lower, upper float64, order, sampleRate int) (*Filte
 	if err != nil {
 		return nil, fmt.Errorf("butterworth band-pass %g to %g Hz at %d Hz: %w", lower, upper, sampleRate, err)
 	}
+	f.marks = []float64{math.Sqrt(lower * upper)}
 	return f, nil
 }
 

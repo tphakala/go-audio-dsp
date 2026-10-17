@@ -419,10 +419,10 @@ func TestFilterChainResponseExtremeCascade(t *testing.T) {
 	}
 }
 
-// TestFilterChainResponseExactNull pins that a section whose magnitude is
-// exactly zero makes GainDB negative infinity wherever it sits in the cascade,
-// rather than being skipped or averaged into a finite sum.
-func TestFilterChainResponseExactNull(t *testing.T) {
+// TestFilterChainResponseExactNullFloored pins that a section whose magnitude is
+// exactly zero contributes SectionFloorDB wherever it sits in the cascade,
+// rather than being skipped, averaged away or turning the sum into -Inf.
+func TestFilterChainResponseExactNullFloored(t *testing.T) {
 	const fs = 48000
 	null, err := NewBiquadFilter([]Biquad{{}}, fs) // B0=B1=B2=0: H(z) = 0 at every frequency
 	if err != nil {
@@ -440,14 +440,23 @@ func TestFilterChainResponseExactNull(t *testing.T) {
 	}
 	for name, fl := range orders {
 		c := NewFilterChain()
+		want := make([]float64, len(freqs))
 		for _, f := range fl {
 			if err := c.AddFilter(f); err != nil {
 				t.Fatal(err)
 			}
+			for i, p := range f.Response(freqs) {
+				if f != null {
+					want[i] += p.GainDB
+				}
+			}
 		}
 		for i, p := range c.Response(freqs) {
-			if !math.IsInf(p.GainDB, -1) {
-				t.Errorf("%s, %g Hz: GainDB = %g, want -Inf", name, freqs[i], p.GainDB)
+			if math.IsInf(p.GainDB, 0) || math.IsNaN(p.GainDB) {
+				t.Errorf("%s, %g Hz: GainDB = %g, want finite", name, freqs[i], p.GainDB)
+			}
+			if w := want[i] + SectionFloorDB; math.Abs(p.GainDB-w) > 1e-12 {
+				t.Errorf("%s, %g Hz: GainDB = %.15g, want %.15g (floor plus the peaks)", name, freqs[i], p.GainDB, w)
 			}
 		}
 	}

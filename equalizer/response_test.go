@@ -57,8 +57,8 @@ func TestResponseKnownPoints(t *testing.T) {
 			t.Errorf("AllPass at %g Hz = %g dB, want 0", f, g)
 		}
 	}
-	// Band-reject is a deep notch at the center (finite, very negative; -Inf only
-	// when the magnitude evaluates to exactly zero).
+	// Band-reject is a deep notch at the center (very negative, floored at
+	// SectionFloorDB).
 	if g := gainAt(t, band(BandReject, 1000, 0, 100, 0, 0), 1000); g > -100 {
 		t.Errorf("BandReject at f0 = %.4f dB, want < -100", g)
 	}
@@ -85,7 +85,7 @@ func TestResponseKnownPoints(t *testing.T) {
 }
 
 // TestResponseNonFiniteFrequency pins the documented behavior that a non-finite
-// frequency yields a NaN GainDB (rather than -Inf, which means an exact null).
+// frequency yields a NaN GainDB (an exact null reads SectionFloorDB per section).
 func TestResponseNonFiniteFrequency(t *testing.T) {
 	e, err := New(band(HighPass, 1000, 0.7071, 0, 0, 0))
 	if err != nil {

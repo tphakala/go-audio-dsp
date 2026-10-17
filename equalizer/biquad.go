@@ -18,7 +18,8 @@ type Biquad struct {
 // sections at sampleRate, run in the order given. It copies sections, so the
 // caller may reuse the slice. sampleRate is only recorded, so that a FilterChain
 // can enforce one rate and Filter.Response can map Hz to radians; the
-// coefficients are used as they are.
+// coefficients are used as they are. A caller-designed filter has no marks (see
+// Filter.Marks); pass its design frequencies to LogSweepWithMarks.
 //
 // It returns an error wrapping ErrInvalidConfig for a sampleRate <= 0, for no
 // sections or more than 16, and for the first section with a non-finite
