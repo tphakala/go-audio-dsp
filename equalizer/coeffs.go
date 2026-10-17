@@ -26,8 +26,8 @@ func newCoeffs(b Band, sampleRate int) (coeffs, error) {
 	if !b.Type.valid() {
 		return coeffs{}, fmt.Errorf("%w: unknown FilterType %d", ErrInvalidConfig, int(b.Type))
 	}
-	if b.Passes < 0 || b.Passes > maxPasses {
-		return coeffs{}, fmt.Errorf("%w: Passes must be in [0, %d], got %d", ErrInvalidConfig, maxPasses, b.Passes)
+	if b.Passes < 0 || b.Passes > MaxPasses {
+		return coeffs{}, fmt.Errorf("%w: Passes must be in [0, %d], got %d", ErrInvalidConfig, MaxPasses, b.Passes)
 	}
 	fs := float64(sampleRate)
 	nyquist := fs / 2

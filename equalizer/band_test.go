@@ -50,7 +50,7 @@ func TestConfigInvalid(t *testing.T) {
 		{"peaking gain NaN", Config{SampleRate: 48000, Bands: []Band{{Type: Peaking, Frequency: 1000, WidthHz: 100, GainDB: math.NaN()}}}},
 		{"shelf gain Inf", Config{SampleRate: 48000, Bands: []Band{{Type: LowShelf, Frequency: 1000, Q: 1, GainDB: math.Inf(1)}}}},
 		{"passes negative", Config{SampleRate: 48000, Bands: []Band{{Type: LowPass, Frequency: 1000, Q: 1, Passes: -1}}}},
-		{"passes too many", Config{SampleRate: 48000, Bands: []Band{{Type: LowPass, Frequency: 1000, Q: 1, Passes: maxPasses + 1}}}},
+		{"passes too many", Config{SampleRate: 48000, Bands: []Band{{Type: LowPass, Frequency: 1000, Q: 1, Passes: MaxPasses + 1}}}},
 		// A finite, in-range frequency near Nyquist can still push the poles onto
 		// the unit circle (marginally unstable); the coefficient check rejects it.
 		{"near-nyquist unstable", Config{SampleRate: 48000, Bands: []Band{{Type: BandReject, Frequency: 23999, WidthHz: 100}}}},

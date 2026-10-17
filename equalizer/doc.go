@@ -30,9 +30,15 @@
 // caller-designed second-order sections after checking that they are finite and
 // stable.
 //
-// Response (on Equalizer and on Filter) and LogSweep report the steady-state
-// magnitude and phase for drawing a response curve; they allocate and are meant
-// for visualization, not the audio path. The biquad recurrence is serial (each
-// output depends on the previous one), so it has no SIMD form; it runs in scalar
-// float64. There is no CGo.
+// Response (on Equalizer, Filter and FilterChain) and LogSweep report the
+// steady-state magnitude in dB and phase in radians (wrapped to [-pi, pi]) at
+// frequencies given in Hz, for drawing a response curve. A FilterChain's
+// response is that of its filters' sections in order and is the identity when the
+// chain is empty; FilterChain.ResponseInto is the allocation-free variant. Each
+// section's dB and phase are added, so a long cascade stays finite.
+// SampleRate on all three types reports the rate (0 for an empty chain), which
+// bounds the meaningful frequencies at SampleRate()/2. Response allocates and is
+// meant for visualization, not the audio path. The biquad recurrence is serial
+// (each output depends on the previous one), so it has no SIMD form; it runs in
+// scalar float64. There is no CGo.
 package equalizer

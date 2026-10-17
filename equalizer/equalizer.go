@@ -13,6 +13,9 @@ type Equalizer struct {
 	sections   []section
 }
 
+// SampleRate returns the Config.SampleRate the equalizer was built with.
+func (e *Equalizer) SampleRate() int { return e.sampleRate }
+
 // New builds an Equalizer from cfg. It validates SampleRate and every band and
 // returns an error wrapping ErrInvalidConfig for the first invalid field. An
 // empty Bands list is valid and yields an identity block.
@@ -22,7 +25,7 @@ func New(cfg Config) (*Equalizer, error) {
 	}
 	// One section per pass. Pre-size to the band count, which is the exact total
 	// for the common single-pass-per-band case, and let append grow it for a band
-	// that cascades more passes. newCoeffs validates Passes (into [0, maxPasses])
+	// that cascades more passes. newCoeffs validates Passes (into [0, MaxPasses])
 	// before the inner loop, so the cascade is built in a single validation pass
 	// with no intermediate plan slice.
 	sections := make([]section, 0, len(cfg.Bands))

@@ -38,8 +38,8 @@ func NewButterworthBandPass(lower, upper float64, order, sampleRate int) (*Filte
 	if sampleRate <= 0 {
 		return nil, fmt.Errorf("%w: SampleRate must be > 0, got %d", ErrInvalidConfig, sampleRate)
 	}
-	if order < 1 || order > maxPasses {
-		return nil, fmt.Errorf("%w: order must be in [1, %d], got %d", ErrInvalidConfig, maxPasses, order)
+	if order < 1 || order > MaxPasses {
+		return nil, fmt.Errorf("%w: order must be in [1, %d], got %d", ErrInvalidConfig, MaxPasses, order)
 	}
 	fs := float64(sampleRate)
 	// Negated comparisons so NaN (every comparison false) is rejected; an infinite
@@ -62,7 +62,7 @@ func NewButterworthBandPass(lower, upper float64, order, sampleRate int) (*Filte
 
 // butterworthBandPass returns the order sections of the design, in float64,
 // ordered by ascending analog pole frequency. The caller has validated the
-// arguments: 0 < lower < upper < fs/2 and 1 <= order <= maxPasses.
+// arguments: 0 < lower < upper < fs/2 and 1 <= order <= MaxPasses.
 func butterworthBandPass(lower, upper, fs float64, order int) []Biquad {
 	// Prewarped analog edges for the bilinear map s = (1 - z^-1)/(1 + z^-1).
 	o1, o2 := math.Tan(math.Pi*lower/fs), math.Tan(math.Pi*upper/fs)

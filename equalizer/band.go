@@ -70,9 +70,11 @@ func (t FilterType) UsesGain() bool {
 	return t == Peaking || t == LowShelf || t == HighShelf
 }
 
-// maxPasses caps how many identical sections a single Band may cascade, so a
-// stray large Passes cannot request an unbounded allocation.
-const maxPasses = 16
+// MaxPasses is the most identical sections a single Band may cascade through
+// Band.Passes (and the most sections NewBiquadFilter accepts, and the highest
+// Butterworth order), so a stray large value cannot request an unbounded
+// allocation. A larger Passes is rejected with ErrInvalidConfig.
+const MaxPasses = 16
 
 // Band is one biquad stage of an equalizer.
 //
@@ -87,13 +89,13 @@ type Band struct {
 	Q         float64 // quality factor (> 0); used by LowPass, HighPass, AllPass, LowShelf, HighShelf
 	WidthHz   float64 // bandwidth in Hz (> 0); used by BandPass, BandReject, Peaking
 	GainDB    float64 // gain in dB; used by Peaking, LowShelf, HighShelf
-	Passes    int     // cascaded identical sections, 0 means 1, at most maxPasses
+	Passes    int     // cascaded identical sections, 0 means 1, at most MaxPasses (16)
 }
 
 // effectivePasses returns the number of cascaded biquad sections this band
 // expands to: Passes, with the documented default that 0 means one section.
 // NewFilter and Equalizer.New share it so the default lives in one place; the
-// upper bound (maxPasses) is validated separately in newCoeffs.
+// upper bound (MaxPasses) is validated separately in newCoeffs.
 func (b Band) effectivePasses() int {
 	if b.Passes == 0 {
 		return 1

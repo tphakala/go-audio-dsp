@@ -29,8 +29,8 @@ func NewBiquadFilter(sections []Biquad, sampleRate int) (*Filter, error) {
 	if sampleRate <= 0 {
 		return nil, fmt.Errorf("%w: SampleRate must be > 0, got %d", ErrInvalidConfig, sampleRate)
 	}
-	if len(sections) < 1 || len(sections) > maxPasses {
-		return nil, fmt.Errorf("%w: sections must number in [1, %d], got %d", ErrInvalidConfig, maxPasses, len(sections))
+	if len(sections) < 1 || len(sections) > MaxPasses {
+		return nil, fmt.Errorf("%w: sections must number in [1, %d], got %d", ErrInvalidConfig, MaxPasses, len(sections))
 	}
 	out := make([]section, len(sections))
 	for i, b := range sections {
