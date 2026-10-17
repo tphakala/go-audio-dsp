@@ -418,3 +418,37 @@ func TestFilterChainResponseExtremeCascade(t *testing.T) {
 		}
 	}
 }
+
+// TestFilterChainResponseExactNull pins that a section whose magnitude is
+// exactly zero makes GainDB negative infinity wherever it sits in the cascade,
+// rather than being skipped or averaged into a finite sum.
+func TestFilterChainResponseExactNull(t *testing.T) {
+	const fs = 48000
+	null, err := NewBiquadFilter([]Biquad{{}}, fs) // B0=B1=B2=0: H(z) = 0 at every frequency
+	if err != nil {
+		t.Fatal(err)
+	}
+	peak := func() *Filter {
+		return mustFilter(t, Band{Type: Peaking, Frequency: 1000, WidthHz: 400, GainDB: 6}, fs)
+	}
+	freqs := []float64{100, 1000, 9000}
+	orders := map[string][]*Filter{
+		"null alone":  {null},
+		"null first":  {null, peak(), peak()},
+		"null middle": {peak(), null, peak()},
+		"null last":   {peak(), peak(), null},
+	}
+	for name, fl := range orders {
+		c := NewFilterChain()
+		for _, f := range fl {
+			if err := c.AddFilter(f); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i, p := range c.Response(freqs) {
+			if !math.IsInf(p.GainDB, -1) {
+				t.Errorf("%s, %g Hz: GainDB = %g, want -Inf", name, freqs[i], p.GainDB)
+			}
+		}
+	}
+}
