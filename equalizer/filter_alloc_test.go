@@ -109,7 +109,16 @@ func TestFilterChainResponseIntoZeroAlloc(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, c := range map[string]*FilterChain{"chain": chainOf(t, testConfig()), "empty": NewFilterChain()} {
+	// The null filter (every coefficient zero) drives the floored path under AllocsPerRun.
+	null, err := NewBiquadFilter([]Biquad{{}}, testConfig().SampleRate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	floored := chainOf(t, testConfig())
+	if err := floored.AddFilter(null); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]*FilterChain{"chain": chainOf(t, testConfig()), "floored": floored, "empty": NewFilterChain()} {
 		t.Run(name, func(t *testing.T) {
 			dst := make([]ResponsePoint, len(freqs))
 			// Positive control: the warm-up must write real points.

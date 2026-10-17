@@ -47,7 +47,9 @@ example a filter placed too close to Nyquist) are rejected at construction.
 
 `Response` returns the magnitude (`GainDB`, dB) and phase (`PhaseRad`, radians) at
 each requested frequency (Hz), and `LogSweep` builds a log-spaced frequency axis
-for a plot:
+for a plot. It returns exactly `n` strictly increasing points from `fLow` to
+`fHigh`, and returns an error for an infinite `fHigh` or a range too narrow for
+`n` distinct points:
 
 ```go
 freqs, _ := equalizer.LogSweep(20, 20000, 256)
@@ -64,11 +66,25 @@ on all three types gives the rate (0 for an empty chain), so the plot range is
 
 ```go
 if chain.Len() > 0 {
-	freqs, _ := equalizer.LogSweep(10, float64(chain.SampleRate())/2, 256)
-	pts := make([]equalizer.ResponsePoint, len(freqs))
+	freqs, _ := equalizer.LogSweepWithMarks(10, float64(chain.SampleRate())/2, 256, chain.Marks())
+	pts := make([]equalizer.ResponsePoint, len(freqs)) // len(freqs) varies with the marks
 	_, _ = chain.ResponseInto(pts, freqs) // reuse pts across redraws, no allocation
 }
 ```
+
+A narrow notch, peak or resonance can fall between the points of a plain
+`LogSweep`: at Q 30 and 256 points a notch can read only -5 dB. Each filter
+therefore records its marks, the frequencies where its response has a defining
+feature, and `LogSweepWithMarks` adds the in-range ones to the grid (the grid
+points themselves never move, and marks outside the range or non-finite are
+dropped). `NewFilter` and `Equalizer` mark each `Band.Frequency`,
+`NewButterworthBandPass` marks the geometric centre of its edges, and
+`NewBiquadFilter` marks nothing, so pass the design frequencies of a
+caller-designed filter to `LogSweepWithMarks` yourself. `Marks()` on `Filter`,
+`FilterChain` and `Equalizer` returns a sorted, duplicate-free copy; a chain's
+marks are those of the filters it accepted. The sweep is longer than `n` by at
+most the number of marks, so size a reused `ResponseInto` buffer by
+`len(freqs)`.
 
 `ResponseInto` is the allocation-free form, and returns `ErrBufferTooSmall`
 without writing when `dst` is shorter than `freqs`. `Response` allocates its
@@ -77,9 +93,12 @@ the filter state, so both are safe to call while streaming. The phase is wrapped
 to `[-pi, pi]`, so a deep cascade's phase wraps and unwrapping for a phase plot
 is the caller's job. The response is accumulated per section, adding each
 section's dB and phase, so a long cascade of high-gain or deep-attenuation
-sections stays finite instead of overflowing; `GainDB` is `-Inf` only when a
-section's magnitude is exactly zero (a deep notch reports a large finite
-attenuation, not `-Inf`). A non-finite frequency gives NaN.
+sections stays finite instead of overflowing. Each section's contribution is
+floored at `SectionFloorDB` (-200 dB), so an exact null or a section deeper than
+that reads exactly -200 dB, a cascade of k such sections reads `k*SectionFloorDB`,
+and `GainDB` is finite, so always JSON-encodable, at every finite frequency. A
+non-finite frequency gives NaN, and a frequency beyond `SampleRate` is evaluated
+modulo `SampleRate`.
 
 ## Filters beyond one RBJ band
 

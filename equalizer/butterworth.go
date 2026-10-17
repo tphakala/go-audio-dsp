@@ -10,15 +10,15 @@ import (
 
 // NewButterworthBandPass builds a Butterworth band-pass Filter whose half-power
 // edges are lower and upper (Hz) at sampleRate, with 0 dB gain at the
-// geometric centre sqrt(lower*upper). The peak lies at the prewarped centre, a
-// little above the geometric one, so the gain at an edge is -3.01 dB plus that
-// excess: within 0.002 dB for order 4 and a one-third-octave band up to 0.95 of
-// Nyquist, further off for low orders and wide bands near Nyquist (order 1 reads
-// -2.79 dB at the upper edge of a one-third-octave band ending at 21 kHz at
-// 48 kHz). order is the prototype
-// (low-pass) order N: the band-pass has 2N poles, realised as N biquad sections,
-// and falls off at 6N dB per octave far from the band. Order 1 is the
-// second-order band-pass, order 4 an eight-pole one.
+// geometric centre sqrt(lower*upper), which is also the filter's only mark (see
+// Filter.Marks). The peak lies at the prewarped centre, a little above the
+// geometric one, so the gain at an edge is -3.01 dB plus that excess: within
+// 0.002 dB for order 4 and a one-third-octave band up to 0.95 of Nyquist,
+// further off for low orders and wide bands near Nyquist (order 1 reads -2.79 dB
+// at the upper edge of a one-third-octave band ending at 21 kHz at 48 kHz).
+// order is the prototype (low-pass) order N: the band-pass has 2N poles,
+// realised as N biquad sections, and falls off at 6N dB per octave far from the
+// band. Order 1 is the second-order band-pass, order 4 an eight-pole one.
 //
 // The design is the classical one: the Butterworth low-pass prototype poles
 // exp(j*pi*(2k+N+1)/(2N)) are mapped to a band-pass by the low-pass to
@@ -57,6 +57,7 @@ func NewButterworthBandPass(lower, upper float64, order, sampleRate int) (*Filte
 	if err != nil {
 		return nil, fmt.Errorf("butterworth band-pass %g to %g Hz at %d Hz: %w", lower, upper, sampleRate, err)
 	}
+	f.marks = []float64{math.Sqrt(lower * upper)}
 	return f, nil
 }
 

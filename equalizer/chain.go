@@ -21,7 +21,7 @@ var _ dsp.Processor = (*FilterChain)(nil)
 // this by rejecting a filter whose rate differs from the chain's first. A
 // FilterChain is not safe for concurrent use; run one instance per stream (for
 // example one per channel). Response and ResponseInto report the chain's
-// frequency response.
+// frequency response, and Marks the frequencies a plot of it should sample.
 type FilterChain struct {
 	sampleRate int // the rate of the first filter added; every later filter must match
 	filters    []*Filter
@@ -50,6 +50,22 @@ func (c *FilterChain) AddFilter(f *Filter) error {
 	}
 	c.filters = append(c.filters, f)
 	return nil
+}
+
+// Marks returns the union of the marks of the filters AddFilter accepted, sorted
+// and duplicate-free, in a new slice; nil when no filter has a mark. It is
+// derived from the chain on each call, so a rejected filter never contributes.
+// Pass it to LogSweepWithMarks so a narrow filter is not missed between sweep
+// points; see Filter.Marks for the rule per constructor.
+func (c *FilterChain) Marks() []float64 {
+	marks := make([]float64, 0, len(c.filters))
+	for _, f := range c.filters {
+		marks = append(marks, f.marks...)
+	}
+	if len(marks) == 0 {
+		return nil
+	}
+	return sortedUnique(marks)
 }
 
 // SampleRate returns the sample rate of the chain's filters, which is the rate

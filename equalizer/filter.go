@@ -2,6 +2,7 @@ package equalizer
 
 import (
 	"fmt"
+	"slices"
 
 	dsp "github.com/tphakala/go-audio-dsp"
 )
@@ -22,11 +23,28 @@ var _ dsp.Processor = (*Filter)(nil)
 // equals an Equalizer of the same bands. Unlike an Equalizer, whose bands are
 // fixed at construction, a Filter is a single reusable stage a caller composes
 // into a FilterChain. A Filter is not safe for concurrent use; run one instance
-// per stream (for example one per channel).
+// per stream (for example one per channel). A Filter also records its marks, the
+// frequencies where its response has a defining feature, which Marks reports for
+// a response plot's frequency axis.
 type Filter struct {
 	sampleRate int // the rate the coefficients were computed for; a FilterChain enforces one rate across its filters
 	sections   []section
+	marks      []float64 // frequencies a plot should sample exactly; set only by constructors
 }
+
+// Marks returns the frequencies where the filter's response has a defining
+// feature, in a new slice, or nil when there are none; pass them to
+// LogSweepWithMarks so a narrow feature is not missed between sweep points.
+//
+// NewFilter marks Band.Frequency. That is the magnitude extremum of Peaking,
+// BandPass and BandReject, within 0.011 dB per cascaded section of the
+// resonance peak of LowPass and HighPass at Q >= 10 (the offset adds for each
+// pass and for each band sharing the frequency), the phase centre of AllPass
+// and the transition midpoint of a shelf. NewButterworthBandPass marks the
+// geometric centre of its edges. NewBiquadFilter marks nothing, since
+// caller-designed sections have no known frequency; pass its design frequencies
+// to LogSweepWithMarks directly.
+func (f *Filter) Marks() []float64 { return slices.Clone(f.marks) }
 
 // SampleRate returns the sample rate the filter's coefficients were computed
 // for.
@@ -35,7 +53,7 @@ func (f *Filter) SampleRate() int { return f.sampleRate }
 // NewFilter builds a Filter for one band at sampleRate. It validates sampleRate
 // and the band and returns an error wrapping ErrInvalidConfig for the first
 // invalid field. Passes == 0 means one section, matching Band's documented
-// default.
+// default. The filter's mark is b.Frequency (see Marks).
 func NewFilter(b Band, sampleRate int) (*Filter, error) {
 	if sampleRate <= 0 {
 		return nil, fmt.Errorf("%w: SampleRate must be > 0, got %d", ErrInvalidConfig, sampleRate)
@@ -48,7 +66,7 @@ func NewFilter(b Band, sampleRate int) (*Filter, error) {
 	for i := range sections {
 		sections[i].c = c
 	}
-	return &Filter{sampleRate: sampleRate, sections: sections}, nil
+	return &Filter{sampleRate: sampleRate, sections: sections, marks: []float64{b.Frequency}}, nil
 }
 
 // ProcessInto writes in filtered through the filter's cascade into out and

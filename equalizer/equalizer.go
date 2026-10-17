@@ -1,6 +1,9 @@
 package equalizer
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // Equalizer is a cascade of RBJ biquad filters that runs as a streaming
 // dsp.Processor over mono float32 audio. It has zero latency (output aligns
@@ -11,14 +14,21 @@ import "fmt"
 type Equalizer struct {
 	sampleRate int
 	sections   []section
+	marks      []float64 // sorted, unique band frequencies; see Marks
 }
+
+// Marks returns the sorted, duplicate-free centre or corner frequencies of the
+// equalizer's bands, in a new slice, or nil for an empty Bands list. Pass them to
+// LogSweepWithMarks so a narrow band is not missed between sweep points. The
+// rule is that of Filter.Marks for NewFilter.
+func (e *Equalizer) Marks() []float64 { return slices.Clone(e.marks) }
 
 // SampleRate returns the Config.SampleRate the equalizer was built with.
 func (e *Equalizer) SampleRate() int { return e.sampleRate }
 
 // New builds an Equalizer from cfg. It validates SampleRate and every band and
 // returns an error wrapping ErrInvalidConfig for the first invalid field. An
-// empty Bands list is valid and yields an identity block.
+// empty Bands list is valid and yields an identity block with no marks.
 func New(cfg Config) (*Equalizer, error) {
 	if cfg.SampleRate <= 0 {
 		return nil, fmt.Errorf("%w: SampleRate must be > 0, got %d", ErrInvalidConfig, cfg.SampleRate)
@@ -29,6 +39,7 @@ func New(cfg Config) (*Equalizer, error) {
 	// before the inner loop, so the cascade is built in a single validation pass
 	// with no intermediate plan slice.
 	sections := make([]section, 0, len(cfg.Bands))
+	marks := make([]float64, 0, len(cfg.Bands))
 	for i := range cfg.Bands {
 		b := cfg.Bands[i]
 		c, err := newCoeffs(b, cfg.SampleRate)
@@ -38,8 +49,12 @@ func New(cfg Config) (*Equalizer, error) {
 		for range b.effectivePasses() {
 			sections = append(sections, section{c: c})
 		}
+		marks = append(marks, b.Frequency)
 	}
-	return &Equalizer{sampleRate: cfg.SampleRate, sections: sections}, nil
+	if len(marks) == 0 {
+		marks = nil
+	}
+	return &Equalizer{sampleRate: cfg.SampleRate, sections: sections, marks: sortedUnique(marks)}, nil
 }
 
 // ProcessInto writes in filtered through the cascade into out and returns the
