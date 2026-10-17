@@ -52,7 +52,7 @@ type markEditor struct {
 func (m *markEditor) inRange(f float64) bool { return m.lo <= f && f <= m.hi }
 
 func (m *markEditor) step() (added, removed []float64) {
-	switch m.r.IntN(7) {
+	switch m.r.IntN(6) {
 	case 0:
 		f := math.Exp(math.Log(m.lo) + m.r.Float64()*(math.Log(m.hi)-math.Log(m.lo)))
 		m.marks, added = append(m.marks, f), []float64{f}
