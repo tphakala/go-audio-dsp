@@ -21,7 +21,7 @@ Packages:
 | `denoiser/gate` | beta | Spectral soft-gate waveform denoiser, the lighter second denoise method |
 | `equalizer` | beta | RBJ biquad filter chain as a streaming block, plus frequency response for a UI curve; Butterworth band-pass and caller-supplied biquad sections as a `Filter` |
 | `gain` | beta | Fixed decibel gain as a streaming block, saturating int16 entry points |
-| `stft` | beta | Shared STFT layer: whole-clip `Plan`, streaming `Analyzer`, overlap-add `Synthesizer`, `EdgeAnalyzer` (sox-schedule frames with edge-adapted windows and a window cache), windows |
+| `stft` | beta | Shared STFT layer: whole-clip `Plan`, streaming `Analyzer`, overlap-add `Synthesizer`, `EdgeAnalyzer` (sox-schedule frames with edge-adapted windows and a process-wide window cache), windows |
 | `spectrogram` | beta | Magnitude, power or dB spectrogram matrix, whole clip or streaming columns; `Fit`, a sox-compatible fit-to-width producer (step and block geometry, block-mean columns, unclamped dB) |
 | `mel` | beta | Per-frame (log-)mel columns; normalization, stacking and tensor layout are the consumer's job |
 | `octave` | beta | Streaming 1/3-octave band level meter (a meter, not a `Processor`): ISO 266 / IEC 61260-1 bands, mean square per period, built on `equalizer` filters (RBJ BandPass by default, an optional Butterworth band-pass profile) |

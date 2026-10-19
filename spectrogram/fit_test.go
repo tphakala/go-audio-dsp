@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/tphakala/go-audio-dsp/stft"
@@ -229,8 +230,11 @@ func TestFitStreamEqualsCompute(t *testing.T) {
 }
 
 // TestFitReuse runs one Fit over clips of different lengths and spans, so the
-// window cache sees a new drain length and a new hop in turn, and checks that a
-// repeat of the first run is bit-identical to it and to a fresh Fit.
+// Fit sees a new drain length and a new hop in turn, and checks that a repeat of
+// the first run is bit-identical to it and to a fresh Fit. The fresh Fit takes
+// its edge windows from the process-wide stft cache that f filled, so this checks
+// determinism and reuse; that a cached window is the right one is pinned in the
+// stft tests, which compare against analyzers with private caches.
 func TestFitReuse(t *testing.T) {
 	clip := soxSignal(t, soxRef{})
 	short := clip[:16800] // 0.7 s: a different L mod hop
@@ -261,6 +265,61 @@ func TestFitReuse(t *testing.T) {
 	}
 	if !sameBits(a2, a1) {
 		t.Error("repeat run after other clips and spans differs from the first run")
+	}
+}
+
+// TestFitConcurrent builds Fits in several goroutines over the same
+// configurations and checks each result against a serial run made after they
+// finish. Whether a goroutine builds a window, waits for another goroutine's
+// build or hits the process-wide stft cache depends on what earlier tests in the
+// process cached, so this pins bit equality and, under -race, the absence of a
+// data race on whichever of those paths the run takes.
+func TestFitConcurrent(t *testing.T) {
+	clip := soxSignal(t, soxRef{})
+	cfgs := []struct {
+		n     int
+		shape stft.WindowShape
+	}{{256, hannShape}, {256, dolphShape(100)}, {1024, dolphShape(86.4)}}
+	span := int64(len(clip))
+	compute := func(i int) ([]float32, error) {
+		f, err := NewFit(FitConfig{SampleRate: soxClipRate, FrameSize: cfgs[i].n, Columns: cfgs[i].n + 2, Window: cfgs[i].shape})
+		if err != nil {
+			return nil, err
+		}
+		m, err := f.Compute(clip, span)
+		if err != nil {
+			return nil, err
+		}
+		return m.Data, nil
+	}
+	const goroutines = 4
+	got := make([][][]float32, goroutines)
+	var wg sync.WaitGroup
+	for g := range goroutines {
+		got[g] = make([][]float32, len(cfgs))
+		wg.Go(func() {
+			for j := range cfgs {
+				i := (j + g) % len(cfgs)
+				d, err := compute(i)
+				if err != nil {
+					t.Errorf("goroutine %d config %d: %v", g, i, err)
+					return
+				}
+				got[g][i] = d
+			}
+		})
+	}
+	wg.Wait()
+	for i := range cfgs {
+		want, err := compute(i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for g := range goroutines {
+			if !sameBits(got[g][i], want) {
+				t.Errorf("goroutine %d config %d: result differs from the serial run", g, i)
+			}
+		}
 	}
 }
 

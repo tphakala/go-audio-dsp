@@ -94,3 +94,44 @@ func BenchmarkFit(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkFitFresh: a Fit built from scratch for every render, the way a
+// request handler uses it, over a 48 kHz clip with the span equal to the clip
+// length. Unlike BenchmarkFit it constructs the Fit inside the loop, so it
+// measures what a later render of a configuration costs once the process-wide
+// edge window cache holds its windows (the checked call before the loop fills
+// the cache). The first-use cost of a configuration is the "cold" mode of
+// stft's BenchmarkEdgeAnalyzer.
+func BenchmarkFitFresh(b *testing.B) {
+	const rate = 48000
+	shape := dolphShape(100)
+	for _, g := range []struct {
+		name    string
+		n       int
+		seconds int
+		columns int
+	}{{"n4096-3s", 4096, 3, 2050}, {"n8192-15s", 8192, 15, 4098}} {
+		b.Run(g.name, func(b *testing.B) {
+			samples := g.seconds * rate
+			sig := sine(samples, rate, 3000, 0.5)
+			cfg := FitConfig{SampleRate: rate, FrameSize: g.n, Columns: g.columns, Window: shape}
+			f, err := NewFit(cfg)
+			if err != nil {
+				b.Fatal(err)
+			}
+			m := Matrix{Data: make([]float32, f.Bins()*g.columns)}
+			// One-time checked call: the loop discards its result.
+			if got, err := f.ComputeInto(&m, sig, int64(samples)); err != nil || got == 0 {
+				b.Fatalf("ComputeInto = (%d, %v)", got, err)
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				f, err := NewFit(cfg)
+				if err != nil {
+					b.Fatal(err)
+				}
+				_, _ = f.ComputeInto(&m, sig, int64(samples))
+			}
+		})
+	}
+}

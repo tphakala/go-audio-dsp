@@ -27,10 +27,13 @@
 //     frame that includes padding, and a per-frame amplitude factor so a full-scale
 //     sinusoid centred on a bin away from DC and Nyquist reads close to power 1.
 //     WindowShape selects the Hann or
-//     Dolph-Chebyshev family (centre-normalized, which sets FullWindowSum). It
-//     caches the edge windows across Reset calls: a repeat run on the same geometry
-//     builds none, and the cache holds at most 32 windows per kind, so memory is
-//     bounded by the frame size alone, not the input length.
+//     Dolph-Chebyshev family (centre-normalized, which sets FullWindowSum). Edge
+//     windows are kept in one process-wide cache, keyed per window by frame size,
+//     shape, window length and lead or drain kind, so a geometry any EdgeAnalyzer
+//     has run needs no new window in the next one while its windows stay cached,
+//     up to the 32 windows per kind it references. The cache holds at most 16 MiB
+//     of window data (least recently used evicted), so window memory does not grow
+//     with the input length.
 //
 // The analysis window may be shorter than the transform: Config.WindowLength in
 // [1, FrameSize] with Config.WindowAlign selects a window zero-padded into the
@@ -45,8 +48,9 @@
 //
 // A Plan, an Analyzer and an EdgeAnalyzer each hold per-transform scratch through
 // their simd plan, so none is safe for concurrent use; build one per goroutine.
-// Distinct Plans, Analyzers and EdgeAnalyzers share no state; a Synthesizer shares
-// its Analyzer's window and inverse-transform scratch, so the pair belongs to one
-// goroutine. The transforms run through simd's AVX/NEON paths where available and
+// Distinct Plans and Analyzers share no state. Distinct EdgeAnalyzers share only
+// the synchronized, read-only edge window cache, so each can run in its own
+// goroutine. A Synthesizer shares its Analyzer's window and inverse-transform
+// scratch, so the pair belongs to one goroutine. The transforms run through simd's AVX/NEON paths where available and
 // portable Go elsewhere; there is no CGo.
 package stft

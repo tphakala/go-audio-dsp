@@ -27,11 +27,11 @@
 // it picks a frame step and a block of frames per column, averages the power of
 // each block, and emits at most Columns columns of unclamped decibels, following
 // the sox 14.4.2 spectrogram effect (the behavioural reference). Its framing,
-// edge-adapted windows and window cache live in stft.EdgeAnalyzer, not here. Its
-// level is an amplitude normalization, 0 dB for a full-scale sinusoid on a bin
-// centre, so it differs from the energy normalization 1/sum(w^2) of Spectrogram
-// by an amount that depends on the frame size and the window; the two are not
-// interchangeable. Fit leaves presentation to the consumer: it applies no display
+// edge-adapted windows and their shared window cache live in stft (EdgeAnalyzer),
+// not here. Its level is an amplitude normalization, 0 dB for a full-scale
+// sinusoid on a bin centre, so it differs from the energy normalization
+// 1/sum(w^2) of Spectrogram by an amount that depends on the frame size and the
+// window; the two are not interchangeable. Fit leaves presentation to the consumer: it applies no display
 // range, so clamping to a dynamic range, the colormap, the axes (SecondsSpanned
 // and BinHz give the scales) and the image encoding are the renderer's job.
 //
