@@ -31,9 +31,12 @@ const (
 // highest sidelobe sits a few dB above -attenuationDB (about 3.4 to 4.2 dB at
 // n = 512 and 1024 for attenuations from 50 to 126.6 dB, more at higher
 // attenuation and far more for short windows); use
-// DolphChebyshevSymmetric when the bound itself matters. Below about 45 dB the
-// window's noise bandwidth stops shrinking with attenuation, and long windows
-// peak at their endpoints rather than the center.
+// DolphChebyshevSymmetric when the bound itself matters. At low attenuation the
+// window gets worse in two ways, at a point that rises with n. Its equivalent
+// noise bandwidth is smallest near 30.5 dB at n = 256, 33.5 dB at n = 512,
+// 36.5 dB at n = 1024 and 42.5 dB at n = 4096, and grows again below that. The
+// window also peaks at its endpoints instead of the center: at 40 dB and below
+// for n = 512, and up to at least 57.5 dB for n = 4096 (center peak from 60 dB).
 //
 // n must be in [1, 32768] and attenuationDB in [20, 200]; anything else, NaN
 // included, returns an error wrapping ErrInvalidConfig. Above about 150 dB the
