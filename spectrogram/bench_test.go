@@ -97,9 +97,11 @@ func BenchmarkFit(b *testing.B) {
 
 // BenchmarkFitFresh: a Fit built from scratch for every render, the way a
 // request handler uses it, over a 48 kHz clip with the span equal to the clip
-// length. Unlike BenchmarkFit it includes the edge window cost that a warmed
-// Fit hides, so it measures what a first render of a configuration costs and
-// what a later render of the same configuration costs once windows are shared.
+// length. Unlike BenchmarkFit it constructs the Fit inside the loop, so it
+// measures what a later render of a configuration costs once the process-wide
+// edge window cache holds its windows (the checked call before the loop fills
+// the cache). The first-use cost of a configuration is the "cold" mode of
+// stft's BenchmarkEdgeAnalyzer.
 func BenchmarkFitFresh(b *testing.B) {
 	const rate = 48000
 	shape := dolphShape(100)

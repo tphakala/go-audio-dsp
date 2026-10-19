@@ -269,9 +269,13 @@ func TestFitReuse(t *testing.T) {
 }
 
 // TestFitConcurrent builds Fits in several goroutines over the same
-// configurations, so they race for the same edge windows in stft's process-wide
-// cache, and checks each result against a serial run. Under -race it pins that
-// Fit, EdgeAnalyzer and the shared cache have no data race.
+// configurations and checks each result against a serial run made after they
+// finish. Whether a goroutine builds a window, waits for another goroutine's
+// build or hits the process-wide stft cache depends on what earlier tests in the
+// process cached, so this pins bit equality and, under -race, the absence of a
+// data race on whichever of those paths the run takes. stft's
+// TestEdgeAnalyzerConcurrent covers the build and wait paths on a cold private
+// cache.
 func TestFitConcurrent(t *testing.T) {
 	clip := soxSignal(t, soxRef{})
 	cfgs := []struct {
@@ -290,31 +294,35 @@ func TestFitConcurrent(t *testing.T) {
 		}
 		return m.Data, nil
 	}
-	want := make([][]float32, len(cfgs))
-	for i := range cfgs {
-		d, err := compute(i)
-		if err != nil {
-			t.Fatal(err)
-		}
-		want[i] = slices.Clone(d)
-	}
+	const goroutines = 4
+	got := make([][][]float32, goroutines)
 	var wg sync.WaitGroup
-	for g := range 4 {
+	for g := range goroutines {
+		got[g] = make([][]float32, len(cfgs))
 		wg.Go(func() {
 			for j := range cfgs {
 				i := (j + g) % len(cfgs)
-				got, err := compute(i)
+				d, err := compute(i)
 				if err != nil {
 					t.Errorf("goroutine %d config %d: %v", g, i, err)
 					return
 				}
-				if !sameBits(got, want[i]) {
-					t.Errorf("goroutine %d config %d: result differs from the serial run", g, i)
-				}
+				got[g][i] = d
 			}
 		})
 	}
 	wg.Wait()
+	for i := range cfgs {
+		want, err := compute(i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for g := range goroutines {
+			if !sameBits(got[g][i], want) {
+				t.Errorf("goroutine %d config %d: result differs from the serial run", g, i)
+			}
+		}
+	}
 }
 
 // TestFitNumColumns checks NumColumns, min(Columns, ceil(frames/BlockSteps)),
