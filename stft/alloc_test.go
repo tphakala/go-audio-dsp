@@ -175,7 +175,7 @@ func TestEdgeAnalyzerHopSwapZeroAlloc(t *testing.T) {
 // warmed by a first analyzer, so the second allocates nothing in Feed and Finish
 // whatever its own Reset did; runtime.MemStats is read around each call because
 // AllocsPerRun's warm-up call would hide a first-call allocation.
-func TestEdgeAnalyzerPastCapAllocatesOnlyOnMiss(t *testing.T) {
+func TestEdgeAnalyzerPastCapFeedAndFinishDoNotAllocateWhenCached(t *testing.T) {
 	shape := WindowShape{Family: ShapeDolphChebyshev, AttenuationDB: 106.5}
 	cases := []struct {
 		name         string
