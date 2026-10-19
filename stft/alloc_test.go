@@ -76,7 +76,7 @@ func TestSynthesizerZeroAlloc(t *testing.T) {
 // A warmed EdgeAnalyzer allocates nothing across Reset, Feed and Finish, with the
 // cached edge windows (N=256, hop 127, whose drain needs edge windows) and with
 // the per-frame rebuild past the cache cap (hop 1 needs more windows than the
-// slabs hold).
+// analyzer references).
 func TestEdgeAnalyzerZeroAlloc(t *testing.T) {
 	cases := []struct {
 		name      string

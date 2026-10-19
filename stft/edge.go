@@ -63,7 +63,7 @@ type EdgeConfig struct {
 // whether it is a lead or a drain window, not on the hop or the clip length. Every
 // EdgeAnalyzer in the process takes its windows from one shared cache keyed that
 // way (bounded at 16 MiB of window data, least recently used evicted), so an
-// analyzer whose geometry any analyzer has run before builds none, and two hops
+// analyzer whose windows any analyzer has built before builds none of them, and two hops
 // that need a window of the same length share it. The analyzer also remembers the
 // windows of its current geometry, so a repeat run does no lookup. At most 32
 // windows are referenced per kind; a frame needing one beyond that evaluates it

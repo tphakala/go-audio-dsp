@@ -30,10 +30,9 @@
 //     Dolph-Chebyshev family (centre-normalized, which sets FullWindowSum). Edge
 //     windows are kept in one process-wide cache, keyed per window by frame size,
 //     shape, window length and lead or drain kind, so a geometry any EdgeAnalyzer
-//     has run builds none in the next one. The cache holds at most 16 MiB of
-//     window data (least recently used evicted) and an analyzer references at most
-//     32 windows per kind, so memory is bounded by the frame size, not the input
-//     length.
+//     has run needs no new window in the next one, up to the 32 windows per kind it
+//     references. The cache holds at most 16 MiB of window data (least recently
+//     used evicted), so window memory does not grow with the input length.
 //
 // The analysis window may be shorter than the transform: Config.WindowLength in
 // [1, FrameSize] with Config.WindowAlign selects a window zero-padded into the
