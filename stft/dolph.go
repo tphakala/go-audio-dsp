@@ -44,8 +44,8 @@ const (
 // n must be in [1, 32768] and attenuationDB in [20, 200]; anything else, NaN
 // included, returns an error wrapping ErrInvalidConfig. Above about 150 dB the
 // float32 cast, not the design, limits how deep the realized sidelobes go.
-// Construction costs O(n log n) arithmetic and a transform plan of about 235
-// bytes per sample (7.7 MB at n = 32768, from the simd f64 README table at
+// Construction costs O(n log n) arithmetic and a transform plan of up to about
+// 245 bytes per sample (7.7 MB at n = 32768, from the simd f64 README table at
 // v1.14.0), so build a window once per (n, attenuationDB) and reuse it.
 func DolphChebyshev(n int, attenuationDB float64) ([]float32, error) {
 	return dolphWindow(n, n+1, attenuationDB)

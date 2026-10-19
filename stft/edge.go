@@ -75,10 +75,11 @@ type EdgeConfig struct {
 // Pinned window memory is bounded by (2*32+2)*FrameSize float32 values plus fixed
 // scratch, independent of the input length. Feed allocates nothing when onFrame
 // does not; Reset and Finish allocate only when a window they need is not in the
-// shared cache (first use in the process, or after eviction). A Dolph-Chebyshev
-// analyzer allocates its evaluation plan and scratch once, at its first window
-// build or, when Reset sees a geometry that can need a window past the cap
-// (FrameSize/2 > 32*hop), in that Reset, so Feed never allocates it. One analyzer
+// shared cache (first use in the process, or after eviction), except that a
+// Dolph-Chebyshev analyzer allocates its evaluation plan and scratch once, at its
+// first window build or, when Reset sees a geometry that can need a window past
+// the cap (FrameSize/2 > 32*hop), in that Reset, and keeps them, so Feed never
+// allocates them. One analyzer
 // is not safe for concurrent use; distinct analyzers may run in different
 // goroutines, because the shared cache is synchronized and its windows are
 // read-only.

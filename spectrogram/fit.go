@@ -78,7 +78,8 @@ func DolphAttenuationDB(dynamicRangeDB, gainDB, adjust float64) float64 {
 // span used before builds none of the windows it keeps while they remain in that
 // cache (see stft.EdgeAnalyzer for eviction and the cap). Feed and Finish are
 // allocation-free when the callback does not allocate; the only allocations are in
-// construction and when a needed window is not in that cache. One Fit is not
+// construction, when a needed window is not in that cache, and the
+// Dolph-Chebyshev plan described at ComputeInto. One Fit is not
 // safe for concurrent use; separate Fits may run concurrently.
 type Fit struct {
 	an  *stft.EdgeAnalyzer
@@ -324,7 +325,9 @@ func (f *Fit) resolveSpan(signalLen int, spanSamples int64) int64 {
 // and writes nothing (the Fit is left reset for that span). On success dst.Data
 // is resliced to the exact length and dst.Bins and dst.Frames are set. It resets
 // the stream first, so calls are independent. Allocation-free once the window
-// cache is warm and dst.Data has the capacity.
+// cache is warm and dst.Data has the capacity, except that a Dolph-Chebyshev Fit
+// allocates its evaluation plan on the first Reset that selects a hop below
+// FrameSize/64 and keeps it.
 func (f *Fit) ComputeInto(dst *Matrix, signal []float32, spanSamples int64) (int, error) {
 	if err := f.Reset(f.resolveSpan(len(signal), spanSamples)); err != nil {
 		return 0, err
