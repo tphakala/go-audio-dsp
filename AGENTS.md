@@ -91,7 +91,7 @@ Unit tests run without external tools; the oracle tests skip when ffmpeg (or, fo
 
 ## Commands
 
-Go version is read from `go.mod` (currently 1.27); golangci-lint is pinned in `.github/workflows/ci.yml` (currently v2.14.0) and must match the local version. The project tracks the latest stable Go, so no shims or build tags for older releases.
+Go version is read from `go.mod` (currently 1.27); golangci-lint is pinned in `.github/workflows/ci.yml` (currently v2.15.0) and must match the local version. The project tracks the latest stable Go, so no shims or build tags for older releases.
 
 ```
 task check        # full local gate: build, vet (amd64, arm64), lint, race tests, scalar-path tests
