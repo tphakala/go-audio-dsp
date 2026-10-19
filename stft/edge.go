@@ -428,8 +428,7 @@ func (a *EdgeAnalyzer) window(m int, drain bool) *edgeWindow {
 			a.buildEntry(e, m, drain)
 			return e
 		}
-		<-e.ready
-		if e.done {
+		if e.wait() {
 			return e
 		}
 		// The builder abandoned the entry; acquire again, possibly as the builder.
@@ -451,7 +450,7 @@ func (a *EdgeAnalyzer) buildEntry(e *edgeWindow, m int, drain bool) {
 	e.sum, e.ok = a.buildWindow(w, m, points, at)
 	e.w, e.done = w, true
 	published = true
-	close(e.ready)
+	e.building.Unlock()
 }
 
 // buildWindow writes into dst (length N, all zero on entry) the m-point shape's
