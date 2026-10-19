@@ -1234,6 +1234,19 @@ func TestDolphGuardsRejectNonFinite(t *testing.T) {
 	isInvalid(t, dolphCentreInto(w, s, math.NaN()), "dolphCentreInto with NaN attenuation")
 }
 
+// Scratch that cannot be built, or a plan shorter than the window, is reported as
+// an invalid configuration instead of yielding an untransformed window.
+func TestDolphScratchRejectsBadSizes(t *testing.T) {
+	_, err := newDolphScratch(0)
+	isInvalid(t, err, "newDolphScratch(0)")
+	s, err := newDolphScratch(8)
+	noErr(t, err)
+	big, err := newDolphScratch(9)
+	noErr(t, err)
+	s.re, s.im = big.re, big.im // buffers of 9 against a plan of capacity 8
+	isInvalid(t, dolphInto(make([]float64, 9), s, 106.5), "dolphInto with a plan shorter than the window")
+}
+
 // A shape that cannot be evaluated yields an all-zero window and ok = false
 // rather than stale or non-finite samples. buildWindow requires a zeroed dst, so
 // the stale-sample half goes through buildFlow, which clears the reused working
