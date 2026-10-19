@@ -6,7 +6,9 @@ import (
 	"math"
 	"math/rand/v2"
 	"slices"
+	"sync"
 	"testing"
+	"time"
 )
 
 // The tests below derive the expected frame schedule and windows from the
@@ -94,6 +96,22 @@ func newEdge(tb testing.TB, n int, shape WindowShape) *EdgeAnalyzer {
 	a, err := NewEdgeAnalyzer(EdgeConfig{FrameSize: n, Shape: shape})
 	noErr(tb, err)
 	return a
+}
+
+// newEdgeCached builds an analyzer over the window cache c.
+func newEdgeCached(tb testing.TB, n int, shape WindowShape, c *edgeWindowCache) *EdgeAnalyzer {
+	tb.Helper()
+	a, err := newEdgeAnalyzer(EdgeConfig{FrameSize: n, Shape: shape}, c)
+	noErr(tb, err)
+	return a
+}
+
+// newEdgeIsolated builds an analyzer over a private cache with the default
+// budget. Reference runs use it so that a wrong cache key cannot make the
+// reference and the analyzer under test read the same wrong window.
+func newEdgeIsolated(tb testing.TB, n int, shape WindowShape) *EdgeAnalyzer {
+	tb.Helper()
+	return newEdgeCached(tb, n, shape, newEdgeWindowCache(edgeWindowCacheBytes))
 }
 
 var hannShape = WindowShape{Family: ShapeHann}
@@ -490,42 +508,97 @@ func requireFramesEqual(t *testing.T, want, got [][]float32, ctx string) {
 	}
 }
 
-// A warmed analyzer rebuilds no window for a repeat geometry. N=2048, Dolph
-// 106.5, hop 175, a 48000-sample clip. The drain windows depend on the clip
-// length modulo the hop, the lead windows only on the hop.
+// edgeTestKey names an edge window by its length and kind, the part of the
+// cache key that varies within one (FrameSize, shape) configuration.
+type edgeTestKey struct {
+	m     int
+	drain bool
+}
+
+// edgeWindowKeys returns the windows an analyzer needs for a clip of l samples at
+// hop s, from the frame model alone: one lead window per start-edge frame, up to
+// the per-kind cap and whatever the clip length, and one drain window per drain
+// frame (a frame with d >= 1 drain zeros), up to the cap. The full window is not
+// included.
+func edgeWindowKeys(n, s, l int) map[edgeTestKey]bool {
+	keys := map[edgeTestKey]bool{}
+	z0 := edgeLead(n, s)
+	for k := range min((z0+s-1)/s, edgeCacheWindows) {
+		keys[edgeTestKey{m: n - (z0 - k*s) + 1}] = true
+	}
+	drainFrames := 0
+	for k := range edgeFrameCount(n, s, l) {
+		if d := k*s + n - z0 - l; d >= 1 && drainFrames < edgeCacheWindows {
+			keys[edgeTestKey{m: n - d + 1, drain: true}] = true
+			drainFrames++
+		}
+	}
+	return keys
+}
+
+// An analyzer builds exactly the windows its geometry needs that its cache does
+// not hold yet. N=2048, Dolph 106.5, hop 175, a 48000-sample clip. The drain
+// windows depend on the clip length modulo the hop, the lead windows only on the
+// hop, and a window of a given length is shared across hops. The expected counts
+// come from edgeWindowKeys, not from the analyzer.
 func TestEdgeWindowCacheReuse(t *testing.T) {
 	const n, hop = 2048, 175
-	a := newEdge(t, n, dolphShape(106.5))
+	shape := dolphShape(106.5)
+	cache := newEdgeWindowCache(edgeWindowCacheBytes)
+	a := newEdgeCached(t, n, shape, cache)
 	sig := noiseSignal(48001, 3)
-
-	// run feeds sig[:l], returns the builds it caused and the number of drain frames.
-	run := func(h, l int) (builds uint64, drainFrames int, frames [][]float32) {
-		before := a.windowBuilds
-		noErr(t, a.Reset(h))
-		collect := func(p []float32) { frames = append(frames, slices.Clone(p)) }
-		a.Feed(sig[:l], collect)
-		inFeed := len(frames)
-		a.Finish(collect)
-		return a.windowBuilds - before, len(frames) - inFeed, frames
+	// The constructor builds the full window and, through Reset(0), the lead
+	// windows of the default hop.
+	seen := map[edgeTestKey]bool{}
+	for k := range edgeWindowKeys(n, a.HopSize(), 0) {
+		if !k.drain {
+			seen[k] = true
+		}
 	}
-	// leadWindows counts frames with lead zeros; drain windows cap at the cache size.
-	leadWindows := func(h int) int { return min((edgeLead(n, h)+h-1)/h, edgeCacheWindows) }
+	sameInt(t, a.windowBuilds, uint64(1+len(seen)), "the constructor builds the full window and the default hop's lead windows into an empty cache")
 
-	b0, d0, first := run(hop, 48000)
-	sameInt(t, b0, uint64(leadWindows(hop)+min(d0, edgeCacheWindows)), "first run builds the lead and drain windows")
-	b1, _, second := run(hop, 48000)
-	sameInt(t, b1, 0, "same hop and length rebuilds nothing")
+	// run feeds sig[:l] at hop h and returns its frames. It asserts the builds
+	// against the keys not seen before in this cache, and that the run stayed
+	// under the per-kind cap (so no build went to the working buffer).
+	run := func(h, l int, ctx string) [][]float32 {
+		t.Helper()
+		keys := edgeWindowKeys(n, h, l)
+		fresh := uint64(0)
+		for k := range keys {
+			if !seen[k] {
+				fresh++
+			}
+			seen[k] = true
+		}
+		before := a.windowBuilds
+		frames, err := runEdge(a, h, sig[:l])
+		noErr(t, err)
+		sameInt(t, a.windowBuilds-before, fresh, ctx+": builds")
+		return frames
+	}
+
+	first := run(hop, 48000, "first run")
+	if len(seen) == 0 {
+		t.Fatal("the key model found no edge window")
+	}
+	second := run(hop, 48000, "same hop and length")
 	requireFramesEqual(t, first, second, "repeat run")
+	run(hop, 48001, "a new length modulo the hop")
 
-	b2, d2, _ := run(hop, 48001)
-	sameInt(t, b2, uint64(min(d2, edgeCacheWindows)), "a new length modulo the hop rebuilds only the drain windows")
-
-	b3, d3, got := run(174, 48000)
-	sameInt(t, b3, uint64(leadWindows(174)+min(d3, edgeCacheWindows)), "a new hop rebuilds the lead and drain windows")
-	fresh := newEdge(t, n, dolphShape(106.5))
-	want, err := runEdge(fresh, 174, sig[:48000])
+	hop175 := edgeWindowKeys(n, hop, 48000)
+	shared := 0
+	for k := range edgeWindowKeys(n, 174, 48000) {
+		if hop175[k] {
+			shared++
+		}
+	}
+	if shared == 0 {
+		t.Fatal("hops 175 and 174 share no window key; the fixture no longer tests sharing across hops")
+	}
+	got := run(174, 48000, "a new hop")
+	want, err := runEdge(newEdgeIsolated(t, n, shape), 174, sig[:48000])
 	noErr(t, err)
-	requireFramesEqual(t, want, got, "hop 174 after hop 175 equals a fresh analyzer")
+	requireFramesEqual(t, want, got, "hop 174 after hop 175 equals an isolated analyzer")
 }
 
 // The drain windows depend on the drain zeros fed when the first drain frame
@@ -536,13 +609,18 @@ func TestEdgeWindowCacheReuse(t *testing.T) {
 // reuse the wrong window.
 func TestEdgeDrainKeyShortClips(t *testing.T) {
 	a := newEdge(t, 1024, dolphShape(100))
+	shared := newEdgeWindowCache(edgeWindowCacheBytes)
 	sig := noiseSignal(550, 8)
 	for _, l := range []int{200, 190, 550, 200, 550} {
 		got, err := runEdge(a, 350, sig[:l])
 		noErr(t, err)
-		want, err := runEdge(newEdge(t, 1024, dolphShape(100)), 350, sig[:l])
+		want, err := runEdge(newEdgeIsolated(t, 1024, dolphShape(100)), 350, sig[:l])
 		noErr(t, err)
 		requireFramesEqual(t, want, got, fmt.Sprintf("L=%d on a reused analyzer", l))
+		// A new analyzer on a cache that already holds the other lengths' windows.
+		got, err = runEdge(newEdgeCached(t, 1024, dolphShape(100), shared), 350, sig[:l])
+		noErr(t, err)
+		requireFramesEqual(t, want, got, fmt.Sprintf("L=%d on a fresh analyzer over a shared cache", l))
 	}
 }
 
@@ -551,14 +629,18 @@ func TestEdgeDrainKeyShortClips(t *testing.T) {
 // hop 2 and hop 3 both fire their first drain frame after 29 zeros and emit two.
 func TestEdgeDrainKeyHop(t *testing.T) {
 	a := newEdge(t, 64, dolphShape(60))
+	shared := newEdgeWindowCache(edgeWindowCacheBytes)
 	sig := noiseSignal(4, 12)
 	for _, hop := range []int{2, 3, 2, 3} {
 		got, err := runEdge(a, hop, sig)
 		noErr(t, err)
-		want, err := runEdge(newEdge(t, 64, dolphShape(60)), hop, sig)
+		want, err := runEdge(newEdgeIsolated(t, 64, dolphShape(60)), hop, sig)
 		noErr(t, err)
 		requireFramesEqual(t, want, got, fmt.Sprintf("hop %d on a reused analyzer", hop))
 		sameInt(t, len(got), 2, "drain frames")
+		got, err = runEdge(newEdgeCached(t, 64, dolphShape(60), shared), hop, sig)
+		noErr(t, err)
+		requireFramesEqual(t, want, got, fmt.Sprintf("hop %d on a fresh analyzer over a shared cache", hop))
 	}
 }
 
@@ -587,8 +669,8 @@ func TestEdgeZeroSumWindow(t *testing.T) {
 }
 
 // One reused analyzer, walked through random (hop, length) steps, produces the
-// same bits as a fresh analyzer for each step. Small hops exceed the cache cap,
-// so the per-frame rebuild buffer is exercised too.
+// same bits as an isolated analyzer for each step. Small hops exceed the cache
+// cap, so the per-frame rebuild buffer is exercised too.
 func TestEdgeCacheTransitions(t *testing.T) {
 	const n, steps = 512, 40
 	for _, shape := range []WindowShape{hannShape, dolphShape(106.5)} {
@@ -600,11 +682,316 @@ func TestEdgeCacheTransitions(t *testing.T) {
 			hop, l := hops[r.IntN(len(hops))], r.IntN(3*n+1)
 			got, err := runEdge(reused, hop, sig[:l])
 			noErr(t, err)
-			want, err := runEdge(newEdge(t, n, shape), hop, sig[:l])
+			want, err := runEdge(newEdgeIsolated(t, n, shape), hop, sig[:l])
 			noErr(t, err)
 			requireFramesEqual(t, want, got, fmt.Sprintf("%v step %d hop %d L %d", shape, step, hop, l))
 		}
 	}
+}
+
+// A new analyzer per step, all over one cache, walked through random (frame
+// size, shape, hop, length) steps, produces the bits of an isolated analyzer.
+// The steps add windows, repeat them, reorder them and, under a budget of three
+// windows, evict most of them between steps; none of it may change an output.
+func TestEdgeCacheSharedTransitions(t *testing.T) {
+	shapes := []WindowShape{hannShape, dolphShape(106.5), dolphShape(60)}
+	sizes := []int{256, 512}
+	hops := []int{1, 3, 60, 127, 174, 175, 256}
+	for _, budget := range []struct {
+		name  string
+		bytes int
+	}{{"large", edgeWindowCacheBytes}, {"three-windows", 3 * 4 * 512}} {
+		t.Run(budget.name, func(t *testing.T) {
+			r := rand.New(rand.NewPCG(41, 42))
+			sig := noiseSignal(3*512, 5)
+			cache := newEdgeWindowCache(budget.bytes)
+			for step := range 60 {
+				n, shape := sizes[r.IntN(len(sizes))], shapes[r.IntN(len(shapes))]
+				hop, l := hops[r.IntN(len(hops))], r.IntN(3*n+1)
+				got, err := runEdge(newEdgeCached(t, n, shape, cache), hop, sig[:l])
+				noErr(t, err)
+				want, err := runEdge(newEdgeIsolated(t, n, shape), hop, sig[:l])
+				noErr(t, err)
+				requireFramesEqual(t, want, got, fmt.Sprintf("step %d n %d %v hop %d L %d", step, n, shape, hop, l))
+				checkEdgeCache(t, cache)
+			}
+		})
+	}
+}
+
+// checkEdgeCache asserts the cache's bookkeeping: the byte count is the sum of its
+// entries, the list and the map hold the same entries, and the budget holds.
+func checkEdgeCache(tb testing.TB, c *edgeWindowCache) {
+	tb.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	sum := 0
+	for k, e := range c.byKey {
+		sum += 4 * k.n
+		if e.elem == nil || e.elem.Value != e {
+			tb.Errorf("entry %v: list element does not point back at it", k)
+		}
+	}
+	sameInt(tb, c.bytes, sum, "cache bytes against the sum of its entries")
+	sameInt(tb, c.lru.Len(), len(c.byKey), "list length against map size")
+	if c.bytes > c.maxBytes && len(c.byKey) > 1 {
+		tb.Errorf("cache holds %d bytes in %d entries, budget %d", c.bytes, len(c.byKey), c.maxBytes)
+	}
+}
+
+// publishEdgeTest fills and publishes an entry acquired with build set, as a
+// builder does.
+func publishEdgeTest(e *edgeWindow, fill float32) {
+	w := make([]float32, e.key.n)
+	for i := range w {
+		w[i] = fill
+	}
+	e.w, e.ok, e.done = w, true, true
+	close(e.ready)
+}
+
+func testEdgeKey(n, m int) edgeKey { return edgeKey{n: n, shape: hannShape, m: m} }
+
+// The cache never holds more than its budget of window data, evicts the least
+// recently used entry (a hit counts as a use), and an evicted entry stays valid
+// for whoever holds it. In-flight entries count toward the budget.
+func TestEdgeWindowCacheBound(t *testing.T) {
+	const n = 64
+	c := newEdgeWindowCache(3 * 4 * n)
+	k := func(m int) edgeKey { return testEdgeKey(n, m) }
+
+	var held *edgeWindow
+	for m := 1; m <= 4; m++ {
+		e, build := c.acquire(k(m))
+		if !build {
+			t.Fatalf("key %d: first acquire is a hit", m)
+		}
+		publishEdgeTest(e, float32(m))
+		if m == 1 {
+			held = e
+		}
+		checkEdgeCache(t, c)
+		if len(c.byKey) > 3 {
+			t.Fatalf("after key %d the cache holds %d entries, budget is 3", m, len(c.byKey))
+		}
+	}
+	if _, ok := c.byKey[k(1)]; ok {
+		t.Error("key 1, the least recently used, is still cached after key 4")
+	}
+	if held.w[0] != 1 || held.w[n-1] != 1 {
+		t.Error("an evicted entry's window changed under its holder")
+	}
+
+	// Touch key 2 so key 3 is the least recently used: a FIFO would evict key 2.
+	if _, build := c.acquire(k(2)); build {
+		t.Fatal("key 2 should still be cached")
+	}
+	e5, build := c.acquire(k(5))
+	if !build {
+		t.Fatal("key 5: first acquire is a hit")
+	}
+	publishEdgeTest(e5, 5)
+	if _, ok := c.byKey[k(3)]; ok {
+		t.Error("key 3 survived although it was the least recently used")
+	}
+	if _, ok := c.byKey[k(2)]; !ok {
+		t.Error("key 2 was evicted although it was just used")
+	}
+	checkEdgeCache(t, c)
+
+	// An evicted key is built again.
+	if _, build := c.acquire(k(1)); !build {
+		t.Error("re-acquiring an evicted key should ask for a build")
+	}
+	checkEdgeCache(t, c)
+}
+
+// An entry being built counts toward the budget and can be evicted, and then
+// completes for its holder without touching the cache's counts. Abandoning an
+// evicted entry leaves a newer entry for the same key alone.
+func TestEdgeWindowCacheInFlight(t *testing.T) {
+	const n = 64
+	c := newEdgeWindowCache(2 * 4 * n)
+	k := func(m int) edgeKey { return testEdgeKey(n, m) }
+
+	inflight, build := c.acquire(k(1))
+	if !build {
+		t.Fatal("first acquire is a hit")
+	}
+	for m := 2; m <= 3; m++ {
+		e, build := c.acquire(k(m))
+		if !build {
+			t.Fatalf("key %d: first acquire is a hit", m)
+		}
+		publishEdgeTest(e, float32(m))
+		checkEdgeCache(t, c)
+	}
+	if _, ok := c.byKey[k(1)]; ok {
+		t.Fatal("the in-flight entry, the least recently used, was not evicted")
+	}
+	bytes := c.bytes
+	publishEdgeTest(inflight, 1)
+	sameInt(t, c.bytes, bytes, "publishing an evicted entry changes the cache's bytes")
+	if !inflight.done || inflight.w[0] != 1 {
+		t.Error("an evicted in-flight entry did not complete for its holder")
+	}
+
+	// A second entry for the same key, then an abandon of a stale one.
+	stale, _ := c.acquire(k(4)) // evicts key 2
+	c.acquire(k(5))             // evicts key 3
+	c.acquire(k(6))             // evicts stale (key 4)
+	if _, ok := c.byKey[k(4)]; ok {
+		t.Fatal("key 4 should have been evicted")
+	}
+	fresh, build := c.acquire(k(4))
+	if !build || fresh == stale {
+		t.Fatal("re-acquiring an evicted in-flight key should give a new entry")
+	}
+	c.abandon(stale)
+	if c.byKey[k(4)] != fresh {
+		t.Error("abandoning a stale entry removed the newer entry for the same key")
+	}
+	checkEdgeCache(t, c)
+}
+
+// A goroutine waiting on an entry whose builder gives up wakes, sees the entry
+// is not done, and gets to build it itself. The timeout turns a missing wake-up
+// into a failure instead of a hang.
+func TestEdgeWindowCacheAbandon(t *testing.T) {
+	c := newEdgeWindowCache(edgeWindowCacheBytes)
+	k := testEdgeKey(64, 7)
+	owner, build := c.acquire(k)
+	if !build {
+		t.Fatal("first acquire is a hit")
+	}
+	acquired := make(chan struct{})
+	result := make(chan bool, 1)
+	go func() {
+		e, build := c.acquire(k)
+		if build || e != owner {
+			result <- false
+			close(acquired)
+			return
+		}
+		close(acquired)
+		<-e.ready
+		_, rebuild := c.acquire(k)
+		result <- !e.done && rebuild
+	}()
+	<-acquired
+	c.abandon(owner)
+	select {
+	case ok := <-result:
+		if !ok {
+			t.Error("the waiter did not see an abandoned entry and take over the build")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiter was not woken by abandon")
+	}
+	checkEdgeCache(t, c)
+}
+
+// A build that panics abandons its entry: nothing stays in the cache for the key,
+// and the next caller builds it.
+func TestEdgeWindowBuildPanicAbandons(t *testing.T) {
+	cache := newEdgeWindowCache(edgeWindowCacheBytes)
+	a := newEdgeCached(t, 64, dolphShape(60), cache)
+	good := a.shape64
+	a.shape64 = nil // evalShape slices it, so the next build panics
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("building with no shape scratch did not panic")
+			}
+		}()
+		a.window(40, false)
+	}()
+	a.shape64 = good
+	checkEdgeCache(t, cache)
+	if _, ok := cache.byKey[edgeKey{n: 64, shape: a.shape, m: 40}]; ok {
+		t.Fatal("the panicked build left its entry in the cache")
+	}
+	if e := a.window(40, false); !e.done || !e.ok {
+		t.Error("the window was not built after the panicked attempt")
+	}
+}
+
+// Many goroutines, each with fresh analyzers over one cache, get the bits of a
+// serial run with isolated analyzers. Under -race this pins that the shared
+// cache and the published windows have no data race. Run with a budget that
+// holds everything and with one that evicts during the builds.
+func TestEdgeAnalyzerConcurrent(t *testing.T) {
+	type cfg struct {
+		n     int
+		shape WindowShape
+		hop   int
+	}
+	cfgs := []cfg{
+		{256, hannShape, 60},
+		{256, dolphShape(106.5), 60},
+		{256, dolphShape(106.5), 61},
+		{512, dolphShape(86.4), 100},
+	}
+	sig := noiseSignal(3*512, 6)
+	want := make([][][]float32, len(cfgs))
+	for i, c := range cfgs {
+		frames, err := runEdge(newEdgeIsolated(t, c.n, c.shape), c.hop, sig[:3*c.n])
+		noErr(t, err)
+		want[i] = frames
+	}
+	for _, budget := range []struct {
+		name  string
+		bytes int
+	}{{"large", edgeWindowCacheBytes}, {"three-windows", 3 * 4 * 512}} {
+		t.Run(budget.name, func(t *testing.T) {
+			cache := newEdgeWindowCache(budget.bytes)
+			var wg sync.WaitGroup
+			for g := range 4 {
+				wg.Go(func() {
+					for range 3 {
+						for j := range cfgs {
+							i := (j + g) % len(cfgs)
+							c := cfgs[i]
+							a, err := newEdgeAnalyzer(EdgeConfig{FrameSize: c.n, Shape: c.shape}, cache)
+							if err != nil {
+								t.Errorf("goroutine %d config %d: %v", g, i, err)
+								return
+							}
+							got, err := runEdge(a, c.hop, sig[:3*c.n])
+							if err != nil {
+								t.Errorf("goroutine %d config %d: %v", g, i, err)
+								return
+							}
+							if !framesBitEqual(want[i], got) {
+								t.Errorf("goroutine %d config %d: frames differ from the serial run", g, i)
+							}
+						}
+					}
+				})
+			}
+			wg.Wait()
+			checkEdgeCache(t, cache)
+		})
+	}
+}
+
+// framesBitEqual reports whether two runs produced the same bits, for callers
+// that cannot use the fatal requireFramesEqual.
+func framesBitEqual(want, got [][]float32) bool {
+	if len(want) != len(got) {
+		return false
+	}
+	for k := range want {
+		if len(want[k]) != len(got[k]) {
+			return false
+		}
+		for i := range want[k] {
+			if math.Float32bits(want[k][i]) != math.Float32bits(got[k][i]) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func TestEdgeAnalyzerConfig(t *testing.T) {
@@ -792,4 +1179,29 @@ func TestEdgeUnevaluableShapeGivesZeroWindow(t *testing.T) {
 			t.Fatalf("window[%d] = %g, want 0", i, v)
 		}
 	}
+}
+
+// A second analyzer with a configuration the first has already run builds no
+// window: edge windows come from the process-wide cache, so only the first
+// analyzer of a (FrameSize, shape) pair in the process pays for them. The
+// configuration is used by no other test, and the assertion does not count the
+// first analyzer's builds because a rerun in one process (go test -count=2)
+// starts with a warm cache.
+func TestEdgeAnalyzerSharesWindowsAcrossInstances(t *testing.T) {
+	const n, hop = 1024, 300
+	shape := dolphShape(97.3)
+	sig := noiseSignal(3*n+17, 31)
+
+	a := newEdge(t, n, shape)
+	first, err := runEdge(a, hop, sig)
+	noErr(t, err)
+
+	b := newEdge(t, n, shape)
+	got, err := runEdge(b, hop, sig)
+	noErr(t, err)
+	sameInt(t, b.windowBuilds, 0, "second analyzer builds (constructor and run)")
+	requireFramesEqual(t, first, got, "second analyzer equals the first")
+	want, err := runEdge(newEdgeIsolated(t, n, shape), hop, sig)
+	noErr(t, err)
+	requireFramesEqual(t, want, got, "second analyzer equals an isolated analyzer")
 }

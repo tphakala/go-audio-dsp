@@ -3,11 +3,12 @@ package stft
 import "testing"
 
 // BenchmarkEdgeAnalyzer runs a 15 s, 24 kHz in-memory clip through a 2048-point
-// EdgeAnalyzer at hop 175. "warm" repeats the same geometry, so the cached edge
-// windows are reused; "newhop" alternates hops 175 and 174, so every Reset
-// rebuilds the start-edge windows (and the drain windows follow the new
-// geometry); "cold" builds a new analyzer for every run, the first-use cost.
-// rebuilds/op counts shape evaluations per operation.
+// EdgeAnalyzer at hop 175. "warm" repeats the same geometry on one analyzer;
+// "newhop" alternates hops 175 and 174, and after warm-up both geometries' windows
+// are in the shared cache, so it measures lookups and should report no rebuilds;
+// "cold" builds a new analyzer over an empty private cache for every run, the
+// first-use cost of a configuration. rebuilds/op counts shape evaluations per
+// operation.
 func BenchmarkEdgeAnalyzer(b *testing.B) {
 	const n, clip = 2048, 15 * 24000
 	sig := testSignal(clip)
@@ -25,7 +26,7 @@ func BenchmarkEdgeAnalyzer(b *testing.B) {
 			b.ReportAllocs()
 			var builds uint64
 			for b.Loop() {
-				a, err := NewEdgeAnalyzer(EdgeConfig{FrameSize: n, Shape: s.shape})
+				a, err := newEdgeAnalyzer(EdgeConfig{FrameSize: n, Shape: s.shape}, newEdgeWindowCache(edgeWindowCacheBytes))
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -59,7 +60,7 @@ func BenchmarkEdgeAnalyzer(b *testing.B) {
 					a.Finish(onFrame)
 				}
 				for i := range len(hops) {
-					run(i) // warm up every geometry, growing the slabs
+					run(i) // warm up every geometry, filling the shared cache
 				}
 				frames := 0
 				count := func([]float32) { frames++ }
@@ -80,8 +81,8 @@ func BenchmarkEdgeAnalyzer(b *testing.B) {
 				}
 				b.ReportMetric(float64(a.windowBuilds-before)/float64(b.N), "rebuilds/op")
 				_ = sink
-				if mode == "warm" && a.windowBuilds != before {
-					b.Fatalf("warm run rebuilt %d windows", a.windowBuilds-before)
+				if a.windowBuilds != before {
+					b.Fatalf("%s run rebuilt %d windows", mode, a.windowBuilds-before)
 				}
 			})
 		}

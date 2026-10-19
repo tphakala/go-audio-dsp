@@ -130,3 +130,38 @@ func TestEdgeAnalyzerZeroAlloc(t *testing.T) {
 		})
 	}
 }
+
+// Alternating between two hops that were both run before neither allocates nor
+// evaluates a window: the second geometry's windows come from the shared cache
+// instead of being rebuilt over the first's. N=256 keeps both geometries under
+// the per-analyzer window cap.
+func TestEdgeAnalyzerHopSwapZeroAlloc(t *testing.T) {
+	const n, l = 256, 6000
+	a, err := NewEdgeAnalyzer(EdgeConfig{FrameSize: n, Shape: WindowShape{Family: ShapeDolphChebyshev, AttenuationDB: 106.5}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := testSignal(l)
+	var sink float64
+	onFrame := func(power []float32) { sink += float64(power[1]) }
+	hops := [...]int{127, 120}
+	i := 0
+	run := func() {
+		if err := a.Reset(hops[i%len(hops)]); err != nil {
+			t.Fatal(err)
+		}
+		i++
+		a.Feed(in, onFrame)
+		a.Finish(onFrame)
+	}
+	run() // warm both geometries
+	run()
+	before := a.windowBuilds
+	if got := testing.AllocsPerRun(20, run); got != 0 {
+		t.Errorf("Reset+Feed+Finish across two hops allocated %v times, want 0", got)
+	}
+	if built := a.windowBuilds - before; built != 0 {
+		t.Errorf("warmed hop swap evaluated %d windows, want 0", built)
+	}
+	_ = sink
+}

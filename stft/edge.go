@@ -8,11 +8,13 @@ import (
 	"github.com/tphakala/simd/f32"
 )
 
-// edgeCacheWindows caps how many edge windows each cache slab (start-edge and
-// drain) keeps. A frame needing a window past the cap is evaluated into a working
-// buffer for that frame, so the output never depends on the cap; only time does.
-// It bounds the analyzer's window memory at (2*edgeCacheWindows + 2) * FrameSize
-// float32 values whatever the hop or the input length.
+// edgeCacheWindows caps how many edge windows an analyzer references per kind
+// (start-edge and drain). A frame needing a window past the cap is evaluated into
+// a working buffer for that frame, so the output never depends on the cap; only
+// time does. The windows an analyzer references are pinned even if the shared
+// cache evicts them, which bounds that memory at (2*edgeCacheWindows + 2) *
+// FrameSize float32 values whatever the hop or the input length (the full window,
+// the working buffer and the two kinds).
 const edgeCacheWindows = 32
 
 // EdgeConfig configures an EdgeAnalyzer.
@@ -57,22 +59,24 @@ type EdgeConfig struct {
 // (DolphChebyshevSymmetric normalizes the peak); the two differ at low attenuation,
 // where the window peaks at its endpoints, and FullWindowSum depends on the choice.
 //
-// Edge windows depend only on the hop, the shape and, for drain frames, on the
-// drain geometry, so the analyzer caches them across Reset calls: the start-edge
-// windows are rebuilt only when the hop changes, and the drain windows only when
-// the hop, the first drain length or the drain frame count changes (for all but
-// very short clips, when L mod S changes). A repeat run on the same geometry
-// builds no window. At most 32 windows are cached per kind; a frame needing one
-// beyond that evaluates it into a working buffer. Cache state never changes the
-// output.
+// An edge window depends only on the frame size, the shape, its length m and
+// whether it is a lead or a drain window, not on the hop or the clip length. Every
+// EdgeAnalyzer in the process takes its windows from one shared cache keyed that
+// way (bounded at 16 MiB of window data, least recently used evicted), so an
+// analyzer whose geometry any analyzer has run before builds none, and two hops
+// that need a window of the same length share it. The analyzer also remembers the
+// windows of its current geometry, so a repeat run does no lookup. At most 32
+// windows are referenced per kind; a frame needing one beyond that evaluates it
+// into a working buffer. Cache state never changes the output.
 //
 // Reset(hop) starts a stream; Feed pushes samples; Finish appends the drain and
 // ends the stream, after which Feed and Finish do nothing until the next Reset.
-// Memory is bounded by (2*32+2)*FrameSize float32 window values plus fixed
+// Pinned window memory is bounded by (2*32+2)*FrameSize float32 values plus fixed
 // scratch, independent of the input length. Feed allocates nothing when onFrame
-// does not; Finish and Reset allocate only when a window slab must grow, the first
-// time a geometry needs more cached windows than any earlier run. Not safe for
-// concurrent use.
+// does not; Reset and Finish allocate only when a window they need is not in the
+// shared cache (first use in the process, or after eviction). One analyzer is not
+// safe for concurrent use; distinct analyzers may run in different goroutines,
+// because the shared cache is synchronized and its windows are read-only.
 type EdgeAnalyzer struct {
 	p     *f32.STFTPlan
 	n     int
@@ -88,20 +92,22 @@ type EdgeAnalyzer struct {
 	spec  []complex64
 	power []float32
 
-	full []float32 // full window with the factor; built once at construction
-	work []float32 // window for a frame past a cache slab
+	cache *edgeWindowCache // where edge windows are shared; the package-wide one outside tests
+
+	full []float32 // full window with the factor; shared and read-only
+	work []float32 // private window for a frame past the per-kind window cap
 	win  []float32 // window of the frame in flight; read by tests via the callback
 
 	shape64 []float64 // shape_m scratch, N+1
 	dolphP  []float64 // Dolph scratch, N/2+1; nil for Hann
 	dolphT  []float64 // Dolph scratch, 2(N+1); nil for Hann
 
-	lead      []float32 // leadCount windows of N, window k has e = z0-k*hop lead zeros
+	lead      [][]float32 // leadCount shared windows of N, window k has e = z0-k*hop lead zeros
 	leadHop   int
 	leadValid bool
 	leadCount int
 
-	drain      []float32 // drainCount windows of N, window j has d = drainD0+j*hop drain zeros
+	drain      [][]float32 // drainCount shared windows of N, window j has d = drainD0+j*hop drain zeros
 	drainHop   int
 	drainD0    int
 	drainValid bool
@@ -111,13 +117,21 @@ type EdgeAnalyzer struct {
 	frame    int64 // frames emitted since Reset
 	finished bool
 
-	windowBuilds uint64 // shape evaluations, for the cache tests
+	windowBuilds uint64 // shape evaluations this analyzer ran, for the cache tests
 }
 
 // NewEdgeAnalyzer builds an EdgeAnalyzer for cfg, ready to stream with the
 // default hop (see Reset). It returns an error wrapping ErrInvalidConfig for an
-// invalid FrameSize or Shape.
+// invalid FrameSize or Shape. Windows already in the shared cache are reused, so
+// construction evaluates the full window only the first time a configuration is
+// seen in the process.
 func NewEdgeAnalyzer(cfg EdgeConfig) (*EdgeAnalyzer, error) {
+	return newEdgeAnalyzer(cfg, sharedEdgeWindows)
+}
+
+// newEdgeAnalyzer is NewEdgeAnalyzer over an explicit window cache, so tests can
+// count builds against a private one.
+func newEdgeAnalyzer(cfg EdgeConfig, cache *edgeWindowCache) (*EdgeAnalyzer, error) {
 	if err := checkFrameSize(cfg.FrameSize); err != nil {
 		return nil, err
 	}
@@ -134,12 +148,14 @@ func NewEdgeAnalyzer(cfg EdgeConfig) (*EdgeAnalyzer, error) {
 		p:       p,
 		n:       n,
 		shape:   cfg.Shape,
+		cache:   cache,
 		buf:     make([]float32, n),
 		spec:    make([]complex64, bins),
 		power:   make([]float32, bins),
-		full:    make([]float32, n),
 		work:    make([]float32, n),
 		shape64: make([]float64, n+1),
+		lead:    make([][]float32, 0, edgeCacheWindows),
+		drain:   make([][]float32, 0, edgeCacheWindows),
 	}
 	if cfg.Shape.Family == ShapeDolphChebyshev {
 		a.dolphP = make([]float64, n/2+1)
@@ -147,12 +163,12 @@ func NewEdgeAnalyzer(cfg EdgeConfig) (*EdgeAnalyzer, error) {
 	}
 	// The full window is shape_(N+1) without its last point. Building it here
 	// also proves the shape is computable at the largest length the analyzer uses.
-	sum, ok := a.buildWindow(a.full, n+1, n, 0)
-	if !ok {
+	fw := a.window(n+1, false)
+	if !fw.ok {
 		return nil, fmt.Errorf("%w: window evaluation lost precision (FrameSize %d, attenuationDB %g)", ErrInvalidConfig, n, cfg.Shape.AttenuationDB)
 	}
-	a.fullSum = sum
-	a.defaultHop = min(max(int(math.Floor(sum+0.5)), 1), n)
+	a.full, a.fullSum = fw.w, fw.sum
+	a.defaultHop = min(max(int(math.Floor(fw.sum+0.5)), 1), n)
 	if err := a.Reset(0); err != nil {
 		return nil, err
 	}
@@ -176,9 +192,10 @@ func (a *EdgeAnalyzer) FullWindowSum() float64 { return a.fullSum }
 
 // Reset starts a new stream with frame advance hop in [1, FrameSize]. A hop of 0
 // selects round(FullWindowSum) clamped to [1, FrameSize]. It keeps the
-// configuration, and the window cache when the geometry allows (see the type
-// documentation). On an invalid hop it returns an error wrapping
-// ErrInvalidConfig and leaves the current stream untouched.
+// configuration and reuses the windows of the current geometry; any others come
+// from the shared cache (see the type documentation). On an invalid hop it
+// returns an error wrapping ErrInvalidConfig and leaves the current stream
+// untouched.
 func (a *EdgeAnalyzer) Reset(hop int) error {
 	if hop == 0 {
 		hop = a.defaultHop
@@ -196,15 +213,15 @@ func (a *EdgeAnalyzer) Reset(hop int) error {
 	return nil
 }
 
-// prepareLead makes the start-edge slab hold the windows for the current hop.
+// prepareLead points a.lead at the shared start-edge windows for the current hop.
 func (a *EdgeAnalyzer) prepareLead() {
 	a.leadCount = min((a.z0+a.hop-1)/a.hop, edgeCacheWindows)
 	if a.leadValid && a.leadHop == a.hop {
 		return
 	}
-	a.lead = growWindows(a.lead, a.leadCount*a.n)
+	a.lead = a.lead[:a.leadCount]
 	for k := range a.leadCount {
-		a.buildFlow(a.lead[k*a.n:(k+1)*a.n], a.z0-k*a.hop)
+		a.lead[k] = a.window(a.n-(a.z0-k*a.hop)+1, false).w
 	}
 	a.leadHop, a.leadValid = a.hop, true
 }
@@ -281,7 +298,7 @@ func (a *EdgeAnalyzer) Finish(onFrame func(power []float32)) {
 	for j := range nDrain {
 		var w []float32
 		if j < a.drainCount {
-			w = a.drain[j*a.n : (j+1)*a.n]
+			w = a.drain[j]
 		} else {
 			a.buildDrain(a.work, d0+j*a.hop)
 			w = a.work
@@ -293,33 +310,33 @@ func (a *EdgeAnalyzer) Finish(onFrame func(power []float32)) {
 	}
 }
 
-// prepareDrain makes the drain slab hold the windows for a drain of nDrain frames
-// whose first holds d0 zeros. Window j depends on the hop and d0+j*hop alone, so
-// the key is the hop, d0 and how many windows the slab holds.
+// prepareDrain points a.drain at the shared windows for a drain of nDrain frames
+// whose first holds d0 zeros. Window j depends on d0+j*hop alone, so the
+// analyzer's own key is the hop, d0 and how many windows it references.
 func (a *EdgeAnalyzer) prepareDrain(d0, nDrain int) {
 	if nDrain == 0 {
-		return // no drain frame; keep the slab for the next stream
+		return // no drain frame; keep the references for the next stream
 	}
 	count := min(nDrain, edgeCacheWindows)
 	if a.drainValid && a.drainHop == a.hop && a.drainD0 == d0 && a.drainCount == count {
 		return
 	}
-	a.drain = growWindows(a.drain, count*a.n)
+	a.drain = a.drain[:count]
 	for j := range count {
-		a.buildDrain(a.drain[j*a.n:(j+1)*a.n], d0+j*a.hop)
+		a.drain[j] = a.window(a.n-(d0+j*a.hop)+1, true).w
 	}
 	a.drainHop, a.drainD0, a.drainCount, a.drainValid = a.hop, d0, count, true
 }
 
 // flowWindow returns the window of the next frame completed from signal samples
-// alone: the full window, a cached start-edge window, or one built for this frame.
+// alone: the full window, a shared start-edge window, or one built for this frame.
 func (a *EdgeAnalyzer) flowWindow() []float32 {
 	e := int64(a.z0) - a.frame*int64(a.hop)
 	switch {
 	case e <= 0:
 		return a.full
 	case a.frame < int64(a.leadCount):
-		return a.lead[int(a.frame)*a.n : (int(a.frame)+1)*a.n]
+		return a.lead[a.frame]
 	}
 	a.buildFlow(a.work, int(e))
 	return a.work
@@ -335,16 +352,67 @@ func (a *EdgeAnalyzer) emit(w []float32, onFrame func(power []float32)) {
 	onFrame(a.power)
 }
 
+// windowLayout returns how many of the m-point shape's leading points a window
+// uses and the slot they start at: m points at slot 0 for a drain window, m-1
+// points ending at the frame's last slot for a lead window. The shared and the
+// working-buffer paths both build through it, so the cache key and the content
+// cannot disagree.
+func (a *EdgeAnalyzer) windowLayout(m int, drain bool) (points, at int) {
+	if drain {
+		return m, 0
+	}
+	return m - 1, a.n - m + 1
+}
+
 // buildFlow builds the window of a frame with e > 0 lead zeros and no drain.
 func (a *EdgeAnalyzer) buildFlow(dst []float32, e int) {
 	m := a.n - e + 1
-	_, _ = a.buildWindow(dst, m, m-1, e)
+	points, at := a.windowLayout(m, false)
+	_, _ = a.buildWindow(dst, m, points, at)
 }
 
 // buildDrain builds the window of a frame holding d >= 1 drain zeros.
 func (a *EdgeAnalyzer) buildDrain(dst []float32, d int) {
 	m := a.n - d + 1
-	_, _ = a.buildWindow(dst, m, m, 0)
+	points, at := a.windowLayout(m, true)
+	_, _ = a.buildWindow(dst, m, points, at)
+}
+
+// window returns the shared entry for the m-point lead or drain window, building
+// it when no analyzer has. The returned entry is read-only. The full window is
+// the lead rule at m = N+1.
+func (a *EdgeAnalyzer) window(m int, drain bool) *edgeWindow {
+	k := edgeKey{n: a.n, shape: a.shape, m: m, drain: drain}
+	for {
+		e, build := a.cache.acquire(k)
+		if build {
+			a.buildEntry(e, m, drain)
+			return e
+		}
+		<-e.ready
+		if e.done {
+			return e
+		}
+		// The builder abandoned the entry; acquire again, possibly as the builder.
+	}
+}
+
+// buildEntry fills and publishes e, which the caller acquired with build set. If
+// the build panics, the deferred abandon removes the entry and wakes its waiters
+// so they retry instead of blocking forever; the panic itself propagates.
+func (a *EdgeAnalyzer) buildEntry(e *edgeWindow, m int, drain bool) {
+	published := false
+	defer func() {
+		if !published {
+			a.cache.abandon(e)
+		}
+	}()
+	w := make([]float32, a.n)
+	points, at := a.windowLayout(m, drain)
+	e.sum, e.ok = a.buildWindow(w, m, points, at)
+	e.w, e.done = w, true
+	published = true
+	close(e.ready)
 }
 
 // buildWindow writes into dst (length N) the m-point shape's first points samples
@@ -396,12 +464,4 @@ func sumFloat64(v []float64) float64 {
 		s += x
 	}
 	return s
-}
-
-// growWindows returns s resized to n values, reusing its capacity when it can.
-func growWindows(s []float32, n int) []float32 {
-	if cap(s) >= n {
-		return s[:n]
-	}
-	return make([]float32, n)
 }

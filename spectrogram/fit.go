@@ -59,10 +59,12 @@ func DolphAttenuationDB(dynamicRangeDB, gainDB, adjust float64) float64 {
 // normalization of Spectrogram (see the package documentation).
 //
 // A Fit runs one stream at a time: Reset starts it, Feed pushes samples, Finish
-// ends it and emits the last, possibly shorter, block. It keeps its window cache
-// across Reset calls (see stft.EdgeAnalyzer). Feed and Finish are allocation-free
-// when the callback does not allocate; the only allocations are in construction
-// and when the window cache first grows. Not safe for concurrent use.
+// ends it and emits the last, possibly shorter, block. Its edge windows come from
+// the process-wide cache of stft.EdgeAnalyzer, so a new Fit for a configuration and
+// span used before builds none. Feed and Finish are allocation-free when the
+// callback does not allocate; the only allocations are in construction and when a
+// needed window is not in that cache. One Fit is not safe for concurrent use;
+// separate Fits may run concurrently.
 type Fit struct {
 	an    *stft.EdgeAnalyzer
 	sc    scaler
@@ -186,7 +188,8 @@ func (f *Fit) fitGeometry(spanSamples int64) (hop, block int, useful int64, err 
 
 // Reset starts a stream for a clip meant to span spanSamples samples (the sox -d
 // value converted to samples; a clip shorter than the span fills fewer columns).
-// It sets Hop and BlockSteps and keeps the window cache when the geometry allows.
+// It sets Hop and BlockSteps and reuses the windows of the current geometry; any
+// others come from the shared edge window cache (see stft.EdgeAnalyzer).
 // spanSamples must be > 0. It returns an error wrapping ErrInvalidConfig if the
 // span is not positive, asks for more columns per second than the sample rate, or
 // leaves a column covering more than 2^31-1 samples; the Fit and the stream then
