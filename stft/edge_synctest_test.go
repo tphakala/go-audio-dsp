@@ -9,18 +9,35 @@ import (
 // These tests pin that nothing the process-wide edge window cache hands out is
 // bound to the testing/synctest bubble that created it (see edgeWindow).
 
-// A window built inside a bubble is reused outside it and in a later bubble, over
-// a private cache and over the shared one NewEdgeAnalyzer uses.
+// Windows built inside a bubble (the full, lead and drain windows of a clip run
+// through Finish) are reused outside it and in a later bubble, over a private
+// cache and over the shared one NewEdgeAnalyzer uses. The default hop keeps every
+// lead and drain frame under the cache cap, so a correct cache rebuilds nothing.
 func TestEdgeWindowCacheAcrossBubbles(t *testing.T) {
 	const n = 512
 	shape := dolphShape(100)
+	sig := noiseSignal(4801, 7)
+	run := func(t *testing.T, a *EdgeAnalyzer) {
+		t.Helper()
+		_, err := runEdge(a, 0, sig)
+		noErr(t, err)
+	}
 	t.Run("private", func(t *testing.T) {
 		cache := newEdgeWindowCache(edgeWindowCacheBytes)
-		synctest.Test(t, func(t *testing.T) { newEdgeCached(t, n, shape, cache) })
+		synctest.Test(t, func(t *testing.T) { run(t, newEdgeCached(t, n, shape, cache)) })
+		drain := false
+		for k := range cache.byKey {
+			drain = drain || k.drain
+		}
+		if !drain {
+			t.Fatal("the bubble run built no drain window")
+		}
 		a := newEdgeCached(t, n, shape, cache)
-		sameInt(t, a.windowBuilds, 0, "builds outside the bubble after it built every window")
+		run(t, a)
+		sameInt(t, a.windowBuilds, 0, "builds outside the bubble after it built the full, lead and drain windows")
 		synctest.Test(t, func(t *testing.T) {
 			a := newEdgeCached(t, n, shape, cache)
+			run(t, a)
 			sameInt(t, a.windowBuilds, 0, "builds in a second bubble")
 		})
 	})
@@ -28,12 +45,14 @@ func TestEdgeWindowCacheAcrossBubbles(t *testing.T) {
 		// An attenuation no other test in the package uses, so the bubble builds the
 		// entries rather than hitting ones another test left in the shared cache.
 		cfg := EdgeConfig{FrameSize: 256, Shape: dolphShape(101.25)}
-		synctest.Test(t, func(t *testing.T) {
-			_, err := NewEdgeAnalyzer(cfg)
+		newShared := func(t *testing.T) {
+			t.Helper()
+			a, err := NewEdgeAnalyzer(cfg)
 			noErr(t, err)
-		})
-		_, err := NewEdgeAnalyzer(cfg)
-		noErr(t, err)
+			run(t, a)
+		}
+		synctest.Test(t, newShared)
+		newShared(t)
 	})
 }
 
