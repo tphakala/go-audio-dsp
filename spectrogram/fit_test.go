@@ -172,7 +172,7 @@ func TestFitFrequencyRange(t *testing.T) {
 		tolDB        float64 // 0 compares bit for bit
 	}{
 		{"48k cap at half the band", 48000, 2048, 0, 12000, 0, 513, 3000, 0},
-		{"384k cap at a quarter of Nyquist", 384000, 2048, 0, 96000, 0, 513, 20000, 0},
+		{"384k cap at half of Nyquist", 384000, 2048, 0, 96000, 0, 513, 20000, 0},
 		{"192k cap at exactly Nyquist", 192000, 1024, 0, 96000, 0, 513, 30000, 0},
 		{"384k cap above Nyquist is Nyquist", 384000, 1024, 0, math.Inf(1), 0, 513, 30000, 0},
 		{"48k min and max off the bin grid", 48000, 1024, 1000, 5000, 22, 107, 3000, 0},
