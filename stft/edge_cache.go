@@ -7,7 +7,7 @@ import (
 
 // edgeWindowCacheBytes bounds the window data the process-wide edge window cache
 // keeps: each entry counts 4*FrameSize bytes (float32 values). The map slot, list
-// element, entry struct and ready channel are not counted (NOT MEASURED), so the
+// element and entry struct are not counted (NOT MEASURED), so the
 // heap held is above this figure.
 // One full set of edge windows for a geometry is at most 2*edgeCacheWindows+1
 // windows: 1.06 MB at FrameSize 4096, 2.1 MB at 8192, 8.5 MB at the Dolph-Chebyshev
@@ -31,16 +31,31 @@ type edgeKey struct {
 }
 
 // edgeWindow is one cache entry. Its fields other than key and elem are written
-// by the single goroutine that built it and published by closing ready; after
-// that nothing writes them, so holders read w lock-free.
+// by its builder, which holds building from acquire until it publishes or
+// abandons the entry; after that nothing writes them, so holders read w
+// lock-free.
+//
+// Waiters lock building rather than wait on a channel or a sync.Cond: the entry
+// is process-wide, and a channel or Cond waiter created in a testing/synctest
+// bubble is bound to it, so touching one from outside is a fatal error. A Mutex
+// has no bubble and blocking on it is not durable.
 type edgeWindow struct {
-	w     []float32     // length n
-	sum   float64       // buildWindow's sum; the full window's sets FullWindowSum
-	ok    bool          // buildWindow's ok
-	done  bool          // true once published; false after ready closes means the build was abandoned
-	ready chan struct{} // closed by the builder after publishing or abandoning
-	key   edgeKey
-	elem  *list.Element // guarded by edgeWindowCache.mu; nil once evicted or abandoned
+	w        []float32  // length n
+	sum      float64    // buildWindow's sum; the full window's sets FullWindowSum
+	ok       bool       // buildWindow's ok
+	done     bool       // true once published; false after building unlocks means the build was abandoned
+	building sync.Mutex // held by the builder until it publishes or abandons
+	key      edgeKey
+	elem     *list.Element // guarded by edgeWindowCache.mu; nil once evicted or abandoned
+}
+
+// wait blocks until the entry's builder publishes or abandons it and reports
+// whether it was published.
+func (e *edgeWindow) wait() bool {
+	e.building.Lock()
+	done := e.done
+	e.building.Unlock()
+	return done
 }
 
 // edgeWindowCache is a byte-bounded LRU of immutable edge windows with one build
@@ -63,7 +78,7 @@ func newEdgeWindowCache(maxBytes int) *edgeWindowCache {
 
 // acquire returns the entry for k. When build is true the entry is new and the
 // caller must fill and publish it, or abandon it. When build is false the entry
-// exists: wait on e.ready, then use it if e.done, else acquire again (its builder
+// exists: use it if e.wait reports it published, else acquire again (its builder
 // gave up). The hit path allocates nothing.
 func (c *edgeWindowCache) acquire(k edgeKey) (e *edgeWindow, build bool) {
 	c.mu.Lock()
@@ -72,7 +87,8 @@ func (c *edgeWindowCache) acquire(k edgeKey) (e *edgeWindow, build bool) {
 		c.lru.MoveToFront(e.elem)
 		return e, false
 	}
-	e = &edgeWindow{key: k, ready: make(chan struct{})}
+	e = &edgeWindow{key: k}
+	e.building.Lock() // before the entry is visible, so no waiter gets in first
 	e.elem = c.lru.PushFront(e)
 	c.byKey[k] = e
 	c.bytes += 4 * k.n
@@ -101,5 +117,5 @@ func (c *edgeWindowCache) abandon(e *edgeWindow) {
 		c.bytes -= 4 * e.key.n
 	}
 	c.mu.Unlock()
-	close(e.ready)
+	e.building.Unlock()
 }
