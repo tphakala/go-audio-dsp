@@ -77,9 +77,10 @@ var dolphGens = []struct {
 // the reference is about 3 ulps. The absolute 1e-9 term (-180 dB re the peak of
 // 1) covers tiny edge samples, where the float64 construction here and scipy's
 // FFT differ by up to about 1.2e-10. The worst case over the fixture is about a
-// quarter of the combined tolerance. The test fails if the periodic or symmetric
-// convention flips, the attenuation maps wrongly, or the normalization moves off
-// the peak.
+// quarter of the combined tolerance (0.2575, the same with the cosine-sum
+// evaluation and with the DFT evaluation). The test fails if the periodic or
+// symmetric convention flips, the attenuation maps wrongly, or the normalization
+// moves off the peak.
 func TestDolphChebyshevAgainstScipyGolden(t *testing.T) {
 	data, err := os.ReadFile("testdata/scipy_chebwin_golden.json")
 	if err != nil {
@@ -298,6 +299,88 @@ func TestDolphChebyshevDomainCorners(t *testing.T) {
 			}
 		}
 	}
+}
+
+// dolphDirectSum is the reference evaluation of the symmetric m-point
+// Dolph-Chebyshev window, peak normalized: the O(m^2) cosine sum that dolph64
+// replaced with one length-m DFT. w[i] = p[0] + 2*sum_{k=1..K} p[k]*cos(pi*k*d/m)
+// with d = m-1-2*i, K = (m-1)/2 and p[k] = T_(m-1)(x0*cos(pi*k/m)), the cosine
+// taken from a table indexed by (k*d) mod 2m so its argument stays small.
+func dolphDirectSum(m int, attenuationDB float64) []float64 {
+	w := make([]float64, m)
+	if m == 1 {
+		w[0] = 1
+		return w
+	}
+	order := float64(m - 1)
+	x0 := math.Cosh(math.Acosh(math.Pow(10, attenuationDB/20)) / order)
+	half := (m - 1) / 2
+	p := make([]float64, half+1)
+	for k := range p {
+		x := x0 * math.Cos(math.Pi*float64(k)/float64(m))
+		if x > 1 {
+			p[k] = math.Cosh(order * math.Acosh(x))
+		} else {
+			p[k] = math.Cos(order * math.Acos(x))
+		}
+	}
+	period := 2 * m
+	tab := make([]float64, period)
+	for j := range tab {
+		tab[j] = math.Cos(math.Pi * float64(j) / float64(m))
+	}
+	for i := range (m + 1) / 2 {
+		d := (m - 1) - 2*i
+		var s float64
+		idx := 0
+		for k := 1; k <= half; k++ {
+			idx += d
+			if idx >= period {
+				idx -= period
+			}
+			s += p[k] * tab[idx]
+		}
+		w[i] = p[0] + 2*s
+		w[m-1-i] = w[i]
+	}
+	peak := slices.Max(w)
+	for i := range w {
+		w[i] /= peak
+	}
+	return w
+}
+
+// TestDolphMatchesDirectSum compares dolph64, the DFT evaluation, with the
+// cosine-sum reference at lengths the scipy golden data does not reach (it stops
+// at n = 8192): odd and even, prime and composite, power-of-two and the lengths
+// around it, and the 32768-point cap, at the ends of the attenuation range. The
+// bound is 1e-12 of the peak, against a worst measured difference of 1.9e-14 (see
+// the t.Logf line).
+func TestDolphMatchesDirectSum(t *testing.T) {
+	lengths := []int{1, 2, 3, 4, 5, 8, 9, 64, 65, 255, 256, 257, 4096, 4097}
+	if !testing.Short() {
+		// About 220 ms each for the reference on the development host.
+		lengths = append(lengths, 32767, 32768, 32769)
+	}
+	const tol = 1e-12
+	var worst float64
+	for _, m := range lengths {
+		for _, att := range []float64{20, 45, 106.5, 200} {
+			got, err := dolph64(m, att)
+			if err != nil {
+				t.Fatalf("m=%d A=%g: %v", m, att, err)
+			}
+			want := dolphDirectSum(m, att)
+			for i := range want {
+				d := math.Abs(got[i] - want[i])
+				worst = max(worst, d)
+				if d > tol {
+					t.Fatalf("m=%d A=%g: w[%d] = %.17g, direct sum %.17g (diff %.3g > %g of peak)", m, att, i, got[i], want[i], d, tol)
+				}
+			}
+		}
+	}
+	t.Logf("worst |dolph64 - direct sum| = %.3g of peak (tolerance %g)", worst, tol)
 }
 
 // TestDolphChebyshevThroughConfig is an end-to-end check that the generators
