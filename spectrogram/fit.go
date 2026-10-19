@@ -64,9 +64,10 @@ func DolphAttenuationDB(dynamicRangeDB, gainDB, adjust float64) float64 {
 //
 // Values are decibels relative to a full-scale sinusoid on a bin centre (0 dB),
 // unclamped, with a finite floor near -200 dB plus GainDB for silence. Rows are
-// all FrameSize/2+1 bins, DC first, so a renderer drawing the picture top-down
-// reads them from the last bin down. Clamping to a display range, colour mapping,
-// axes and PNG encoding stay with the renderer, as for Spectrogram.
+// the bins in [MinHz, MaxHz] (all FrameSize/2+1 bins by default), lowest first,
+// so a renderer drawing the picture top-down reads them from the last row down.
+// Clamping to a display range, colour mapping, axes and PNG encoding stay with
+// the renderer, as for Spectrogram.
 //
 // This is an amplitude normalization, a different level from the energy
 // normalization of Spectrogram (see the package documentation).
