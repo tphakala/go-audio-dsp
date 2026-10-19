@@ -31,9 +31,15 @@
 // not here. Its level is an amplitude normalization, 0 dB for a full-scale
 // sinusoid on a bin centre, so it differs from the energy normalization
 // 1/sum(w^2) of Spectrogram by an amount that depends on the frame size and the
-// window; the two are not interchangeable. Fit leaves presentation to the consumer: it applies no display
-// range, so clamping to a dynamic range, the colormap, the axes (SecondsSpanned
-// and BinHz give the scales) and the image encoding are the renderer's job.
+// window; the two are not interchangeable. FitConfig.MinHz and MaxHz keep only
+// the rows of a frequency range, rounded as in Config, so a renderer that draws
+// below Nyquist does not pay for the rows above it; the transform still runs at
+// full size, the kept rows match the full-band rows within the tolerance above
+// (a range of fewer than 8 bins can differ by one ulp on a SIMD tier), and the
+// sox effect has no such range. Fit leaves presentation to the consumer: it
+// applies no display range, so clamping to a dynamic range, the colormap, the
+// axes (SecondsSpanned and BinHz give the scales) and the image encoding are the
+// renderer's job.
 //
 // Every value type is single channel. Construction may allocate; the per-frame
 // paths (ComputeInto into a caller-sized Matrix, ColumnSource.Feed and Fit.Feed) are

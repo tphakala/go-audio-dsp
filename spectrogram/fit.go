@@ -19,7 +19,9 @@ type FitConfig struct {
 	SampleRate int
 	// FrameSize is the transform length in samples, a power of two >= 2. A
 	// renderer that draws a picture Height pixels tall uses 2*(Height-1), so the
-	// rows (Bins) match its height.
+	// rows (Bins) match its height. A renderer that draws only up to a frequency
+	// below Nyquist can use a FrameSize m times larger and set MaxHz to that
+	// frequency, so Bins still equals Height.
 	FrameSize int
 	// Columns is the column limit: Fit never emits more, and picks its step so a
 	// span fills about this many columns. Required (>= 1).
@@ -29,6 +31,17 @@ type FitConfig struct {
 	Window stft.WindowShape
 	// GainDB is added to every value. It must be finite; BirdNET-Go uses 0.
 	GainDB float64
+	// MinHz and MaxHz select the output frequency range: rows cover the bins
+	// whose centre frequency lies in [MinHz, MaxHz], with the same rounding and
+	// validation as Config. MinHz 0 starts at DC. MaxHz 0, or any value at or
+	// above Nyquist, means Nyquist; a negative MaxHz is rejected. MinHz must be
+	// finite and below the effective MaxHz. Fit still transforms the full
+	// FrameSize, so the range selects which rows are kept and does not change
+	// their values, within the tolerance the package documents (a range of fewer
+	// than 8 bins can differ by one ulp on a SIMD tier); the per-bin work outside
+	// the range is skipped. The sox effect has no frequency range; this is an
+	// extension.
+	MinHz, MaxHz float64
 }
 
 // DolphAttenuationDB returns the Dolph-Chebyshev sidelobe attenuation to pair
@@ -71,10 +84,9 @@ type Fit struct {
 	sc    scaler
 	cfg   FitConfig
 	n     int
-	bins  int
-	acc   []float32 // sum of the power of the frames in the pending block
-	mean  []float32 // acc divided by the block's frame count
-	col   []float32 // output column handed to the callback
+	acc   []float32 // sum of the power of the frames in the pending block; length hi, only [lo, hi) is used
+	mean  []float32 // acc divided by the block's frame count; same layout
+	col   []float32 // output column handed to the callback, length Bins
 	ready bool      // Reset has succeeded at least once
 
 	// Geometry from the last successful Reset.
@@ -103,35 +115,41 @@ func NewFit(cfg FitConfig) (*Fit, error) {
 	if math.IsNaN(cfg.GainDB) || math.IsInf(cfg.GainDB, 0) {
 		return nil, fmt.Errorf("%w: GainDB must be finite, got %g", ErrInvalidConfig, cfg.GainDB)
 	}
+	if err := validateHzRange(cfg.MinHz, cfg.MaxHz); err != nil {
+		return nil, err
+	}
 	an, err := stft.NewEdgeAnalyzer(stft.EdgeConfig{FrameSize: cfg.FrameSize, Shape: cfg.Window})
 	if err != nil {
 		return nil, err
 	}
-	bins := an.NumBins()
-	if int64(bins)*int64(cfg.Columns) > math.MaxInt32 {
+	lo, hi, err := binRange(cfg.SampleRate, cfg.FrameSize, an.NumBins(), cfg.MinHz, cfg.MaxHz)
+	if err != nil {
+		return nil, err
+	}
+	if bins := hi - lo; int64(bins)*int64(cfg.Columns) > math.MaxInt32 {
 		return nil, fmt.Errorf("%w: Columns %d with %d bins gives a matrix of more than %d values", ErrInvalidConfig, cfg.Columns, bins, math.MaxInt32)
 	}
-	sc := newDBScaler(bins, cfg.GainDB)
-	sc.binHz = float64(cfg.SampleRate) / float64(cfg.FrameSize)
+	sc := newDBScaler(lo, hi, float64(cfg.SampleRate)/float64(cfg.FrameSize), cfg.GainDB)
 	return &Fit{
 		an:   an,
 		sc:   sc,
 		cfg:  cfg,
 		n:    cfg.FrameSize,
-		bins: bins,
-		acc:  make([]float32, bins),
-		mean: make([]float32, bins),
-		col:  make([]float32, bins),
+		acc:  make([]float32, hi),
+		mean: make([]float32, hi),
+		col:  make([]float32, hi-lo),
 	}, nil
 }
 
 // FrameSize returns the transform size in samples.
 func (f *Fit) FrameSize() int { return f.n }
 
-// Bins returns the number of frequency rows in each column, FrameSize/2 + 1.
-func (f *Fit) Bins() int { return f.bins }
+// Bins returns the number of frequency rows in each column: the bins in
+// [MinHz, MaxHz], FrameSize/2 + 1 by default.
+func (f *Fit) Bins() int { return f.sc.bins() }
 
-// BinHz returns the centre frequency in Hz of row bin (0 is DC).
+// BinHz returns the centre frequency in Hz of row bin. Row 0 is the lowest kept
+// bin: DC, unless MinHz selects a higher one.
 func (f *Fit) BinHz(bin int) float64 { return f.sc.binHzOf(bin) }
 
 // Hop returns the frame step in samples chosen by the last successful Reset, or 0
@@ -181,7 +199,7 @@ func (f *Fit) fitGeometry(spanSamples int64) (hop, block int, useful int64, err 
 	// The last kept frame is X*B-1. Its end in signal samples is N - Z0 + (X*B-1)*S
 	// for Z0 = ceil((N-S)/2) lead zeros. The product stays far below int64: block*hop
 	// is at most B0 plus half a hop, B0 is below 2^31, and Columns is below 2^31
-	// (NewFit bounds Bins*Columns by MaxInt32 with Bins >= 2).
+	// (NewFit bounds Bins*Columns by MaxInt32 with Bins >= 1).
 	z0 := (f.n - hop + 1) / 2
 	useful = int64(f.n-z0) + (int64(f.cfg.Columns)*int64(block)-1)*int64(hop)
 	return hop, block, useful, nil
@@ -266,7 +284,8 @@ func (f *Fit) frame(power []float32, onColumn func(col []float32, index int)) {
 	if f.emitted >= f.cfg.Columns {
 		return
 	}
-	simdf32.Add(f.acc, f.acc, power)
+	lo, hi := f.sc.lo, f.sc.hi
+	simdf32.Add(f.acc[lo:], f.acc[lo:], power[lo:hi])
 	f.count++
 	if f.count == f.block {
 		f.emit(onColumn)
@@ -275,11 +294,12 @@ func (f *Fit) frame(power []float32, onColumn func(col []float32, index int)) {
 
 // emit converts the pending block's mean power to decibels and hands it out.
 func (f *Fit) emit(onColumn func(col []float32, index int)) {
-	simdf32.Scale(f.mean, f.acc, float32(1/float64(f.count)))
+	lo := f.sc.lo
+	simdf32.Scale(f.mean[lo:], f.acc[lo:], float32(1/float64(f.count)))
 	f.sc.apply(f.col, f.mean)
 	onColumn(f.col, f.emitted)
 	f.emitted++
-	clear(f.acc)
+	clear(f.acc[lo:])
 	f.count = 0
 }
 
@@ -307,13 +327,13 @@ func (f *Fit) ComputeInto(dst *Matrix, signal []float32, spanSamples int64) (int
 	if err := f.Reset(f.resolveSpan(len(signal), spanSamples)); err != nil {
 		return 0, err
 	}
-	need := f.bins * f.NumColumns(int64(len(signal)))
+	bins := f.Bins()
+	need := bins * f.NumColumns(int64(len(signal)))
 	if cap(dst.Data) < need {
 		return 0, ErrBufferTooSmall
 	}
 	dst.Data = dst.Data[:need]
-	dst.Bins = f.bins
-	bins := f.bins
+	dst.Bins = bins
 	onColumn := func(col []float32, index int) {
 		copy(dst.Data[index*bins:(index+1)*bins], col)
 	}
@@ -330,7 +350,7 @@ func (f *Fit) Compute(signal []float32, spanSamples int64) (Matrix, error) {
 	if err := f.Reset(span); err != nil {
 		return Matrix{}, err
 	}
-	m := Matrix{Data: make([]float32, f.bins*f.NumColumns(int64(len(signal))))}
+	m := Matrix{Data: make([]float32, f.Bins()*f.NumColumns(int64(len(signal))))}
 	_, err := f.ComputeInto(&m, signal, span)
 	return m, err
 }

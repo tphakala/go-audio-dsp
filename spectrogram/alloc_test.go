@@ -72,17 +72,23 @@ func TestFitZeroAlloc(t *testing.T) {
 		sig   []float32
 		span  int64
 		cols  int
+		// minHz and maxHz select a frequency range; both 0 keeps every bin.
+		minHz, maxHz float64
 	}{
 		// 1 s at sm: the drain runs and the last block is partial.
-		{"sm hann", 256, 258, hannShape, clip, 15 * soxClipRate, 18},
-		{"sm dolph", 256, 258, dolphShape(100), clip, 15 * soxClipRate, 18},
+		{"sm hann", 256, 258, hannShape, clip, 15 * soxClipRate, 18, 0, 0},
+		{"sm dolph", 256, 258, dolphShape(100), clip, 15 * soxClipRate, 18, 0, 0},
 		// 16 s at lg and a 15 s span: Columns are reached first and the drain is skipped.
-		{"lg hann truncated", 1024, 1026, hannShape, long, 15 * soxClipRate, 1026},
-		{"lg dolph truncated", 1024, 1026, dolphShape(100), long, 15 * soxClipRate, 1026},
+		{"lg hann truncated", 1024, 1026, hannShape, long, 15 * soxClipRate, 1026, 0, 0},
+		{"lg dolph truncated", 1024, 1026, dolphShape(100), long, 15 * soxClipRate, 1026, 0, 0},
+		{"lg dolph ranged", 1024, 1026, dolphShape(100), long, 15 * soxClipRate, 1026, 500, 6000},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := newTestFit(t, soxClipRate, c.n, c.x, c.shape)
+			f, err := NewFit(FitConfig{SampleRate: soxClipRate, FrameSize: c.n, Columns: c.x, Window: c.shape, MinHz: c.minHz, MaxHz: c.maxHz})
+			if err != nil {
+				t.Fatal(err)
+			}
 			m := Matrix{Data: make([]float32, f.Bins()*c.x)}
 			// Checked warm-up: a regression that emits nothing must fail here, not
 			// slip through AllocsPerRun, which ignores the result.

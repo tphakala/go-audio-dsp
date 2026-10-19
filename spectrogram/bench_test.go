@@ -101,7 +101,8 @@ func BenchmarkFit(b *testing.B) {
 // measures what a later render of a configuration costs once the process-wide
 // edge window cache holds its windows (the checked call before the loop fills
 // the cache). The first-use cost of a configuration is the "cold" mode of
-// stft's BenchmarkEdgeAnalyzer.
+// stft's BenchmarkEdgeAnalyzer. The n2048-15s pair is the render of a clip drawn
+// up to half of its band, without and with a MaxHz cap at that frequency.
 func BenchmarkFitFresh(b *testing.B) {
 	const rate = 48000
 	shape := dolphShape(100)
@@ -110,11 +111,17 @@ func BenchmarkFitFresh(b *testing.B) {
 		n       int
 		seconds int
 		columns int
-	}{{"n4096-3s", 4096, 3, 2050}, {"n8192-15s", 8192, 15, 4098}} {
+		maxHz   float64
+	}{
+		{"n4096-3s", 4096, 3, 2050, 0},
+		{"n8192-15s", 8192, 15, 4098, 0},
+		{"n2048-15s", 2048, 15, 1024, 0},
+		{"n2048-15s-max12k", 2048, 15, 1024, 12000},
+	} {
 		b.Run(g.name, func(b *testing.B) {
 			samples := g.seconds * rate
 			sig := sine(samples, rate, 3000, 0.5)
-			cfg := FitConfig{SampleRate: rate, FrameSize: g.n, Columns: g.columns, Window: shape}
+			cfg := FitConfig{SampleRate: rate, FrameSize: g.n, Columns: g.columns, Window: shape, MaxHz: g.maxHz}
 			f, err := NewFit(cfg)
 			if err != nil {
 				b.Fatal(err)

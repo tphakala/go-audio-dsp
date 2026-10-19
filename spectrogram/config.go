@@ -129,13 +129,52 @@ func (c Config) validate() error {
 	if math.IsNaN(c.DynamicRangeDB) || math.IsInf(c.DynamicRangeDB, 0) || c.DynamicRangeDB < 0 {
 		return fmt.Errorf("%w: DynamicRangeDB must be a finite value >= 0, got %g", ErrInvalidConfig, c.DynamicRangeDB)
 	}
-	if math.IsNaN(c.MinHz) || math.IsInf(c.MinHz, 0) || c.MinHz < 0 {
-		return fmt.Errorf("%w: MinHz must be a finite value >= 0, got %g", ErrInvalidConfig, c.MinHz)
+	return validateHzRange(c.MinHz, c.MaxHz)
+}
+
+// validateHzRange checks the MinHz and MaxHz fields of a Config or FitConfig on
+// their own; binRange checks them against the sample rate and frame size.
+func validateHzRange(minHz, maxHz float64) error {
+	if math.IsNaN(minHz) || math.IsInf(minHz, 0) || minHz < 0 {
+		return fmt.Errorf("%w: MinHz must be a finite value >= 0, got %g", ErrInvalidConfig, minHz)
 	}
-	if math.IsNaN(c.MaxHz) || c.MaxHz < 0 {
-		return fmt.Errorf("%w: MaxHz must be >= 0 (0 means Nyquist), got %g", ErrInvalidConfig, c.MaxHz)
+	if math.IsNaN(maxHz) || maxHz < 0 {
+		return fmt.Errorf("%w: MaxHz must be >= 0 (0 means Nyquist), got %g", ErrInvalidConfig, maxHz)
 	}
 	return nil
+}
+
+// binRange resolves a validated [minHz, maxHz] range to the bin range [lo, hi)
+// whose centre frequencies lie in it, for a transform of frameSize samples at
+// sampleRate with numBins bins. A maxHz of 0 or above Nyquist is Nyquist. It
+// returns an error wrapping ErrInvalidConfig when the range is empty. Only
+// sampleRate, frameSize and the two limits enter, so it holds at any sample rate.
+func binRange(sampleRate, frameSize, numBins int, minHz, maxHz float64) (lo, hi int, err error) {
+	binHz := float64(sampleRate) / float64(frameSize)
+	nyquist := float64(sampleRate) / 2
+
+	if maxHz <= 0 || maxHz > nyquist {
+		maxHz = nyquist
+	}
+	// This check must precede the float-to-int conversions below: it bounds minHz
+	// by maxHz <= nyquist, so both conversions stay within numBins whatever finite
+	// minHz the caller passes.
+	if minHz >= maxHz {
+		return 0, 0, fmt.Errorf("%w: MinHz %g must be < MaxHz %g (effective, clamped to Nyquist %g)", ErrInvalidConfig, minHz, maxHz, nyquist)
+	}
+
+	// Include every bin whose center frequency lies in [MinHz, maxHz]. The small
+	// epsilon absorbs floating-point rounding so an exact bin frequency is not
+	// dropped by a hair.
+	const eps = 1e-9
+	lo = int(math.Ceil(minHz/binHz - eps))
+	hi = int(math.Floor(maxHz/binHz+eps)) + 1
+	lo = max(lo, 0)
+	hi = min(hi, numBins)
+	if lo >= hi {
+		return 0, 0, fmt.Errorf("%w: frequency range [%g, %g] Hz selects no bins at FrameSize %d, SampleRate %d", ErrInvalidConfig, minHz, maxHz, frameSize, sampleRate)
+	}
+	return lo, hi, nil
 }
 
 // scaler maps a frame's magnitude-squared power (length NumBins, Analyzer-owned)
@@ -163,28 +202,10 @@ func (sc *scaler) bins() int { return sc.hi - sc.lo }
 // newScaler resolves the bin sub-range and the window normalization for cfg
 // against an already-built analyzer (its NumBins and resolved window).
 func newScaler(cfg Config, a *stft.Analyzer) (scaler, error) {
-	numBins := a.NumBins()
 	binHz := float64(cfg.SampleRate) / float64(a.FrameSize())
-	nyquist := float64(cfg.SampleRate) / 2
-
-	maxHz := cfg.MaxHz
-	if maxHz <= 0 || maxHz > nyquist {
-		maxHz = nyquist
-	}
-	if cfg.MinHz >= maxHz {
-		return scaler{}, fmt.Errorf("%w: MinHz %g must be < MaxHz %g (effective, clamped to Nyquist %g)", ErrInvalidConfig, cfg.MinHz, maxHz, nyquist)
-	}
-
-	// Include every bin whose center frequency lies in [MinHz, maxHz]. The small
-	// epsilon absorbs floating-point rounding so an exact bin frequency is not
-	// dropped by a hair.
-	const eps = 1e-9
-	lo := int(math.Ceil(cfg.MinHz/binHz - eps))
-	hi := int(math.Floor(maxHz/binHz+eps)) + 1
-	lo = max(lo, 0)
-	hi = min(hi, numBins)
-	if lo >= hi {
-		return scaler{}, fmt.Errorf("%w: frequency range [%g, %g] Hz selects no bins at FrameSize %d, SampleRate %d", ErrInvalidConfig, cfg.MinHz, maxHz, a.FrameSize(), cfg.SampleRate)
+	lo, hi, err := binRange(cfg.SampleRate, a.FrameSize(), a.NumBins(), cfg.MinHz, cfg.MaxHz)
+	if err != nil {
+		return scaler{}, err
 	}
 
 	var sumSq float64
@@ -230,16 +251,17 @@ func newScaler(cfg Config, a *stft.Analyzer) (scaler, error) {
 	return sc, nil
 }
 
-// newDBScaler returns the scaler Fit uses: the DB scale over all bins, with a
-// finite power floor, gainDB added and no display clamp. The power it reads is
-// already level-normalized by the producer, so there is no window-energy term
-// (dbAddConst carries the gain alone). It reuses apply's DB path, so the floor
+// newDBScaler returns the scaler Fit uses: the DB scale over the bins [lo, hi),
+// binHz apart, with a finite power floor, gainDB added and no display clamp. The
+// power it reads is already level-normalized by the producer, so there is no
+// window-energy term (dbAddConst carries the gain alone). It reuses apply's DB path, so the floor
 // constant and the Clamp, Log10, Affine order are the ones Spectrogram uses.
-func newDBScaler(bins int, gainDB float64) scaler {
+func newDBScaler(lo, hi int, binHz, gainDB float64) scaler {
 	return scaler{
 		scale:      DB,
-		lo:         0,
-		hi:         bins,
+		lo:         lo,
+		hi:         hi,
+		binHz:      binHz,
 		dbAddConst: float32(gainDB),
 		dbFloor:    dbFloorPower,
 	}

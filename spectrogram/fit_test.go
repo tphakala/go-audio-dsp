@@ -125,29 +125,107 @@ func TestFitAccessors(t *testing.T) {
 // average several frames per column).
 func TestFitLevel(t *testing.T) {
 	for _, shape := range []stft.WindowShape{hannShape, dolph106p5} {
-		for _, n := range []int{256, 512, 1024, 2048} {
-			const rate, samples = 24000, 48000
-			k0 := n / 8
-			sig := make([]float32, samples)
-			for i := range sig {
-				sig[i] = float32(math.Sin(2 * math.Pi * float64(k0) * float64(i) / float64(n)))
+		// 384 kHz is an ultrasonic rate: it picks a different step and block.
+		for _, rate := range []int{24000, 384000} {
+			for _, n := range []int{256, 512, 1024, 2048} {
+				const samples = 48000
+				k0 := n / 8
+				sig := make([]float32, samples)
+				for i := range sig {
+					sig[i] = float32(math.Sin(2 * math.Pi * float64(k0) * float64(i) / float64(n)))
+				}
+				f := newTestFit(t, rate, n, n+2, shape)
+				m, err := f.Compute(sig, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if m.Frames < 8 {
+					t.Fatalf("%s %d Hz N=%d: %d columns, want at least 8", shape.Family, rate, n, m.Frames)
+				}
+				col := m.Column(m.Frames / 2)
+				if got := float64(col[k0]); math.Abs(got) > 0.1 {
+					t.Errorf("%s %d Hz N=%d: mid-clip level at bin %d = %.4f dB, want 0 within 0.1", shape.Family, rate, n, k0, got)
+				}
+				if peak := slices.Max(col); peak != col[k0] {
+					t.Errorf("%s %d Hz N=%d: peak %.3f dB is not at bin %d (%.3f dB)", shape.Family, rate, n, peak, k0, col[k0])
+				}
 			}
-			f := newTestFit(t, rate, n, n+2, shape)
-			m, err := f.Compute(sig, 0)
+		}
+	}
+}
+
+// TestFitFrequencyRange checks that a ranged Fit keeps exactly the rows of the
+// uncapped Fit that lie in [MinHz, MaxHz]: the same values, in a matrix whose
+// stride, Bins and BinHz follow the range. The signal is seeded noise plus an
+// in-band sinusoid so no bin sits on the floor. Rows with at least 8 output bins
+// compare bit for bit; the one-bin row compares within a tolerance, because
+// simd Log10 falls back to a scalar path below a minimum slice length (4 on
+// arm64, f32_arm64.go:770-775 in simd v1.12.0) and the two paths can differ by
+// one ulp.
+func TestFitFrequencyRange(t *testing.T) {
+	cases := []struct {
+		name         string
+		rate, n      int
+		minHz, maxHz float64
+		lo, hi       int
+		sineHz       float64
+		tolDB        float64 // 0 compares bit for bit
+	}{
+		{"48k cap at half the band", 48000, 2048, 0, 12000, 0, 513, 3000, 0},
+		{"384k cap at a quarter of Nyquist", 384000, 2048, 0, 96000, 0, 513, 20000, 0},
+		{"192k cap at exactly Nyquist", 192000, 1024, 0, 96000, 0, 513, 30000, 0},
+		{"384k cap above Nyquist is Nyquist", 384000, 1024, 0, math.Inf(1), 0, 513, 30000, 0},
+		{"48k min and max off the bin grid", 48000, 1024, 1000, 5000, 22, 107, 3000, 0},
+		{"48k one bin", 48000, 1024, 1000, 1040, 22, 23, 1010, 1e-4},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rng := rand.New(rand.NewPCG(7, 9))
+			sig := make([]float32, c.rate)
+			for i := range sig {
+				s := 0.5 * math.Sin(2*math.Pi*c.sineHz*float64(i)/float64(c.rate))
+				sig[i] = float32(s + 0.3*(2*rng.Float64()-1))
+			}
+			const cols = 200
+			shape := dolphShape(100)
+			full := newTestFit(t, c.rate, c.n, cols, shape)
+			var want Matrix
+			want.Data = make([]float32, full.Bins()*cols)
+			if _, err := full.ComputeInto(&want, sig, 0); err != nil {
+				t.Fatal(err)
+			}
+			ranged, err := NewFit(FitConfig{SampleRate: c.rate, FrameSize: c.n, Columns: cols, Window: shape, MinHz: c.minHz, MaxHz: c.maxHz})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if m.Frames < 8 {
-				t.Fatalf("%s N=%d: %d columns, want at least 8", shape.Family, n, m.Frames)
+			got, err := ranged.Compute(sig, 0)
+			if err != nil {
+				t.Fatal(err)
 			}
-			col := m.Column(m.Frames / 2)
-			if got := float64(col[k0]); math.Abs(got) > 0.1 {
-				t.Errorf("%s N=%d: mid-clip level at bin %d = %.4f dB, want 0 within 0.1", shape.Family, n, k0, got)
+			if ranged.Bins() != c.hi-c.lo || got.Bins != ranged.Bins() {
+				t.Fatalf("Bins() = %d, matrix Bins = %d, want %d", ranged.Bins(), got.Bins, c.hi-c.lo)
 			}
-			if peak := slices.Max(col); peak != col[k0] {
-				t.Errorf("%s N=%d: peak %.3f dB is not at bin %d (%.3f dB)", shape.Family, n, peak, k0, col[k0])
+			if wantHz := float64(c.lo) * float64(c.rate) / float64(c.n); ranged.BinHz(0) != wantHz {
+				t.Errorf("BinHz(0) = %v, want %v", ranged.BinHz(0), wantHz)
 			}
-		}
+			if got.Frames != want.Frames || got.Frames < 8 {
+				t.Fatalf("Frames = %d, uncapped %d, want equal and at least 8", got.Frames, want.Frames)
+			}
+			for col := range got.Frames {
+				g, w := got.Column(col), want.Column(col)[c.lo:c.hi]
+				if c.tolDB == 0 {
+					if !sameBits(g, w) {
+						t.Fatalf("column %d differs from uncapped rows [%d, %d)", col, c.lo, c.hi)
+					}
+					continue
+				}
+				for i := range g {
+					if math.Abs(float64(g[i]-w[i])) > c.tolDB {
+						t.Fatalf("column %d row %d = %v, uncapped %v, want within %g dB", col, i, g[i], w[i], c.tolDB)
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -469,6 +547,12 @@ func TestFitConfig(t *testing.T) {
 		{"Hann with attenuation", func(c *FitConfig) { c.Window.AttenuationDB = 40 }},
 		{"Dolph attenuation too low", func(c *FitConfig) { c.Window = stft.WindowShape{Family: stft.ShapeDolphChebyshev, AttenuationDB: 5} }},
 		{"matrix size overflow", func(c *FitConfig) { c.Columns = math.MaxInt32 }},
+		{"MaxHz negative", func(c *FitConfig) { c.MaxHz = -1 }},
+		{"MaxHz NaN", func(c *FitConfig) { c.MaxHz = math.NaN() }},
+		{"MinHz Inf", func(c *FitConfig) { c.MinHz = math.Inf(1) }},
+		{"MinHz not below MaxHz", func(c *FitConfig) { c.MinHz, c.MaxHz = 5000, 4000 }},
+		// binHz is 93.75 here, so [1000, 1030] holds no bin centre.
+		{"empty bin range", func(c *FitConfig) { c.MinHz, c.MaxHz = 1000, 1030 }},
 	}
 	for _, c := range bad {
 		cfg := good
