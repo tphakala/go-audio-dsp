@@ -1231,17 +1231,20 @@ func TestDolphGuardsRejectNonFinite(t *testing.T) {
 }
 
 // A shape that cannot be evaluated yields an all-zero window and ok = false
-// rather than stale or non-finite samples.
+// rather than stale or non-finite samples. buildWindow requires a zeroed dst, so
+// the stale-sample half goes through buildFlow, which clears the reused working
+// buffer first.
 func TestEdgeUnevaluableShapeGivesZeroWindow(t *testing.T) {
 	a := newEdge(t, 16, hannShape)
 	a.shape.Family = ShapeFamily(9) // bypasses validate, which the constructor applies
+	if _, ok := a.buildWindow(make([]float32, 16), 9, 8, 0); ok {
+		t.Error("buildWindow reported ok for an unknown family")
+	}
 	dst := make([]float32, 16)
 	for i := range dst {
 		dst[i] = 1
 	}
-	if _, ok := a.buildWindow(dst, 9, 8, 0); ok {
-		t.Error("buildWindow reported ok for an unknown family")
-	}
+	a.buildFlow(dst, 8) // m = 9
 	for i, v := range dst {
 		if v != 0 {
 			t.Fatalf("window[%d] = %g, want 0", i, v)

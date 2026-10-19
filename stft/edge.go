@@ -367,15 +367,19 @@ func (a *EdgeAnalyzer) windowLayout(m int, drain bool) (points, at int) {
 
 // buildFlow builds the window of a frame with e > 0 lead zeros and no drain.
 func (a *EdgeAnalyzer) buildFlow(dst []float32, e int) {
-	m := a.n - e + 1
-	points, at := a.windowLayout(m, false)
-	_, _ = a.buildWindow(dst, m, points, at)
+	a.buildWork(dst, a.n-e+1, false)
 }
 
 // buildDrain builds the window of a frame holding d >= 1 drain zeros.
 func (a *EdgeAnalyzer) buildDrain(dst []float32, d int) {
-	m := a.n - d + 1
-	points, at := a.windowLayout(m, true)
+	a.buildWork(dst, a.n-d+1, true)
+}
+
+// buildWork builds the m-point lead or drain window into dst, the reused working
+// buffer, clearing first because dst still holds the previous past-cap window.
+func (a *EdgeAnalyzer) buildWork(dst []float32, m int, drain bool) {
+	clear(dst)
+	points, at := a.windowLayout(m, drain)
 	_, _ = a.buildWindow(dst, m, points, at)
 }
 
@@ -408,7 +412,7 @@ func (a *EdgeAnalyzer) buildEntry(e *edgeWindow, m int, drain bool) {
 			a.cache.abandon(e)
 		}
 	}()
-	w := make([]float32, a.n)
+	w := make([]float32, a.n) // fresh, so all zero as buildWindow requires
 	points, at := a.windowLayout(m, drain)
 	e.sum, e.ok = a.buildWindow(w, m, points, at)
 	e.w, e.done = w, true
@@ -416,14 +420,14 @@ func (a *EdgeAnalyzer) buildEntry(e *edgeWindow, m int, drain bool) {
 	close(e.ready)
 }
 
-// buildWindow writes into dst (length N) the m-point shape's first points samples
-// at slots [at, at+points), zero elsewhere, scaled by 2/sum * ((m-1)/N)^2 with sum
-// over those points in float64. It returns that sum and whether the shape
-// evaluated. A non-positive or non-finite sum gives an all-zero window, so no NaN
-// or Inf reaches the transform; a shape that cannot be evaluated does the same
-// (shapes accepted by NewEdgeAnalyzer are evaluable at its full-window length).
+// buildWindow writes into dst (length N, all zero on entry) the m-point shape's
+// first points samples at slots [at, at+points), scaled by 2/sum * ((m-1)/N)^2
+// with sum over those points in float64. It returns that sum and whether the
+// shape evaluated. A non-positive or non-finite sum leaves dst all zero, so no
+// NaN or Inf reaches the transform; a shape that cannot be evaluated does the
+// same (shapes accepted by NewEdgeAnalyzer are evaluable at its full-window
+// length).
 func (a *EdgeAnalyzer) buildWindow(dst []float32, m, points, at int) (sum float64, ok bool) {
-	clear(dst)
 	if !a.evalShape(m) {
 		return 0, false
 	}

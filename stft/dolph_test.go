@@ -3,6 +3,7 @@ package stft
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"slices"
@@ -336,10 +337,14 @@ func TestDolphChebyshevThroughConfig(t *testing.T) {
 }
 
 func BenchmarkDolphChebyshev(b *testing.B) {
-	b.ReportAllocs()
-	for b.Loop() {
-		if _, err := DolphChebyshev(8192, 106.5); err != nil {
-			b.Fatal(err)
-		}
+	for _, n := range []int{256, 2048, 4096, 8192, 32768} {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := DolphChebyshev(n, 106.5); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
