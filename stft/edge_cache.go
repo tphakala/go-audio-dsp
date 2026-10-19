@@ -7,8 +7,8 @@ import (
 
 // edgeWindowCacheBytes bounds the window data the process-wide edge window cache
 // keeps: each entry counts 4*FrameSize bytes (float32 values). The map slot, list
-// element, entry struct and ready channel are not counted (NOT MEASURED, roughly
-// a hundred bytes per entry), so the heap held is slightly above this figure.
+// element, entry struct and ready channel are not counted (NOT MEASURED), so the
+// heap held is above this figure.
 // One full set of edge windows for a geometry is at most 2*edgeCacheWindows+1
 // windows: 1.06 MB at FrameSize 4096, 2.1 MB at 8192, 8.5 MB at the Dolph-Chebyshev
 // cap of 32768. 16 MiB holds several sets at the common sizes and stays small on

@@ -63,11 +63,11 @@ type EdgeConfig struct {
 // whether it is a lead or a drain window, not on the hop or the clip length. Every
 // EdgeAnalyzer in the process takes its windows from one shared cache keyed that
 // way (bounded at 16 MiB of window data, least recently used evicted), so an
-// analyzer whose windows any analyzer has built before builds none of them, and two hops
-// that need a window of the same length share it. The analyzer also remembers the
-// windows of its current geometry, so a repeat run does no lookup. At most 32
-// windows are referenced per kind; a frame needing one beyond that evaluates it
-// into a working buffer. Cache state never changes the output.
+// analyzer builds none of the windows still cached from an earlier build, and two
+// hops that need a window of the same length share it. The analyzer also
+// remembers the windows of its current geometry, so a repeat run does no lookup.
+// At most 32 windows are referenced per kind; a frame needing one beyond that
+// evaluates it into a working buffer. Cache state never changes the output.
 //
 // Reset(hop) starts a stream; Feed pushes samples; Finish appends the drain and
 // ends the stream, after which Feed and Finish do nothing until the next Reset.
@@ -123,8 +123,8 @@ type EdgeAnalyzer struct {
 // NewEdgeAnalyzer builds an EdgeAnalyzer for cfg, ready to stream with the
 // default hop (see Reset). It returns an error wrapping ErrInvalidConfig for an
 // invalid FrameSize or Shape. Windows already in the shared cache are reused, so
-// construction evaluates the full window only the first time a configuration is
-// seen in the process.
+// construction evaluates the full window only when it is not cached: the first
+// time a configuration is seen in the process, or after eviction.
 func NewEdgeAnalyzer(cfg EdgeConfig) (*EdgeAnalyzer, error) {
 	return newEdgeAnalyzer(cfg, sharedEdgeWindows)
 }
@@ -193,7 +193,8 @@ func (a *EdgeAnalyzer) FullWindowSum() float64 { return a.fullSum }
 // Reset starts a new stream with frame advance hop in [1, FrameSize]. A hop of 0
 // selects round(FullWindowSum) clamped to [1, FrameSize]. It keeps the
 // configuration and reuses the windows of the current geometry; any others come
-// from the shared cache (see the type documentation). On an invalid hop it
+// from the shared cache, or are built when not cached (see the type
+// documentation). On an invalid hop it
 // returns an error wrapping ErrInvalidConfig and leaves the current stream
 // untouched.
 func (a *EdgeAnalyzer) Reset(hop int) error {

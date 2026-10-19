@@ -61,11 +61,11 @@ func DolphAttenuationDB(dynamicRangeDB, gainDB, adjust float64) float64 {
 // A Fit runs one stream at a time: Reset starts it, Feed pushes samples, Finish
 // ends it and emits the last, possibly shorter, block. Its edge windows come from
 // the process-wide cache of stft.EdgeAnalyzer, so a new Fit for a configuration and
-// span used before builds none of the windows it keeps (see stft.EdgeAnalyzer for
-// the cap). Feed and Finish are allocation-free when the callback does not
-// allocate; the only allocations are in construction and when a needed window is
-// not in that cache. One Fit is not safe for concurrent use; separate Fits may
-// run concurrently.
+// span used before builds none of the windows it keeps while they remain in that
+// cache (see stft.EdgeAnalyzer for eviction and the cap). Feed and Finish are
+// allocation-free when the callback does not allocate; the only allocations are in
+// construction and when a needed window is not in that cache. One Fit is not
+// safe for concurrent use; separate Fits may run concurrently.
 type Fit struct {
 	an    *stft.EdgeAnalyzer
 	sc    scaler
