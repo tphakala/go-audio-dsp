@@ -6,7 +6,6 @@ import (
 
 	"github.com/tphakala/simd/c64"
 	"github.com/tphakala/simd/f32"
-	"github.com/tphakala/simd/f64"
 )
 
 // edgeCacheWindows caps how many edge windows an analyzer references per kind
@@ -79,10 +78,9 @@ type EdgeConfig struct {
 // Dolph-Chebyshev analyzer allocates its evaluation plan and scratch once, at its
 // first window build or, when Reset sees a geometry that can need a window past
 // the cap (FrameSize/2 > 32*hop), in that Reset, and keeps them, so Feed never
-// allocates them. One analyzer
-// is not safe for concurrent use; distinct analyzers may run in different
-// goroutines, because the shared cache is synchronized and its windows are
-// read-only.
+// allocates them. One analyzer is not safe for concurrent use; distinct
+// analyzers may run in different goroutines, because the shared cache is
+// synchronized and its windows are read-only.
 type EdgeAnalyzer struct {
 	p     *f32.STFTPlan
 	n     int
@@ -104,10 +102,8 @@ type EdgeAnalyzer struct {
 	work []float32 // private window for a frame past the per-kind window cap
 	win  []float32 // window of the frame in flight; read by tests via the callback
 
-	shape64   []float64    // shape_m scratch, N+1
-	dolphRe   []float64    // Dolph DFT scratch, N+1; nil until ensureDolph
-	dolphIm   []float64    // Dolph DFT scratch, N+1; nil until ensureDolph
-	dolphPlan *f64.DFTPlan // Dolph DFT plan of capacity N+1; nil until ensureDolph
+	shape64 []float64     // shape_m scratch, N+1
+	dolph   *dolphScratch // Dolph DFT plan and scratch of capacity N+1; nil until ensureDolph
 
 	lead      [][]float32 // leadCount shared windows of N, window k has e = z0-k*hop lead zeros
 	leadHop   int
@@ -239,16 +235,14 @@ func (a *EdgeAnalyzer) Reset(hop int) error {
 // N, and the first drain frame needs d0 >= 1 of them (Finish), so there are at
 // most (N/2-1)/hop + 1 drain frames, more than 32 only if N/2 > 32*hop.
 func (a *EdgeAnalyzer) ensureDolph() error {
-	if a.shape.Family != ShapeDolphChebyshev || a.dolphPlan != nil {
+	if a.shape.Family != ShapeDolphChebyshev || a.dolph != nil {
 		return nil
 	}
-	plan, err := f64.NewDFTPlan(a.n + 1)
+	s, err := newDolphScratch(a.n + 1)
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+		return err
 	}
-	a.dolphPlan = plan
-	a.dolphRe = make([]float64, a.n+1)
-	a.dolphIm = make([]float64, a.n+1)
+	a.dolph = s
 	return nil
 }
 
@@ -499,7 +493,7 @@ func (a *EdgeAnalyzer) evalShape(m int) bool {
 		if a.ensureDolph() != nil {
 			return false
 		}
-		return dolphCentreInto(w, a.dolphRe, a.dolphIm, a.dolphPlan, a.shape.AttenuationDB) == nil
+		return dolphCentreInto(w, a.dolph, a.shape.AttenuationDB) == nil
 	}
 	return false
 }

@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tphakala/simd/f64"
 )
 
 // The tests below derive the expected frame schedule and windows from the
@@ -1152,9 +1151,9 @@ func TestDolphCentreIntoMatchesDolph64(t *testing.T) {
 			peakNorm, err := dolph64(m, att)
 			noErr(t, err)
 			w := make([]float64, m)
-			plan, err := f64.NewDFTPlan(m)
+			s, err := newDolphScratch(m)
 			noErr(t, err)
-			noErr(t, dolphCentreInto(w, make([]float64, m), make([]float64, m), plan, att))
+			noErr(t, dolphCentreInto(w, s, att))
 			if w[(m-1)/2] != 1 {
 				t.Fatalf("m=%d A=%g: centre sample = %g, want exactly 1", m, att, w[(m-1)/2])
 			}
@@ -1231,9 +1230,9 @@ func TestDolphGuardsRejectNonFinite(t *testing.T) {
 	_, err := dolph64(9, math.NaN())
 	isInvalid(t, err, "dolph64 with NaN attenuation")
 	w := make([]float64, 9)
-	plan, err := f64.NewDFTPlan(9)
+	s, err := newDolphScratch(9)
 	noErr(t, err)
-	isInvalid(t, dolphCentreInto(w, make([]float64, 9), make([]float64, 9), plan, math.NaN()), "dolphCentreInto with NaN attenuation")
+	isInvalid(t, dolphCentreInto(w, s, math.NaN()), "dolphCentreInto with NaN attenuation")
 }
 
 // A shape that cannot be evaluated yields an all-zero window and ok = false

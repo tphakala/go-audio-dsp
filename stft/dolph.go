@@ -96,21 +96,38 @@ func toFloat32(w []float64) []float32 {
 	return out
 }
 
+// dolphScratch is the reusable state of dolphInto: a DFT plan and the
+// split-complex buffers it transforms, all sized for windows of up to the
+// plan's capacity. A DFTPlan is not safe for concurrent use, so neither is this.
+type dolphScratch struct {
+	re, im []float64
+	plan   *f64.DFTPlan
+}
+
+// newDolphScratch builds scratch for windows of up to capacity points.
+func newDolphScratch(capacity int) (*dolphScratch, error) {
+	plan, err := f64.NewDFTPlan(capacity)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
+	return &dolphScratch{re: make([]float64, capacity), im: make([]float64, capacity), plan: plan}, nil
+}
+
 // dolph64 returns the symmetric m-point Dolph-Chebyshev window in float64, peak
-// normalized to 1. It evaluates the window with dolphInto on a plan and scratch
-// built for this call (a DFTPlan is not safe for concurrent use), then divides
-// by the peak. Callers have validated m and attenuationDB.
+// normalized to 1. It evaluates the window with dolphInto on scratch built for
+// this call, then divides by the peak. Callers have validated m and
+// attenuationDB.
 func dolph64(m int, attenuationDB float64) ([]float64, error) {
 	w := make([]float64, m)
 	if m == 1 {
 		w[0] = 1
 		return w, nil
 	}
-	plan, err := f64.NewDFTPlan(m)
+	s, err := newDolphScratch(m)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+		return nil, err
 	}
-	if err := dolphInto(w, make([]float64, m), make([]float64, m), plan, attenuationDB); err != nil {
+	if err := dolphInto(w, s, attenuationDB); err != nil {
 		return nil, err
 	}
 
@@ -124,15 +141,15 @@ func dolph64(m int, attenuationDB float64) ([]float64, error) {
 
 // dolphCentreInto fills w (length m >= 1) with the symmetric m-point
 // Dolph-Chebyshev window normalized so its centre sample, index (m-1)/2, is 1.
-// re and im are caller scratch of length at least m and plan has capacity at
-// least m, so an analyzer can evaluate many lengths without allocating.
-func dolphCentreInto(w, re, im []float64, plan *f64.DFTPlan, attenuationDB float64) error {
+// s has capacity at least m, so an analyzer can evaluate many lengths without
+// allocating.
+func dolphCentreInto(w []float64, s *dolphScratch, attenuationDB float64) error {
 	m := len(w)
 	if m == 1 {
 		w[0] = 1
 		return nil
 	}
-	if err := dolphInto(w, re, im, plan, attenuationDB); err != nil {
+	if err := dolphInto(w, s, attenuationDB); err != nil {
 		return err
 	}
 	return normalizeBy(w, w[(m-1)/2], attenuationDB)
@@ -168,16 +185,16 @@ func normalizeBy(w []float64, norm, attenuationDB float64) error {
 // about 2e-14 of the peak in float64 (TestDolphMatchesDirectSum), so a few
 // float32 samples can differ from it by 1 ulp.
 //
-// re and im are scratch of length at least m, rewritten in full on every call,
-// and plan has capacity at least m. The plan transforms a different length per
-// call without allocating, and its result for a length does not depend on its
-// capacity or on earlier calls (simd f64/dft.go:26-28 at v1.14.0).
-func dolphInto(w, re, im []float64, plan *f64.DFTPlan, attenuationDB float64) error {
+// s has capacity at least m; its buffers are rewritten in full on every call.
+// The plan transforms a different length per call without allocating, and its
+// result for a length does not depend on its capacity or on earlier calls (simd
+// f64/dft.go:26-28 at v1.14.0).
+func dolphInto(w []float64, s *dolphScratch, attenuationDB float64) error {
 	m := len(w)
 	order := float64(m - 1)
 	x0 := math.Cosh(math.Acosh(math.Pow(10, attenuationDB/20)) / order)
 	half := (m - 1) / 2
-	re, im = re[:m], im[:m]
+	re, im, plan := s.re[:m], s.im[:m], s.plan
 
 	// For k <= half < m/2 the cosine is positive, so x > 0 and only the
 	// hyperbolic and the trigonometric branch of T_order are reachable.
