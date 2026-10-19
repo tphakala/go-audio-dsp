@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"slices"
+
+	"github.com/tphakala/simd/f64"
 )
 
 // Domain of the Dolph-Chebyshev generators. The float64 evaluation below loses
@@ -42,8 +44,9 @@ const (
 // n must be in [1, 32768] and attenuationDB in [20, 200]; anything else, NaN
 // included, returns an error wrapping ErrInvalidConfig. Above about 150 dB the
 // float32 cast, not the design, limits how deep the realized sidelobes go.
-// Construction costs O(n^2) arithmetic, so build a window once per (n,
-// attenuationDB) and reuse it.
+// Construction costs O(n log n) arithmetic and a transform plan of up to about
+// 245 bytes per sample (7.7 MB at n = 32768, from the simd f64 README table at
+// v1.14.0), so build a window once per (n, attenuationDB) and reuse it.
 func DolphChebyshev(n int, attenuationDB float64) ([]float32, error) {
 	return dolphWindow(n, n+1, attenuationDB)
 }
@@ -93,9 +96,26 @@ func toFloat32(w []float64) []float32 {
 	return out
 }
 
+// dolphScratch is the reusable state of dolphInto: a DFT plan and the
+// split-complex buffers it transforms, all sized for windows of up to the
+// plan's capacity. A DFTPlan is not safe for concurrent use, so neither is this.
+type dolphScratch struct {
+	re, im []float64
+	plan   *f64.DFTPlan
+}
+
+// newDolphScratch builds scratch for windows of up to capacity points.
+func newDolphScratch(capacity int) (*dolphScratch, error) {
+	plan, err := f64.NewDFTPlan(capacity)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
+	return &dolphScratch{re: make([]float64, capacity), im: make([]float64, capacity), plan: plan}, nil
+}
+
 // dolph64 returns the symmetric m-point Dolph-Chebyshev window in float64, peak
-// normalized to 1. It evaluates the window with dolphInto on freshly allocated
-// scratch, then divides by the peak. Callers have validated m and
+// normalized to 1. It evaluates the window with dolphInto on scratch built for
+// this call, then divides by the peak. Callers have validated m and
 // attenuationDB.
 func dolph64(m int, attenuationDB float64) ([]float64, error) {
 	w := make([]float64, m)
@@ -103,7 +123,13 @@ func dolph64(m int, attenuationDB float64) ([]float64, error) {
 		w[0] = 1
 		return w, nil
 	}
-	dolphInto(w, make([]float64, (m-1)/2+1), make([]float64, 2*m), attenuationDB)
+	s, err := newDolphScratch(m)
+	if err != nil {
+		return nil, err
+	}
+	if err := dolphInto(w, s, attenuationDB); err != nil {
+		return nil, err
+	}
 
 	// The domain keeps the evaluation positive and finite, so the guard in
 	// normalizeBy does not fire for validated input.
@@ -115,15 +141,17 @@ func dolph64(m int, attenuationDB float64) ([]float64, error) {
 
 // dolphCentreInto fills w (length m >= 1) with the symmetric m-point
 // Dolph-Chebyshev window normalized so its centre sample, index (m-1)/2, is 1.
-// p and tab are caller scratch of length at least (m-1)/2+1 and 2*m, so an
-// analyzer can evaluate many lengths without allocating.
-func dolphCentreInto(w, p, tab []float64, attenuationDB float64) error {
+// s has capacity at least m, so an analyzer can evaluate many lengths without
+// allocating.
+func dolphCentreInto(w []float64, s *dolphScratch, attenuationDB float64) error {
 	m := len(w)
 	if m == 1 {
 		w[0] = 1
 		return nil
 	}
-	dolphInto(w, p, tab, attenuationDB)
+	if err := dolphInto(w, s, attenuationDB); err != nil {
+		return err
+	}
 	return normalizeBy(w, w[(m-1)/2], attenuationDB)
 }
 
@@ -146,49 +174,58 @@ func normalizeBy(w []float64, norm, attenuationDB float64) error {
 // so the polynomial's sidelobe plateau sits attenuationDB below its peak (scipy
 // 1.18.1 scipy/signal/windows/_windows.py, chebwin).
 //
-// The spectrum samples are real and mirror-symmetric, so the inverse DFT of a
-// symmetric window reduces to w[i] = p[0] + 2*sum_{k=1..K} p[k]*cos(pi*k*d/m)
-// with d = (m-1) - 2*i and K = (m-1)/2, evaluated for the first half of the
-// window and mirrored. p and tab are scratch of length at least K+1 and 2*m.
-func dolphInto(w, p, tab []float64, attenuationDB float64) {
+// The spectrum samples p[k] are real and mirror-symmetric, so the inverse DFT of
+// a symmetric window reduces to w[i] = p[0] + 2*sum_{k=1..K} p[k]*cos(pi*k*d/m)
+// with d = (m-1) - 2*i and K = (m-1)/2, for the first half of the window, which
+// is then mirrored. With theta_k = pi*k*(m-1)/m this is 2*Re(X[i]) - p[0], where
+// X is the forward DFT of length m of z[k] = p[k]*exp(sqrt(-1)*theta_k) for
+// k <= K and zero above. The identity holds for odd and even m. The DFT length
+// is m itself, on the same frequency grid as scipy and the direct cosine sum, so
+// no sample is resampled. The values agree with the direct cosine sum to within
+// about 2e-14 of the peak in float64 (TestDolphMatchesDirectSum), so a few
+// float32 samples can differ from it by 1 ulp.
+//
+// s has capacity at least m; its buffers are rewritten in full on every call.
+// The plan transforms a different length per call without allocating, and its
+// result for a length does not depend on its capacity or on earlier calls (simd
+// f64/dft.go:26-28 at v1.14.0).
+func dolphInto(w []float64, s *dolphScratch, attenuationDB float64) error {
 	m := len(w)
 	order := float64(m - 1)
 	x0 := math.Cosh(math.Acosh(math.Pow(10, attenuationDB/20)) / order)
 	half := (m - 1) / 2
+	re, im, plan := s.re[:m], s.im[:m], s.plan
 
 	// For k <= half < m/2 the cosine is positive, so x > 0 and only the
 	// hyperbolic and the trigonometric branch of T_order are reachable.
-	p = p[:half+1]
-	for k := range p {
+	period := 2 * int64(m)
+	for k := 0; k <= half; k++ {
 		x := x0 * math.Cos(math.Pi*float64(k)/float64(m))
+		var p float64
 		if x > 1 {
-			p[k] = math.Cosh(order * math.Acosh(x))
+			p = math.Cosh(order * math.Acosh(x))
 		} else {
-			p[k] = math.Cos(order * math.Acos(x))
+			p = math.Cos(order * math.Acos(x))
 		}
+		// k*(m-1) is reduced mod 2m in integers before it is scaled by pi/m, so
+		// the angle stays in [0, 2*pi) and carries no rounding from a large product.
+		r := int64(k) * int64(m-1) % period
+		s, c := math.Sincos(math.Pi * float64(r) / float64(m))
+		re[k], im[k] = p*c, p*s
 	}
+	clear(re[half+1:])
+	clear(im[half+1:])
+	p0 := re[0] // theta_0 = 0, so z[0] = p[0] exactly
 
-	// cos(pi*j/m) for j in [0, 2m): indexing the table by (k*d) mod 2m avoids
-	// evaluating the cosine of large arguments. Indices stay below 2m, which is
-	// below 2^17 at the length cap, so they are safe for a 32-bit int.
-	period := 2 * m
-	tab = tab[:period]
-	for j := range tab {
-		tab[j] = math.Cos(math.Pi * float64(j) / float64(m))
+	// Forward returns 0 and leaves the data untouched when the lengths do not fit
+	// the plan; that must not pass for a transformed window.
+	if plan.Forward(re, im) != m {
+		return fmt.Errorf("%w: Dolph-Chebyshev DFT of length %d does not fit its plan (capacity %d)", ErrInvalidConfig, m, plan.Capacity())
 	}
 	for i := range (m + 1) / 2 {
-		d := (m - 1) - 2*i // in [0, m-1], below period
-		var s float64
-		idx := 0
-		for k := 1; k <= half; k++ {
-			idx += d
-			if idx >= period {
-				idx -= period
-			}
-			s += p[k] * tab[idx]
-		}
-		v := p[0] + 2*s
+		v := 2*re[i] - p0
 		w[i] = v
 		w[m-1-i] = v
 	}
+	return nil
 }

@@ -72,11 +72,17 @@ type EdgeConfig struct {
 // Reset(hop) starts a stream; Feed pushes samples; Finish appends the drain and
 // ends the stream, after which Feed and Finish do nothing until the next Reset.
 // Pinned window memory is bounded by (2*32+2)*FrameSize float32 values plus fixed
-// scratch, independent of the input length. Feed allocates nothing when onFrame
+// scratch, independent of the input length; for Dolph-Chebyshev that scratch
+// includes, once built, a DFT plan and its buffers of up to about 260 bytes per
+// FrameSize sample (see DolphChebyshev). Feed allocates nothing when onFrame
 // does not; Reset and Finish allocate only when a window they need is not in the
-// shared cache (first use in the process, or after eviction). One analyzer is not
-// safe for concurrent use; distinct analyzers may run in different goroutines,
-// because the shared cache is synchronized and its windows are read-only.
+// shared cache (first use in the process, or after eviction), except that a
+// Dolph-Chebyshev analyzer allocates its evaluation plan and scratch once, at its
+// first window build or, when Reset sees a geometry that can need a window past
+// the cap (FrameSize/2 > 32*hop), in that Reset, and keeps them, so Feed never
+// allocates them. One analyzer is not safe for concurrent use; distinct
+// analyzers may run in different goroutines, because the shared cache is
+// synchronized and its windows are read-only.
 type EdgeAnalyzer struct {
 	p     *f32.STFTPlan
 	n     int
@@ -98,9 +104,8 @@ type EdgeAnalyzer struct {
 	work []float32 // private window for a frame past the per-kind window cap
 	win  []float32 // window of the frame in flight; read by tests via the callback
 
-	shape64 []float64 // shape_m scratch, N+1
-	dolphP  []float64 // Dolph scratch, N/2+1; nil for Hann
-	dolphT  []float64 // Dolph scratch, 2(N+1); nil for Hann
+	shape64 []float64     // shape_m scratch, N+1
+	dolph   *dolphScratch // Dolph DFT plan and scratch of capacity N+1; nil until ensureDolph
 
 	lead      [][]float32 // leadCount shared windows of N, window k has e = z0-k*hop lead zeros
 	leadHop   int
@@ -157,10 +162,6 @@ func newEdgeAnalyzer(cfg EdgeConfig, cache *edgeWindowCache) (*EdgeAnalyzer, err
 		lead:    make([][]float32, 0, edgeCacheWindows),
 		drain:   make([][]float32, 0, edgeCacheWindows),
 	}
-	if cfg.Shape.Family == ShapeDolphChebyshev {
-		a.dolphP = make([]float64, n/2+1)
-		a.dolphT = make([]float64, 2*(n+1))
-	}
 	// The full window is shape_(N+1) without its last point. Building it here
 	// also proves the shape is computable at the largest length the analyzer uses.
 	fw := a.window(n+1, false)
@@ -204,6 +205,14 @@ func (a *EdgeAnalyzer) Reset(hop int) error {
 	if hop < 1 || hop > a.n {
 		return fmt.Errorf("%w: hop must be in [1, FrameSize=%d] (0 selects the default), got %d", ErrInvalidConfig, a.n, hop)
 	}
+	// A frame past the per-kind window cap evaluates its window inside Feed or
+	// Finish, where nothing may allocate, so the Dolph plan has to exist by then
+	// even when every cacheable window comes from the shared cache.
+	if a.n/2 > edgeCacheWindows*hop {
+		if err := a.ensureDolph(); err != nil {
+			return err
+		}
+	}
 	a.hop = hop
 	a.z0 = (a.n - hop + 1) / 2
 	a.prepareLead()
@@ -211,6 +220,31 @@ func (a *EdgeAnalyzer) Reset(hop int) error {
 	a.fill = a.z0
 	a.consumed, a.frame = 0, 0
 	a.finished = false
+	return nil
+}
+
+// ensureDolph allocates the Dolph DFT plan and scratch on first use; it does
+// nothing for other shapes or once they exist. The plan has capacity N+1, the
+// longest shape the analyzer evaluates, and serves every shorter length without
+// allocating (simd f64/dft.go:26-28, 96 at v1.14.0). Allocating is allowed only
+// where a window can be missing from the shared cache (the constructor, Reset,
+// Finish) or where Reset has run it ahead of a past-cap frame.
+//
+// Reset runs it ahead when N/2 > 32*hop, a bound that covers both kinds of
+// past-cap window. Lead: ceil(z0/hop) windows are referenced and z0 =
+// (N-hop+1)/2 <= N/2, so more than 32 means z0 > 32*hop. Drain: the drain zeros
+// number floor((N-hop)/2) plus at most ceil(hop/2), which is at most N/2 for even
+// N, and the first drain frame needs d0 >= 1 of them (Finish), so there are at
+// most (N/2-1)/hop + 1 drain frames, more than 32 only if N/2 > 32*hop.
+func (a *EdgeAnalyzer) ensureDolph() error {
+	if a.shape.Family != ShapeDolphChebyshev || a.dolph != nil {
+		return nil
+	}
+	s, err := newDolphScratch(a.n + 1)
+	if err != nil {
+		return err
+	}
+	a.dolph = s
 	return nil
 }
 
@@ -456,13 +490,21 @@ func (a *EdgeAnalyzer) evalShape(m int) bool {
 		hannSymmetric64(w)
 		return true
 	case ShapeDolphChebyshev:
-		return dolphCentreInto(w, a.dolphP, a.dolphT, a.shape.AttenuationDB) == nil
+		// A past-cap frame reaches here from Feed or Finish with the plan already
+		// built by Reset; only a window missing from the shared cache allocates.
+		if a.ensureDolph() != nil {
+			return false
+		}
+		return dolphCentreInto(w, a.dolph, a.shape.AttenuationDB) == nil
 	}
 	return false
 }
 
 // sumFloat64 adds v in order. The sum stays scalar on purpose: it sets the
-// default hop through rounding, which must not depend on the simd kernel tier.
+// default hop through rounding, so it adds no tier dependence of its own. The
+// Dolph window values it adds come from a simd DFT whose results are
+// tolerance-stable, not bit-stable, across CPU tiers (simd f64/dft.go:27-28 at
+// v1.14.0).
 func sumFloat64(v []float64) float64 {
 	var s float64
 	for _, x := range v {
