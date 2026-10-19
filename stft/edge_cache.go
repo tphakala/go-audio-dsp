@@ -31,9 +31,9 @@ type edgeKey struct {
 }
 
 // edgeWindow is one cache entry. Its fields other than key and elem are written
-// by the single goroutine that built it, which holds building from acquire until
-// it publishes or abandons the entry; after that nothing writes them, so holders
-// read w lock-free.
+// by its builder, which holds building from acquire until it publishes or
+// abandons the entry; after that nothing writes them, so holders read w
+// lock-free.
 //
 // Waiters lock building rather than wait on a channel or a sync.Cond: the entry
 // is process-wide, and a channel or Cond waiter created in a testing/synctest
