@@ -72,7 +72,9 @@ type EdgeConfig struct {
 // Reset(hop) starts a stream; Feed pushes samples; Finish appends the drain and
 // ends the stream, after which Feed and Finish do nothing until the next Reset.
 // Pinned window memory is bounded by (2*32+2)*FrameSize float32 values plus fixed
-// scratch, independent of the input length. Feed allocates nothing when onFrame
+// scratch, independent of the input length; for Dolph-Chebyshev that scratch
+// includes, once built, a DFT plan and its buffers of up to about 260 bytes per
+// FrameSize sample (see DolphChebyshev). Feed allocates nothing when onFrame
 // does not; Reset and Finish allocate only when a window they need is not in the
 // shared cache (first use in the process, or after eviction), except that a
 // Dolph-Chebyshev analyzer allocates its evaluation plan and scratch once, at its
