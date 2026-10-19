@@ -9,7 +9,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
 )
 
 // The tests below derive the expected frame schedule and windows from the
@@ -1280,4 +1279,45 @@ func TestEdgeAnalyzerSharesWindowsAcrossInstances(t *testing.T) {
 	want, err := runEdge(newEdgeIsolated(t, n, shape), hop, sig)
 	noErr(t, err)
 	requireFramesEqual(t, want, got, "second analyzer equals an isolated analyzer")
+}
+
+// The Dolph-Chebyshev plan is not built eagerly: an analyzer whose windows all
+// come from the cache, at a hop that cannot reach past the cap, has none, and a
+// Hann analyzer never builds one. Each analyzer uses a private cache so the
+// shared one cannot make the cold row warm. That Reset builds the plan ahead of
+// a past-cap frame is pinned by TestEdgeAnalyzerPastCapFeedAndFinishDoNotAllocateWhenCached.
+func TestEdgeDolphPlanIsLazy(t *testing.T) {
+	const n = 128
+	cache := newEdgeWindowCache(edgeWindowCacheBytes)
+	cfg := EdgeConfig{FrameSize: n, Shape: WindowShape{Family: ShapeDolphChebyshev, AttenuationDB: 106.5}}
+
+	cold, err := newEdgeAnalyzer(cfg, cache)
+	noErr(t, err)
+	if cold.dolph == nil {
+		t.Fatal("cold analyzer evaluated windows at construction but has no plan")
+	}
+
+	// The default hop's windows are now cached, so neither construction nor
+	// Reset(0) evaluates anything.
+	warm, err := newEdgeAnalyzer(cfg, cache)
+	noErr(t, err)
+	if warm.HopSize() < n/64 {
+		t.Fatalf("default hop %d is below FrameSize/64; the row needs a hop that cannot reach past the cap", warm.HopSize())
+	}
+	if warm.dolph != nil {
+		t.Fatal("warm analyzer built a plan at construction")
+	}
+	noErr(t, warm.Reset(0))
+	if warm.dolph != nil {
+		t.Fatal("Reset at the default hop built a plan")
+	}
+
+	hann, err := newEdgeAnalyzer(EdgeConfig{FrameSize: n, Shape: hannShape}, newEdgeWindowCache(edgeWindowCacheBytes))
+	noErr(t, err)
+	noErr(t, hann.Reset(1))
+	hann.Feed(testSignal(400), func([]float32) {})
+	hann.Finish(func([]float32) {})
+	if hann.dolph != nil {
+		t.Fatal("Hann analyzer built a Dolph plan")
+	}
 }
