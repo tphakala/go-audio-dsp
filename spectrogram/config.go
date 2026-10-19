@@ -254,8 +254,9 @@ func newScaler(cfg Config, a *stft.Analyzer) (scaler, error) {
 // newDBScaler returns the scaler Fit uses: the DB scale over the bins [lo, hi),
 // binHz apart, with a finite power floor, gainDB added and no display clamp. The
 // power it reads is already level-normalized by the producer, so there is no
-// window-energy term (dbAddConst carries the gain alone). It reuses apply's DB path, so the floor
-// constant and the Clamp, Log10, Affine order are the ones Spectrogram uses.
+// window-energy term (dbAddConst carries the gain alone). It reuses apply's DB
+// path, so the floor constant and the Clamp, Log10, Affine order are the ones
+// Spectrogram uses.
 func newDBScaler(lo, hi int, binHz, gainDB float64) scaler {
 	return scaler{
 		scale:      DB,

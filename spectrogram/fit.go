@@ -81,12 +81,14 @@ func DolphAttenuationDB(dynamicRangeDB, gainDB, adjust float64) float64 {
 // construction and when a needed window is not in that cache. One Fit is not
 // safe for concurrent use; separate Fits may run concurrently.
 type Fit struct {
-	an    *stft.EdgeAnalyzer
-	sc    scaler
-	cfg   FitConfig
-	n     int
-	acc   []float32 // sum of the power of the frames in the pending block; length hi, only [lo, hi) is used
-	mean  []float32 // acc divided by the block's frame count; same layout
+	an  *stft.EdgeAnalyzer
+	sc  scaler
+	cfg FitConfig
+	n   int
+	// acc sums the power of the frames in the pending block, then holds their mean
+	// while emit converts it. Its length is hi and only [lo, hi) is used, because
+	// scaler.apply reads its input by absolute bin.
+	acc   []float32
 	col   []float32 // output column handed to the callback, length Bins
 	ready bool      // Reset has succeeded at least once
 
@@ -132,13 +134,12 @@ func NewFit(cfg FitConfig) (*Fit, error) {
 	}
 	sc := newDBScaler(lo, hi, float64(cfg.SampleRate)/float64(cfg.FrameSize), cfg.GainDB)
 	return &Fit{
-		an:   an,
-		sc:   sc,
-		cfg:  cfg,
-		n:    cfg.FrameSize,
-		acc:  make([]float32, hi),
-		mean: make([]float32, hi),
-		col:  make([]float32, hi-lo),
+		an:  an,
+		sc:  sc,
+		cfg: cfg,
+		n:   cfg.FrameSize,
+		acc: make([]float32, hi),
+		col: make([]float32, hi-lo),
 	}, nil
 }
 
@@ -295,12 +296,12 @@ func (f *Fit) frame(power []float32, onColumn func(col []float32, index int)) {
 
 // emit converts the pending block's mean power to decibels and hands it out.
 func (f *Fit) emit(onColumn func(col []float32, index int)) {
-	lo := f.sc.lo
-	simdf32.Scale(f.mean[lo:], f.acc[lo:], float32(1/float64(f.count)))
-	f.sc.apply(f.col, f.mean)
+	acc := f.acc[f.sc.lo:]
+	simdf32.Scale(acc, acc, float32(1/float64(f.count)))
+	f.sc.apply(f.col, f.acc)
 	onColumn(f.col, f.emitted)
 	f.emitted++
-	clear(f.acc[lo:])
+	clear(acc)
 	f.count = 0
 }
 
