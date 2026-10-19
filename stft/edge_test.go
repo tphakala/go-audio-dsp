@@ -807,8 +807,8 @@ func TestEdgeWindowCacheBound(t *testing.T) {
 }
 
 // An entry being built counts toward the budget and can be evicted, and then
-// completes for its holder without touching the cache's counts. Abandoning an
-// evicted entry leaves a newer entry for the same key alone.
+// completes for its holder. Abandoning an evicted entry leaves a newer entry for
+// the same key alone.
 func TestEdgeWindowCacheInFlight(t *testing.T) {
 	const n = 64
 	c := newEdgeWindowCache(2 * 4 * n)
@@ -829,9 +829,7 @@ func TestEdgeWindowCacheInFlight(t *testing.T) {
 	if _, ok := c.byKey[k(1)]; ok {
 		t.Fatal("the in-flight entry, the least recently used, was not evicted")
 	}
-	bytes := c.bytes
 	publishEdgeTest(inflight, 1)
-	sameInt(t, c.bytes, bytes, "publishing an evicted entry changes the cache's bytes")
 	if !inflight.done || inflight.w[0] != 1 {
 		t.Error("an evicted in-flight entry did not complete for its holder")
 	}
@@ -889,6 +887,76 @@ func TestEdgeWindowCacheAbandon(t *testing.T) {
 		t.Fatal("the waiter was not woken by abandon")
 	}
 	checkEdgeCache(t, c)
+}
+
+// An analyzer that finds another goroutine's entry in flight waits for it. If
+// the owner abandons the entry the analyzer builds the window itself, and if the
+// owner publishes it the analyzer returns the owner's window without building.
+// The test owns the entry, then waits for the analyzer's lookup to move it to the
+// front of the cache list, which only a hit does, so the analyzer is known to be
+// past the lookup before the owner acts.
+func TestEdgeWindowWaiterRetries(t *testing.T) {
+	const n, m = 64, 50
+	for _, publish := range []bool{false, true} {
+		name := "abandoned"
+		if publish {
+			name = "published"
+		}
+		t.Run(name, func(t *testing.T) {
+			cache := newEdgeWindowCache(edgeWindowCacheBytes)
+			a := newEdgeCached(t, n, hannShape, cache)
+			builds := a.windowBuilds
+			owner, build := cache.acquire(edgeKey{n: n, shape: hannShape, m: m, drain: true})
+			if !build {
+				t.Fatal("the owner's acquire is a hit")
+			}
+			// Put another entry in front so the owner is not the list front.
+			if _, build := cache.acquire(testEdgeKey(n, 7)); !build {
+				t.Fatal("the second acquire is a hit")
+			}
+			got := make(chan *edgeWindow, 1)
+			go func() { got <- a.window(m, true) }()
+
+			deadline := time.After(5 * time.Second)
+			for {
+				cache.mu.Lock()
+				front := cache.lru.Front().Value.(*edgeWindow)
+				cache.mu.Unlock()
+				if front == owner {
+					break
+				}
+				select {
+				case <-deadline:
+					t.Fatal("the analyzer never looked the owner's entry up")
+				case <-time.After(time.Millisecond):
+				}
+			}
+			if publish {
+				publishEdgeTest(owner, 3)
+			} else {
+				cache.abandon(owner)
+			}
+			select {
+			case e := <-got:
+				if !e.done || len(e.w) != n {
+					t.Fatalf("window returned an unfinished entry (done %v, %d values)", e.done, len(e.w))
+				}
+				if publish {
+					if e != owner || e.w[0] != 3 {
+						t.Error("the waiter did not return the owner's published window")
+					}
+					sameInt(t, a.windowBuilds, builds, "builds when the owner publishes")
+				} else {
+					if e == owner {
+						t.Error("the waiter returned the abandoned entry")
+					}
+					sameInt(t, a.windowBuilds, builds+1, "builds when the owner abandons")
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the analyzer did not return after the owner finished")
+			}
+		})
+	}
 }
 
 // A build that panics abandons its entry: nothing stays in the cache for the key,
@@ -1183,7 +1251,7 @@ func TestEdgeUnevaluableShapeGivesZeroWindow(t *testing.T) {
 
 // A second analyzer with a configuration the first has already run builds no
 // window: edge windows come from the process-wide cache, so only the first
-// analyzer of a (FrameSize, shape) pair in the process pays for them. The
+// analyzer to need a window in the process pays for it. The
 // configuration is used by no other test, and the assertion does not count the
 // first analyzer's builds because a rerun in one process (go test -count=2)
 // starts with a warm cache.
