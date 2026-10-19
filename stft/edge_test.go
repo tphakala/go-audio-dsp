@@ -852,19 +852,24 @@ func TestEdgeWindowCacheInFlight(t *testing.T) {
 	checkEdgeCache(t, c)
 }
 
-// hangGuard returns a channel that fires once nine tenths of the time left until
-// t's deadline (go test -timeout) when it is called have passed, or never when
-// the run has no deadline. A wait that selects on it turns a missed wake-up into
-// a failure with a message before the test binary's timeout panic, without a
-// fixed real-time bound that a loaded machine could overrun on a correct build.
-// Arm it outside any synctest bubble, where timers are real.
+// hangGuardMax caps a hang guard. One missed wake-up then costs a minute instead
+// of most of the package's -timeout, and a test binary run without
+// -test.timeout (built with go test -c and run on the target) still fails instead
+// of hanging. A correct build wakes these waiters in well under a millisecond.
+const hangGuardMax = time.Minute
+
+// hangGuard returns a channel that fires after nine tenths of the time left until
+// t's deadline (go test -timeout) when it is called, capped at hangGuardMax, or
+// after hangGuardMax when the run has no deadline. A wait that selects on it
+// turns a missed wake-up into a failure with a message before the test binary's
+// timeout panic. Arm it outside any synctest bubble, where timers are real.
 func hangGuard(t *testing.T) <-chan time.Time {
 	t.Helper()
-	deadline, ok := t.Deadline()
-	if !ok {
-		return nil
+	wait := hangGuardMax
+	if deadline, ok := t.Deadline(); ok {
+		wait = min(wait, time.Until(deadline)*9/10)
 	}
-	return time.After(time.Until(deadline) * 9 / 10)
+	return time.After(wait)
 }
 
 // A goroutine waiting on an entry whose builder gives up wakes, sees the entry
