@@ -35,8 +35,9 @@ const (
 // window gets worse in two ways, at a point that rises with n. Its equivalent
 // noise bandwidth is smallest near 30.5 dB at n = 256, 33.5 dB at n = 512,
 // 36.5 dB at n = 1024 and 42.5 dB at n = 4096, and grows again below that. The
-// window also peaks at its endpoints instead of the center: at 40 dB and below
-// for n = 512, and up to at least 57.5 dB for n = 4096 (center peak from 60 dB).
+// window also peaks at its endpoints instead of the center: at 43 dB and below
+// for n = 512 (center peak from 43.5 dB) and at 59.5 dB and below for n = 4096
+// (center peak from 60 dB).
 //
 // n must be in [1, 32768] and attenuationDB in [20, 200]; anything else, NaN
 // included, returns an error wrapping ErrInvalidConfig. Above about 150 dB the
