@@ -61,7 +61,7 @@ func TestEdgeWindowCacheAcrossBubbles(t *testing.T) {
 // owner publishes it the analyzer returns the owner's window without building.
 // This holds with no bubble and whichever side of a bubble the owner and the
 // waiter are on. The owner acts only once awaitEdgeFront has seen the waiter's
-// lookup, and acts even if it timed out so a stuck waiter is released.
+// lookup, and acts even if its guard fired so a stuck waiter is released.
 func TestEdgeWindowWaiterRetries(t *testing.T) {
 	const n, m = 64, 50
 	sides := []struct {
@@ -99,10 +99,11 @@ func TestEdgeWindowWaiterRetries(t *testing.T) {
 				case side.ownerBubble:
 					owners := make(chan *edgeWindow, 1)
 					seen := make(chan bool, 1)
+					guard := hangGuard(t)
 					go func() {
 						o := <-owners
 						go lookup()
-						seen <- awaitEdgeFront(cache, o)
+						seen <- awaitEdgeFront(cache, o, guard)
 					}()
 					synctest.Test(t, func(t *testing.T) {
 						owner = own(t)
@@ -113,8 +114,9 @@ func TestEdgeWindowWaiterRetries(t *testing.T) {
 				case side.waitBubble:
 					owner = own(t)
 					seen := make(chan bool, 1)
+					guard := hangGuard(t)
 					go func() {
-						ok := awaitEdgeFront(cache, owner)
+						ok := awaitEdgeFront(cache, owner, guard)
 						finishEdgeOwner(cache, owner, publish)
 						seen <- ok
 					}()
@@ -123,7 +125,7 @@ func TestEdgeWindowWaiterRetries(t *testing.T) {
 				default:
 					owner = own(t)
 					go lookup()
-					looked = awaitEdgeFront(cache, owner)
+					looked = awaitEdgeFront(cache, owner, hangGuard(t))
 					finishEdgeOwner(cache, owner, publish)
 				}
 				if !looked {
@@ -151,11 +153,10 @@ func finishEdgeOwner(c *edgeWindowCache, owner *edgeWindow, publish bool) {
 	c.abandon(owner)
 }
 
-// awaitEdgeFront reports whether e became the front of c's list within 5 s of
-// real time; after the owner put another entry in front, only a hit on e moves it
-// there. It must run outside any bubble, where its timers are real.
-func awaitEdgeFront(c *edgeWindowCache, e *edgeWindow) bool {
-	deadline := time.After(5 * time.Second)
+// awaitEdgeFront reports whether e became the front of c's list before guard
+// (from hangGuard) fired; after the owner put another entry in front, only a hit
+// on e moves it there. It must run outside any bubble, where its timers are real.
+func awaitEdgeFront(c *edgeWindowCache, e *edgeWindow, guard <-chan time.Time) bool {
 	for {
 		c.mu.Lock()
 		front := c.lru.Front().Value.(*edgeWindow)
@@ -164,7 +165,7 @@ func awaitEdgeFront(c *edgeWindowCache, e *edgeWindow) bool {
 			return true
 		}
 		select {
-		case <-deadline:
+		case <-guard:
 			return false
 		case <-time.After(time.Millisecond):
 		}
@@ -173,26 +174,26 @@ func awaitEdgeFront(c *edgeWindowCache, e *edgeWindow) bool {
 
 // checkEdgeWaiter checks the entry a waiting window lookup returned: the owner's
 // when it published, a fresh build when it abandoned.
-func checkEdgeWaiter(tb testing.TB, got <-chan *edgeWindow, a *EdgeAnalyzer, owner *edgeWindow, builds uint64, publish bool) {
-	tb.Helper()
+func checkEdgeWaiter(t *testing.T, got <-chan *edgeWindow, a *EdgeAnalyzer, owner *edgeWindow, builds uint64, publish bool) {
+	t.Helper()
 	var e *edgeWindow
 	select {
 	case e = <-got:
-	case <-time.After(5 * time.Second):
-		tb.Fatal("the analyzer did not return after the owner finished")
+	case <-hangGuard(t):
+		t.Fatal("the analyzer did not return after the owner finished")
 	}
 	if !e.done || len(e.w) != a.n {
-		tb.Fatalf("window returned an unfinished entry (done %v, %d values)", e.done, len(e.w))
+		t.Fatalf("window returned an unfinished entry (done %v, %d values)", e.done, len(e.w))
 	}
 	if publish {
 		if e != owner || e.w[0] != 3 {
-			tb.Error("the waiter did not return the owner's published window")
+			t.Error("the waiter did not return the owner's published window")
 		}
-		sameInt(tb, a.windowBuilds, builds, "builds when the owner publishes")
+		sameInt(t, a.windowBuilds, builds, "builds when the owner publishes")
 		return
 	}
 	if e == owner {
-		tb.Error("the waiter returned the abandoned entry")
+		t.Error("the waiter returned the abandoned entry")
 	}
-	sameInt(tb, a.windowBuilds, builds+1, "builds when the owner abandons")
+	sameInt(t, a.windowBuilds, builds+1, "builds when the owner abandons")
 }

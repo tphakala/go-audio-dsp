@@ -852,8 +852,23 @@ func TestEdgeWindowCacheInFlight(t *testing.T) {
 	checkEdgeCache(t, c)
 }
 
+// hangGuard returns a channel that fires once nine tenths of the time left until
+// t's deadline (go test -timeout) when it is called have passed, or never when
+// the run has no deadline. A wait that selects on it turns a missed wake-up into
+// a failure with a message before the test binary's timeout panic, without a
+// fixed real-time bound that a loaded machine could overrun on a correct build.
+// Arm it outside any synctest bubble, where timers are real.
+func hangGuard(t *testing.T) <-chan time.Time {
+	t.Helper()
+	deadline, ok := t.Deadline()
+	if !ok {
+		return nil
+	}
+	return time.After(time.Until(deadline) * 9 / 10)
+}
+
 // A goroutine waiting on an entry whose builder gives up wakes, sees the entry
-// is not done, and gets to build it itself. The timeout turns a missing wake-up
+// is not done, and gets to build it itself. The guard turns a missing wake-up
 // into a failure instead of a hang.
 func TestEdgeWindowCacheAbandon(t *testing.T) {
 	c := newEdgeWindowCache(edgeWindowCacheBytes)
@@ -883,7 +898,7 @@ func TestEdgeWindowCacheAbandon(t *testing.T) {
 		if !ok {
 			t.Error("the waiter did not see an abandoned entry and take over the build")
 		}
-	case <-time.After(5 * time.Second):
+	case <-hangGuard(t):
 		t.Fatal("the waiter was not woken by abandon")
 	}
 	checkEdgeCache(t, c)
