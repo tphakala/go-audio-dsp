@@ -160,14 +160,13 @@ func normalizeBy(w []float64, norm, attenuationDB float64) error {
 // The spectrum samples p[k] are real and mirror-symmetric, so the inverse DFT of
 // a symmetric window reduces to w[i] = p[0] + 2*sum_{k=1..K} p[k]*cos(pi*k*d/m)
 // with d = (m-1) - 2*i and K = (m-1)/2, for the first half of the window, which
-// is then mirrored. With theta_k = pi*k*(m-1)/m this is
-// 2*Re(sum_{k=0..K} p[k]*exp(i*theta_k)*exp(-2*pi*i*k*i/m)) - p[0], one forward
-// DFT of length m of the sequence z[k] = p[k]*exp(i*theta_k) for k <= K and zero
-// above. The identity holds for odd and even m. The DFT length is m itself, on
-// the same frequency grid as scipy and the direct cosine sum, so no sample is
-// resampled. The values agree with the direct cosine sum to within about 2e-14 of
-// the peak in float64 (TestDolphMatchesDirectSum), so a few float32 samples can
-// differ from it by 1 ulp.
+// is then mirrored. With theta_k = pi*k*(m-1)/m this is 2*Re(X[i]) - p[0], where
+// X is the forward DFT of length m of z[k] = p[k]*exp(sqrt(-1)*theta_k) for
+// k <= K and zero above. The identity holds for odd and even m. The DFT length
+// is m itself, on the same frequency grid as scipy and the direct cosine sum, so
+// no sample is resampled. The values agree with the direct cosine sum to within
+// about 2e-14 of the peak in float64 (TestDolphMatchesDirectSum), so a few
+// float32 samples can differ from it by 1 ulp.
 //
 // re and im are scratch of length at least m, rewritten in full on every call,
 // and plan has capacity at least m. The plan transforms a different length per

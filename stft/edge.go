@@ -78,9 +78,10 @@ type EdgeConfig struct {
 // shared cache (first use in the process, or after eviction). A Dolph-Chebyshev
 // analyzer allocates its evaluation plan and scratch once, at its first window
 // build or, when Reset sees a geometry that can need a window past the cap
-// (FrameSize/2 > 32*hop), in that Reset, so Feed never allocates it. One analyzer is not
-// safe for concurrent use; distinct analyzers may run in different goroutines,
-// because the shared cache is synchronized and its windows are read-only.
+// (FrameSize/2 > 32*hop), in that Reset, so Feed never allocates it. One analyzer
+// is not safe for concurrent use; distinct analyzers may run in different
+// goroutines, because the shared cache is synchronized and its windows are
+// read-only.
 type EdgeAnalyzer struct {
 	p     *f32.STFTPlan
 	n     int
