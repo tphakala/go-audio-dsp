@@ -6,7 +6,8 @@ import "testing"
 // EdgeAnalyzer at hop 175. "warm" repeats the same geometry, so the cached edge
 // windows are reused; "newhop" alternates hops 175 and 174, so every Reset
 // rebuilds the start-edge windows (and the drain windows follow the new
-// geometry). rebuilds/op counts shape evaluations per operation.
+// geometry); "cold" builds a new analyzer for every run, the first-use cost.
+// rebuilds/op counts shape evaluations per operation.
 func BenchmarkEdgeAnalyzer(b *testing.B) {
 	const n, clip = 2048, 15 * 24000
 	sig := testSignal(clip)
@@ -18,6 +19,26 @@ func BenchmarkEdgeAnalyzer(b *testing.B) {
 		{"xl-dolph106.5", WindowShape{Family: ShapeDolphChebyshev, AttenuationDB: 106.5}},
 	}
 	for _, s := range shapes {
+		b.Run(s.name+"/cold", func(b *testing.B) {
+			var sink float64
+			onFrame := func(power []float32) { sink += float64(power[1]) }
+			b.ReportAllocs()
+			var builds uint64
+			for b.Loop() {
+				a, err := NewEdgeAnalyzer(EdgeConfig{FrameSize: n, Shape: s.shape})
+				if err != nil {
+					b.Fatal(err)
+				}
+				if err := a.Reset(175); err != nil {
+					b.Fatal(err)
+				}
+				a.Feed(sig, onFrame)
+				a.Finish(onFrame)
+				builds += a.windowBuilds
+			}
+			b.ReportMetric(float64(builds)/float64(b.N), "rebuilds/op")
+			_ = sink
+		})
 		for _, mode := range []string{"warm", "newhop"} {
 			b.Run(s.name+"/"+mode, func(b *testing.B) {
 				a, err := NewEdgeAnalyzer(EdgeConfig{FrameSize: n, Shape: s.shape})
