@@ -273,9 +273,7 @@ func TestFitReuse(t *testing.T) {
 // finish. Whether a goroutine builds a window, waits for another goroutine's
 // build or hits the process-wide stft cache depends on what earlier tests in the
 // process cached, so this pins bit equality and, under -race, the absence of a
-// data race on whichever of those paths the run takes. stft's
-// TestEdgeAnalyzerConcurrent covers the build and wait paths on a cold private
-// cache.
+// data race on whichever of those paths the run takes.
 func TestFitConcurrent(t *testing.T) {
 	clip := soxSignal(t, soxRef{})
 	cfgs := []struct {
