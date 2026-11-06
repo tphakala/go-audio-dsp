@@ -245,7 +245,7 @@ func (c Config) validate() error {
 	return nil
 }
 
-// dotProductMinWidth is the nonzero-weight count at or above which project projects
+// dotProductMinWidth is the nonzero-weight count at or above which project handles
 // a row with the SIMD f32.DotProduct kernel; narrower rows use a scalar
 // multiply-accumulate loop, because for a few terms the DotProduct call and
 // dispatch overhead dominates the multiply-add work. 16 is where the two paths
