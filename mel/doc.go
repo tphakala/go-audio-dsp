@@ -10,8 +10,9 @@
 // rather than bit-stable across build targets and SIMD tiers; it is the
 // batch-versus-stream agreement within one build that is exact.
 //
-// A column is the STFT power (or magnitude) spectrum projected through a mel
-// filterbank and, optionally, compressed by a floored log. The filterbank is
+// A column is the STFT power, magnitude or signed real-part spectrum projected
+// through a mel filterbank and, optionally, compressed by a floored log or a power
+// law. The filterbank is
 // generated on the Slaney (librosa default) or HTK scale, with or without Slaney
 // area normalization, or supplied precomputed through Config.Filterbank
 // (FilterbankFromRows) for a model whose bank comes from a table. The whole-clip

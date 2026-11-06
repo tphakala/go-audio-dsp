@@ -96,6 +96,13 @@ func (e *Extractor) Compute(signal []float32, pad stft.PadMode) Matrix {
 // FrameSize/2 of padding (zeros, or a numpy-style reflection) before and after the
 // signal through the NoPad analyzer, so the result matches stft.Plan under the same
 // pad without an allocation.
+//
+// Frame-parallel use: NoPad frame f depends only on signal[f*HopSize :
+// f*HopSize+FrameSize), and ComputeInto resets the analyzer first, so ComputeInto
+// on signal[f0*HopSize : (f0+c-1)*HopSize+FrameSize) writes exactly columns f0 to
+// f0+c-1 of the whole-clip NoPad matrix, bit for bit. A caller can therefore split
+// a clip across goroutines, each with its own Extractor (sharing one Filterbank)
+// writing a three-index sub-slice of one Matrix's Data. See ExampleExtractor_parallel.
 func (e *Extractor) ComputeInto(dst *Matrix, signal []float32, pad stft.PadMode) (int, error) {
 	mels := e.pr.fb.numMels
 	frames := e.NumFrames(len(signal), pad)
@@ -114,20 +121,37 @@ func (e *Extractor) ComputeInto(dst *Matrix, signal []float32, pad stft.PadMode)
 	}
 
 	frame := 0
-	onFrame := func(_ []complex64, power []float32) {
-		e.pr.apply(dst.Data[frame*mels:(frame+1)*mels], power)
-		frame++
-	}
 	if centered(pad) {
 		half := e.n / 2
 		e.fillPad(signal, pad == stft.PadReflect)
-		e.an.Feed(e.pre[:half], onFrame)
-		e.an.Feed(signal, onFrame)
-		e.an.Feed(e.suf[:half], onFrame)
+		frame = e.feed(dst.Data, e.pre[:half], frame)
+		frame = e.feed(dst.Data, signal, frame)
+		frame = e.feed(dst.Data, e.suf[:half], frame)
 	} else {
-		e.an.Feed(signal, onFrame)
+		frame = e.feed(dst.Data, signal, frame)
 	}
 	return frame, nil
+}
+
+// feed pushes src through the analyzer, writing one column per completed frame
+// into out starting at column frame, and returns the next column index. InputReal
+// needs the complex spectrum and skips the power pass (FeedSpectrum); the other
+// inputs project the power. The callbacks are passed as literals so they do not
+// escape.
+func (e *Extractor) feed(out, src []float32, frame int) int {
+	mels := e.pr.fb.numMels
+	if e.pr.input == InputReal {
+		e.an.FeedSpectrum(src, func(spec []complex64) {
+			e.pr.fromSpectrum(out[frame*mels:(frame+1)*mels], spec)
+			frame++
+		})
+		return frame
+	}
+	e.an.Feed(src, func(_ []complex64, power []float32) {
+		e.pr.fromPower(out[frame*mels:(frame+1)*mels], power)
+		frame++
+	})
+	return frame
 }
 
 // fillPad fills the FrameSize/2 prefix and suffix scratch for a centered frame.

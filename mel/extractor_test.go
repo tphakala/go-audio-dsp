@@ -22,42 +22,68 @@ func toneSig(nSamples, sr int, freqs []float64, amp float64) []float32 {
 	return s
 }
 
-// refMel projects one frame's power (|X|^2 over NumBins) through the dense
-// filterbank and applies the input and log stages in float64, mirroring
-// projector.apply. It returns the linear mel energies (pre-log) and the final
-// column, so a test can gate the log comparison on the 40 dB-down floor.
-func refMel(power []float32, dense [][]float32, input Input, log Log, offset, floor float32) (lin, out []float64) {
-	numBins := len(power)
-	src := make([]float64, numBins)
-	for k := range src {
-		p := float64(power[k])
-		if input == InputMagnitude {
-			p = math.Sqrt(p)
+// refSource returns the per-bin source one frame projects, in float64: the power
+// |X|^2, its square root for InputMagnitude, or the signed real part Re(X) for
+// InputReal. power and spec are the same frame; only the one cfg.Input needs is
+// read.
+func refSource(input Input, power []float32, spec []complex64) []float64 {
+	switch input {
+	case InputReal:
+		src := make([]float64, len(spec))
+		for k, v := range spec {
+			src[k] = float64(real(v))
 		}
-		src[k] = p
+		return src
+	case InputMagnitude:
+		src := make([]float64, len(power))
+		for k, p := range power {
+			src[k] = math.Sqrt(float64(p))
+		}
+		return src
+	case InputPower:
 	}
+	src := make([]float64, len(power))
+	for k, p := range power {
+		src[k] = float64(p)
+	}
+	return src
+}
+
+// refMel projects one frame's per-bin source (see refSource) through the dense
+// filterbank and applies the compression stage in float64, mirroring
+// projector.fromPower and fromSpectrum. It returns the linear mel energies
+// (pre-compression, signed for InputReal) and the final column, so a test can gate
+// the comparison on the 40 dB-down floor.
+func refMel(src []float64, dense [][]float32, cfg Config) (lin, out []float64) {
+	offset, floor := float64(float32(cfg.LogOffset)), float64(float32(cfg.LogFloor))
+	exponent := float64(float32(cfg.PowerExponent))
 	lin = make([]float64, len(dense))
 	out = make([]float64, len(dense))
 	for m := range dense {
 		var acc float64
 		row := dense[m]
-		for k := range numBins {
+		for k := range src {
 			acc += float64(row[k]) * src[k]
 		}
 		lin[m] = acc
 		val := acc
-		if log != LogNone {
+		if cfg.Log != LogNone {
+			if cfg.Log == PowerLaw {
+				val = math.Abs(val)
+			}
 			if offset > 0 {
-				val += float64(offset)
+				val += offset
 			}
 			if floor > 0 {
-				val = math.Max(val, float64(floor))
+				val = math.Max(val, floor)
 			}
-			switch log {
+			switch cfg.Log {
 			case Log10:
 				val = math.Log10(val)
 			case LogNatural:
 				val = math.Log(val)
+			case PowerLaw:
+				val = math.Pow(val, exponent)
 			case LogNone:
 			}
 		}
@@ -99,6 +125,16 @@ func melTestConfigs(t *testing.T) map[string]Config {
 		t.Fatal(err)
 	}
 	return map[string]Config{
+		// Signed real-part input with a power law (rows ~40 bins wide, so the
+		// DotProduct path) and a non-divisor hop, the BirdNET-like shape.
+		"real-powerlaw-custom": {
+			SampleRate: 48000, FrameSize: 1024, HopSize: 280, Filterbank: fb,
+			Input: InputReal, Log: PowerLaw, PowerExponent: 0.4,
+		},
+		"real-nolog-generated": {
+			SampleRate: 48000, FrameSize: 1024, HopSize: 256, NumMels: 40,
+			MinHz: 500, MaxHz: 20000, Input: InputReal, Log: LogNone,
+		},
 		"power-log10": {
 			SampleRate: 48000, FrameSize: 1024, HopSize: 256, NumMels: 40,
 			MinHz: 500, MaxHz: 20000, Input: InputPower, Log: Log10, LogOffset: 1e-6,
@@ -171,14 +207,22 @@ func runExtractorCase(t *testing.T, cfg Config, sig []float32, pad stft.PadMode)
 	if got := plan.PowerInto(powerRef, sig, pad); got != frames {
 		t.Fatalf("PowerInto wrote %d frames, want %d", got, frames)
 	}
+	specRef := make([][]complex64, frames)
+	for f := range specRef {
+		specRef[f] = make([]complex64, bins)
+	}
+	if got := plan.Spectrum(specRef, sig, pad); got != frames {
+		t.Fatalf("Spectrum wrote %d frames, want %d", got, frames)
+	}
 	dense := ex.Filterbank().Dense()
 	m := ex.Compute(sig, pad)
 	if m.Frames != frames || m.Mels != ex.NumMels() {
 		t.Fatalf("matrix shape = %dx%d, want %dx%d", m.Mels, m.Frames, ex.NumMels(), frames)
 	}
 	for f := range frames {
-		lin, out := refMel(powerRef[f*bins:(f+1)*bins], dense, cfg.Input, cfg.Log, float32(cfg.LogOffset), float32(cfg.LogFloor))
-		compareMelColumn(t, m.Column(f), lin, out, cfg.Log, f)
+		src := refSource(cfg.Input, powerRef[f*bins:(f+1)*bins], specRef[f])
+		lin, out := refMel(src, dense, cfg)
+		compareMelColumn(t, m.Column(f), lin, out, cfg, f)
 	}
 }
 
@@ -196,24 +240,60 @@ func runExtractorCase(t *testing.T, cfg Config, sig []float32, pad stft.PadMode)
 const (
 	linTol = 1e-5 // peak-relative, linear mel energies
 	logTol = 1e-4 // absolute, log units
+
+	// InputReal sums signed terms, so the float32 projection cancels against a
+	// float64 reference by more than the non-negative inputs do: the worst
+	// peak-relative deviation is ~7.9e-6 on amd64 AVX+FMA and ~1.2e-6 on the
+	// SIMD_DISABLE=all tier, versus ~9e-8 for power and magnitude. The analyzer and
+	// stft.Plan.Spectrum spectra are bit-identical here, so this is accumulation
+	// error in the projection, not a transform difference.
+	realLinTol = 1e-4
+
+	// Power-law values are compared relative to the reference where |lin| is at
+	// least powLawFloor of the column peak (40 dB down); below that x^q amplifies the
+	// projection error of a near-zero x. The worst measured relative deviation of the
+	// compared values is ~1.3e-4 on amd64 AVX+FMA and ~7.3e-5 on the SIMD_DISABLE=all
+	// tier (real-powerlaw-custom, from the real-part accumulation error above, not
+	// from Pow, whose fast path is ~1.4e-5).
+	powTol      = 1e-3
+	powLawFloor = 1e-2
 )
 
-func compareMelColumn(t *testing.T, col []float32, lin, out []float64, log Log, f int) {
+func compareMelColumn(t *testing.T, col []float32, lin, out []float64, cfg Config, f int) {
 	t.Helper()
+	log := cfg.Log
+	tol := linTol
+	if cfg.Input == InputReal {
+		tol = realLinTol
+	}
 	peak := 0.0
 	for _, v := range lin {
-		peak = math.Max(peak, v)
+		peak = math.Max(peak, math.Abs(v)) // |v|: InputReal energies are signed
 	}
 	for mm := range col {
 		got := float64(col[mm])
 		if log == LogNone {
-			if math.Abs(got-lin[mm]) > linTol*peak+1e-9 {
+			if math.Abs(got-lin[mm]) > tol*peak+1e-9 {
 				t.Fatalf("frame %d mel %d: linear got %g want %g (peak %g)", f, mm, got, lin[mm], peak)
 			}
 			continue
 		}
 		if math.IsInf(got, 0) || math.IsNaN(got) {
-			t.Fatalf("frame %d mel %d: non-finite log value %g", f, mm, got)
+			t.Fatalf("frame %d mel %d: non-finite compressed value %g", f, mm, got)
+		}
+		if log == PowerLaw {
+			// x^q amplifies the relative error of a near-zero x, so bands under 60 dB
+			// below the peak are only checked for finiteness and sign.
+			if got < 0 {
+				t.Fatalf("frame %d mel %d: power-law value %g is negative", f, mm, got)
+			}
+			if math.Abs(lin[mm]) < peak*powLawFloor {
+				continue
+			}
+			if math.Abs(got-out[mm]) > powTol*out[mm] {
+				t.Fatalf("frame %d mel %d: power-law got %g want %g", f, mm, got, out[mm])
+			}
+			continue
 		}
 		if lin[mm] < peak*1e-4 {
 			continue
@@ -443,6 +523,16 @@ func TestExtractorConfigValidation(t *testing.T) {
 		{"log floor underflows float32", mut(func(c *Config) { c.Log = Log10; c.LogFloor = 1e-50 })},
 		{"log offset overflows float32", mut(func(c *Config) { c.Log = Log10; c.LogOffset = 1e40 })},
 		{"log floor overflows float32", mut(func(c *Config) { c.Log = Log10; c.LogFloor = 1e40 })},
+		{"powerlaw exponent zero", mut(func(c *Config) { c.Log = PowerLaw })},
+		{"powerlaw exponent negative", mut(func(c *Config) { c.Log = PowerLaw; c.PowerExponent = -0.5 })},
+		{"powerlaw exponent above one", mut(func(c *Config) { c.Log = PowerLaw; c.PowerExponent = 1.5 })},
+		{"powerlaw exponent nan", mut(func(c *Config) { c.Log = PowerLaw; c.PowerExponent = math.NaN() })},
+		{"powerlaw exponent inf", mut(func(c *Config) { c.Log = PowerLaw; c.PowerExponent = math.Inf(1) })},
+		{"powerlaw exponent underflows float32", mut(func(c *Config) { c.Log = PowerLaw; c.PowerExponent = 1e-50 })},
+		{"exponent with log10", mut(func(c *Config) { c.Log = Log10; c.LogOffset = 1e-6; c.PowerExponent = 0.5 })},
+		{"exponent without compression", mut(func(c *Config) { c.PowerExponent = 0.5 })},
+		{"real input with log10", mut(func(c *Config) { c.Input = InputReal; c.Log = Log10; c.LogOffset = 1e-6 })},
+		{"real input with natural log", mut(func(c *Config) { c.Input = InputReal; c.Log = LogNatural; c.LogFloor = 1e-6 })},
 		{"custom bank bins mismatch", mut(func(c *Config) { c.Filterbank = fbBad })},
 		{"window length too big", mut(func(c *Config) { c.WindowLength = 9999 })},
 	}
@@ -453,6 +543,102 @@ func TestExtractorConfigValidation(t *testing.T) {
 			}
 			if _, err := NewColumnSource(tc.cfg); !errors.Is(err, ErrInvalidConfig) {
 				t.Fatalf("NewColumnSource err = %v, want ErrInvalidConfig", err)
+			}
+		})
+	}
+}
+
+// TestExtractorConfigAccepted pins the boundaries the rejection table above sits
+// next to: the exponent upper bound, the narrowed offset-or-floor rule, and
+// signed input without compression.
+func TestExtractorConfigAccepted(t *testing.T) {
+	base := Config{SampleRate: 16000, FrameSize: 256, HopSize: 64, NumMels: 20, MinHz: 0, MaxHz: 0}
+	cases := map[string]Config{
+		"powerlaw exponent one":          {Input: InputPower, Log: PowerLaw, PowerExponent: 1},
+		"powerlaw without offset":        {Input: InputMagnitude, Log: PowerLaw, PowerExponent: 0.35},
+		"real input without compression": {Input: InputReal, Log: LogNone},
+		"real input powerlaw":            {Input: InputReal, Log: PowerLaw, PowerExponent: 0.8, LogOffset: 1e-6, LogFloor: 1e-9},
+	}
+	for name, delta := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := base
+			cfg.Input, cfg.Log, cfg.PowerExponent = delta.Input, delta.Log, delta.PowerExponent
+			cfg.LogOffset, cfg.LogFloor = delta.LogOffset, delta.LogFloor
+			if _, err := New(cfg); err != nil {
+				t.Fatalf("New err = %v, want nil", err)
+			}
+			if _, err := NewColumnSource(cfg); err != nil {
+				t.Fatalf("NewColumnSource err = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestExtractorRealPowerLawHandDerived checks the real-part projection and the
+// power-law stage against values derived by hand. With a rectangular window of
+// length 64 the DFT of cos(2*pi*k0*n/64 + phi) is 32*exp(i*phi) at bin k0, so
+// x[n] = cos(2*pi*4n/64 + pi/3) - cos(2*pi*9n/64) + 0.5*cos(2*pi*20n/64) has
+// Re X[4] = 16 (|X[4]| = 32), Re X[9] = -32 and Re X[20] = 16. The bank puts
+// weight 1 on bin 4 (row 0), 1 on bin 4 and 0.25 on bin 9 (row 1, interior zeros),
+// 1 on bin 9 (row 2), nothing (row 3), and 1 over bins 10..30 (row 4, 21 wide so
+// it takes the DotProduct branch).
+func TestExtractorRealPowerLawHandDerived(t *testing.T) {
+	const n = 64
+	sig := make([]float32, n)
+	for i := range sig {
+		x := float64(i)
+		sig[i] = float32(math.Cos(2*math.Pi*4*x/n+math.Pi/3) - math.Cos(2*math.Pi*9*x/n) + 0.5*math.Cos(2*math.Pi*20*x/n))
+	}
+	rows := make([][]float32, 5)
+	for m := range rows {
+		rows[m] = make([]float32, n/2+1)
+	}
+	rows[0][4] = 1
+	rows[1][4], rows[1][9] = 1, 0.25
+	rows[2][9] = 1
+	for k := 10; k <= 30; k++ {
+		rows[4][k] = 1
+	}
+	fb, err := FilterbankFromRows(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ones := make([]float32, n)
+	for i := range ones {
+		ones[i] = 1
+	}
+	base := Config{SampleRate: n, FrameSize: n, HopSize: n, CustomWindow: ones, Filterbank: fb}
+	cases := []struct {
+		name  string
+		input Input
+		log   Log
+		exp   float64
+		off   float64
+		want  []float64
+		tol   float64 // relative to max(1, |want|)
+	}{
+		{"real linear is signed", InputReal, LogNone, 0, 0, []float64{16, 8, -32, 0, 16}, 1e-3},
+		{"real powerlaw takes abs", InputReal, PowerLaw, 0.5, 0, []float64{4, math.Sqrt(8), math.Sqrt(32), 0, 4}, 1e-4},
+		{"real powerlaw offset after abs", InputReal, PowerLaw, 0.5, 1, []float64{math.Sqrt(17), 3, math.Sqrt(33), 1, math.Sqrt(17)}, 1e-4},
+		{"power powerlaw", InputPower, PowerLaw, 0.5, 0, []float64{32, math.Sqrt(1280), 32, 0, 16}, 1e-4},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base
+			cfg.Input, cfg.Log, cfg.PowerExponent, cfg.LogOffset = tc.input, tc.log, tc.exp, tc.off
+			ex, err := New(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := ex.Compute(sig, stft.NoPad)
+			if m.Frames != 1 || m.Mels != 5 {
+				t.Fatalf("matrix %dx%d, want 5x1", m.Mels, m.Frames)
+			}
+			for mm, want := range tc.want {
+				got := float64(m.At(mm, 0))
+				if !(math.Abs(got-want) <= tc.tol*math.Max(1, math.Abs(want))) { // fail-closed: NaN fails
+					t.Errorf("mel %d = %g, want %g", mm, got, want)
+				}
 			}
 		})
 	}

@@ -15,10 +15,12 @@ func TestEnumStrings(t *testing.T) {
 		{Norm(9).String(), "Norm(9)"},
 		{InputPower.String(), "power"},
 		{InputMagnitude.String(), "magnitude"},
+		{InputReal.String(), "real"},
 		{Input(9).String(), "Input(9)"},
 		{LogNone.String(), "none"},
 		{Log10.String(), "log10"},
 		{LogNatural.String(), "natural"},
+		{PowerLaw.String(), "powerlaw"},
 		{Log(9).String(), "Log(9)"},
 	}
 	for _, tc := range cases {

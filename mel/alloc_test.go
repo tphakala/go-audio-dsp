@@ -13,11 +13,26 @@ import (
 )
 
 func TestZeroAlloc(t *testing.T) {
-	cfg := Config{
-		SampleRate: 48000, FrameSize: 1024, HopSize: 256, NumMels: 40,
-		MinHz: 500, MaxHz: 20000, Input: InputPower, Log: Log10, LogOffset: 1e-6,
+	configs := map[string]Config{
+		"power-log10": {
+			SampleRate: 48000, FrameSize: 1024, HopSize: 256, NumMels: 40,
+			MinHz: 500, MaxHz: 20000, Input: InputPower, Log: Log10, LogOffset: 1e-6,
+		},
+		// The real-part path goes through FeedSpectrum, Deinterleave2, Abs and Pow in
+		// both producers.
+		"real-powerlaw": {
+			SampleRate: 48000, FrameSize: 1024, HopSize: 280, NumMels: 40,
+			MinHz: 500, MaxHz: 20000, Input: InputReal, Log: PowerLaw, PowerExponent: 0.4,
+		},
 	}
 	sig := toneSig(48000, 48000, []float64{1200, 4300}, 0.4) // 1 s
+	for name, cfg := range configs {
+		t.Run(name, func(t *testing.T) { checkZeroAlloc(t, cfg, sig) })
+	}
+}
+
+func checkZeroAlloc(t *testing.T, cfg Config, sig []float32) {
+	t.Helper()
 
 	ex, err := New(cfg)
 	if err != nil {

@@ -3,6 +3,7 @@ package mel
 import (
 	"fmt"
 	"math"
+	"unsafe"
 
 	"github.com/tphakala/go-audio-dsp/stft"
 
@@ -62,8 +63,11 @@ func (n Norm) String() string {
 	return fmt.Sprintf("Norm(%d)", int(n))
 }
 
-// Input selects what the filterbank projects: the power spectrum |X|^2 or the
-// magnitude spectrum |X|. The zero value is InputPower (librosa power=2.0).
+// Input selects what the filterbank projects: the power spectrum |X|^2, the
+// magnitude spectrum |X|, or the signed real part Re(X) of the half spectrum. The
+// zero value is InputPower (librosa power=2.0). Power and magnitude projections
+// are non-negative; the real-part projection is signed, so it pairs with LogNone or
+// PowerLaw (which takes the absolute value) and not with the log modes.
 type Input int
 
 const (
@@ -71,10 +75,13 @@ const (
 	InputPower Input = iota
 	// InputMagnitude projects the magnitude spectrum |X| (librosa power=1.0).
 	InputMagnitude
+	// InputReal projects the signed real part Re(X) of the half spectrum, not its
+	// magnitude, so mel values can be negative under LogNone.
+	InputReal
 )
 
 // valid reports whether i is a defined input.
-func (i Input) valid() bool { return i >= InputPower && i <= InputMagnitude }
+func (i Input) valid() bool { return i >= InputPower && i <= InputReal }
 
 // String returns the input name.
 func (i Input) String() string {
@@ -83,6 +90,8 @@ func (i Input) String() string {
 		return "power"
 	case InputMagnitude:
 		return "magnitude"
+	case InputReal:
+		return "real"
 	}
 	return fmt.Sprintf("Input(%d)", int(i))
 }
@@ -98,10 +107,14 @@ const (
 	Log10
 	// LogNatural applies ln(max(x + LogOffset, LogFloor)).
 	LogNatural
+	// PowerLaw applies max(|x| + LogOffset, LogFloor)^PowerExponent, with the
+	// absolute value taken only for the signed InputReal. It is a compression, not
+	// a log: 0 maps to 0, so neither an offset nor a floor is required.
+	PowerLaw
 )
 
 // valid reports whether l is a defined log mode.
-func (l Log) valid() bool { return l >= LogNone && l <= LogNatural }
+func (l Log) valid() bool { return l >= LogNone && l <= PowerLaw }
 
 // String returns the log-mode name.
 func (l Log) String() string {
@@ -112,13 +125,15 @@ func (l Log) String() string {
 		return "log10"
 	case LogNatural:
 		return "natural"
+	case PowerLaw:
+		return "powerlaw"
 	}
 	return fmt.Sprintf("Log(%d)", int(l))
 }
 
 // Config configures an Extractor or ColumnSource: the short-time transform
-// (shared with package stft), the mel filterbank, the power/magnitude input, and
-// an optional log stage. The zero values of Scale, Norm and Input reproduce
+// (shared with package stft), the mel filterbank, the power, magnitude or
+// real-part input, and an optional log or power-law stage. The zero values of Scale, Norm and Input reproduce
 // librosa's melspectrogram defaults (Slaney scale, slaney norm, power input).
 type Config struct {
 	// SampleRate in Hz; required (> 0). Places the mel filters and validates
@@ -145,14 +160,22 @@ type Config struct {
 	// FrameSize/2 + 1. It is read-only and may be shared between instances.
 	Filterbank *Filterbank
 
-	// Input selects power or magnitude projection.
+	// Input selects power, magnitude or signed real-part projection.
 	Input Input
 
-	// Log stage. When Log != LogNone, at least one of LogOffset and LogFloor must
-	// be > 0 so silence never yields -Inf: y = log(max(x + LogOffset, LogFloor)).
+	// Compression stage. For Log10 and LogNatural at least one of LogOffset and
+	// LogFloor must be > 0 so silence never yields -Inf:
+	// y = log(max(x + LogOffset, LogFloor)). InputReal is signed and cannot use
+	// them. PowerLaw needs neither: y = max(|x| + LogOffset, LogFloor)^PowerExponent.
 	Log       Log
-	LogOffset float64 // added before the log (BSG-BAT: 1e-6)
-	LogFloor  float64 // lower clamp before the log (0 means none)
+	LogOffset float64 // added before the log or power (BSG-BAT: 1e-6)
+	LogFloor  float64 // lower clamp before the log or power (0 means none)
+
+	// PowerExponent is the exponent q of PowerLaw, in (0, 1] so the stage
+	// compresses and a finite input gives a finite output. It must be 0 for every
+	// other Log. A model that squares the real-part projection and then raises it to
+	// p is InputReal with PowerLaw and PowerExponent = 2p.
+	PowerExponent float64
 }
 
 // stftConfig projects the transform fields onto an stft.Config; stft validates
@@ -191,7 +214,7 @@ func (c Config) validate() error {
 	}
 	// The projector applies the offset and floor as float32 (buildEngine casts them
 	// once). A finite positive float64 that overflows to +Inf or underflows to 0 in
-	// float32 would defeat the guard and let apply emit a non-finite column, so
+	// float32 would defeat the guard and let the projector emit a non-finite column, so
 	// validate the converted values the projector actually uses, not just the float64
 	// inputs.
 	offset32, floor32 := float32(c.LogOffset), float32(c.LogFloor)
@@ -201,13 +224,28 @@ func (c Config) validate() error {
 	if math.IsInf(float64(floor32), 0) {
 		return fmt.Errorf("%w: LogFloor %g overflows to non-finite in float32", ErrInvalidConfig, c.LogFloor)
 	}
-	if c.Log != LogNone && offset32 <= 0 && floor32 <= 0 {
+	logMode := c.Log == Log10 || c.Log == LogNatural
+	if logMode && offset32 <= 0 && floor32 <= 0 {
 		return fmt.Errorf("%w: Log requires LogOffset or LogFloor to stay > 0 in float32 so silence never yields -Inf, got LogOffset %g, LogFloor %g", ErrInvalidConfig, c.LogOffset, c.LogFloor)
+	}
+	if logMode && c.Input == InputReal {
+		return fmt.Errorf("%w: InputReal is signed and cannot be combined with %s; use LogNone or PowerLaw", ErrInvalidConfig, c.Log)
+	}
+	if c.Log == PowerLaw {
+		q := c.PowerExponent
+		if math.IsNaN(q) || q <= 0 || q > 1 {
+			return fmt.Errorf("%w: PowerExponent must be in (0, 1] for PowerLaw, got %g", ErrInvalidConfig, q)
+		}
+		if float32(q) <= 0 {
+			return fmt.Errorf("%w: PowerExponent %g underflows to 0 in float32", ErrInvalidConfig, q)
+		}
+	} else if c.PowerExponent != 0 {
+		return fmt.Errorf("%w: PowerExponent %g is only used with PowerLaw, got Log %s", ErrInvalidConfig, c.PowerExponent, c.Log)
 	}
 	return nil
 }
 
-// dotProductMinWidth is the nonzero-weight count at or above which apply projects
+// dotProductMinWidth is the nonzero-weight count at or above which project projects
 // a row with the SIMD f32.DotProduct kernel; narrower rows use a scalar
 // multiply-accumulate loop, because for a few terms the DotProduct call and
 // dispatch overhead dominates the multiply-add work. 16 is where the two paths
@@ -217,41 +255,71 @@ func (c Config) validate() error {
 // projection did. It is a compile-time constant, so the branch is arch-independent.
 const dotProductMinWidth = 16
 
-// projector maps one frame's power (len NumBins, Analyzer-owned) to one mel
-// column (len NumMels). Shared by Extractor and ColumnSource so both produce
-// identical columns.
+// projector maps one frame's spectrum to one mel column (len NumMels). Shared by
+// Extractor and ColumnSource so both produce identical columns.
 type projector struct {
-	fb           *Filterbank
-	input        Input
-	mag          []float32 // sqrt scratch, len NumBins, only for InputMagnitude
-	magLo, magHi int       // union of nonempty row spans; the sqrt sub-range for InputMagnitude
-	log          Log
-	offset       float32 // LogOffset cast once
-	floor        float32 // LogFloor cast once
+	fb       *Filterbank
+	input    Input
+	src      []float32 // per-bin source scratch, len NumBins, for InputMagnitude (sqrt) and InputReal (real parts)
+	im       []float32 // imaginary parts thrown away by the real-part deinterleave, len hi-lo, InputReal only
+	lo, hi   int       // union of nonempty row spans; the sub-range of src that is filled
+	log      Log
+	offset   float32 // LogOffset cast once
+	floor    float32 // LogFloor cast once
+	exponent float32 // PowerExponent cast once
 }
 
-// apply writes one mel column into dst (len NumMels) from a frame's power (len
-// NumBins, Analyzer-owned). dst and power must not alias. Every arithmetic pass
-// runs through simd with scalar fallbacks under SIMD_DISABLE=all. Allocation-free.
-func (p *projector) apply(dst, power []float32) {
+// fromPower writes one mel column into dst (len NumMels) from a frame's power (len
+// NumBins, Analyzer-owned) for InputPower and InputMagnitude. dst and power must
+// not alias. Every arithmetic pass runs through simd with scalar fallbacks under
+// SIMD_DISABLE=all. Allocation-free.
+func (p *projector) fromPower(dst, power []float32) {
 	src := power
 	if p.input == InputMagnitude {
-		// Only the bins some row actually reads need the sqrt. magLo:magHi is the
-		// union of every nonempty row's span (buildEngine precomputes it), and every
-		// dot product below reads within it, so this is bit-identical to a full-width
+		// Only the bins some row actually reads need the sqrt. lo:hi is the union of
+		// every nonempty row's span (buildEngine precomputes it), and every dot
+		// product below reads within it, so this is bit-identical to a full-width
 		// sqrt while skipping the wasted work when the bank covers a sub-band. Bins
-		// outside the union keep stale values but are never read. magHi == magLo only
-		// for an all-empty bank (every row projects to 0); skip the zero-length call.
-		if p.magHi > p.magLo {
-			simdf32.Sqrt(p.mag[p.magLo:p.magHi], power[p.magLo:p.magHi]) // |X| = sqrt(|X|^2)
+		// outside the union keep stale values but are never read. hi == lo only for
+		// an all-empty bank (every row projects to 0); skip the zero-length call.
+		if p.hi > p.lo {
+			simdf32.Sqrt(p.src[p.lo:p.hi], power[p.lo:p.hi]) // |X| = sqrt(|X|^2)
 		}
-		src = p.mag
+		src = p.src
 	}
-	// Sparse per-row projection: each row multiplies only its contiguous nonzero
-	// weights against the matching bins. A row narrower than dotProductMinWidth uses
-	// a scalar multiply-accumulate loop because the DotProduct call overhead would
-	// dominate its few terms; wider rows stay on the SIMD kernel. An empty row
-	// (n == 0) reads empty spans and yields 0.
+	p.project(dst, src)
+	p.compress(dst)
+}
+
+// fromSpectrum writes one mel column into dst (len NumMels) from a frame's
+// Hermitian half-spectrum (len NumBins, Analyzer-owned) for InputReal: the signed
+// real part Re(X) is projected, not the magnitude. dst and spec must not alias.
+// Allocation-free.
+func (p *projector) fromSpectrum(dst []float32, spec []complex64) {
+	// Same active-range reasoning as fromPower: only bins some row reads are
+	// deinterleaved. The imaginary parts land in the throwaway im scratch.
+	if p.hi > p.lo {
+		simdf32.Deinterleave2(p.src[p.lo:p.hi], p.im, interleaved(spec)[2*p.lo:2*p.hi])
+	}
+	p.project(dst, p.src)
+	p.compress(dst)
+}
+
+// interleaved views spec as the float32 sequence re0, im0, re1, im1, ... without
+// copying. A complex64 is two consecutive float32 (real first) with alignment 4 on
+// every GOARCH the module builds for (checked for amd64, arm64, 386, arm, mips,
+// mipsle, mips64le, windows/arm64 and darwin/arm64), so the view is aligned and
+// exactly 2*len(spec) long. spec must not be empty (NumBins >= 2).
+func interleaved(spec []complex64) []float32 {
+	return unsafe.Slice((*float32)(unsafe.Pointer(unsafe.SliceData(spec))), 2*len(spec))
+}
+
+// project is the sparse per-row projection: each row multiplies only its
+// contiguous nonzero weights against the matching bins of src. A row narrower than
+// dotProductMinWidth uses a scalar multiply-accumulate loop because the DotProduct
+// call overhead would dominate its few terms; wider rows stay on the SIMD kernel.
+// An empty row (n == 0) reads empty spans and yields 0.
+func (p *projector) project(dst, src []float32) {
 	for m, r := range p.fb.rows {
 		w := p.fb.weights[r.off : r.off+r.n]
 		s := src[r.start : r.start+r.n]
@@ -266,14 +334,23 @@ func (p *projector) apply(dst, power []float32) {
 		}
 		dst[m] = simdf32.DotProduct(w, s)
 	}
+}
+
+// compress applies the compression stage to a projected column in place.
+func (p *projector) compress(dst []float32) {
 	if p.log == LogNone {
 		return
 	}
-	// y = log(max(x + offset, floor)). The mel energy x is >= 0 (power and
-	// magnitude are >= 0, and every filterbank weight is non-negative: generated
-	// banks build non-negative triangles and FilterbankFromRows rejects negative
-	// weights), and validation guarantees offset > 0 or floor > 0, so the argument
-	// to log is always > 0. Either guard may be absent.
+	// The log argument max(x + offset, floor) is always > 0 for the log modes: the
+	// mel energy x is >= 0 for InputPower and InputMagnitude (power and magnitude
+	// are >= 0, and every filterbank weight is non-negative: generated banks build
+	// non-negative triangles and FilterbankFromRows rejects negative weights), and
+	// validation guarantees offset > 0 or floor > 0. InputReal is signed, which is
+	// why validation rejects the log modes for it; PowerLaw takes |x| first, and
+	// 0^q = 0 for q > 0, so it needs no guard. Either offset or floor may be absent.
+	if p.log == PowerLaw && p.input == InputReal {
+		simdf32.Abs(dst, dst)
+	}
 	if p.offset > 0 {
 		simdf32.AddScalar(dst, dst, p.offset)
 	}
@@ -285,6 +362,8 @@ func (p *projector) apply(dst, power []float32) {
 		simdf32.Log10(dst, dst)
 	case LogNatural:
 		simdf32.Log(dst, dst)
+	case PowerLaw:
+		simdf32.Pow(dst, dst, p.exponent)
 	case LogNone:
 		// unreachable: returned above
 	}
@@ -320,15 +399,19 @@ func buildEngine(cfg Config) (*stft.Analyzer, projector, error) {
 		return nil, projector{}, fmt.Errorf("%w: Filterbank.NumBins %d must equal FrameSize/2+1 = %d", ErrInvalidConfig, fb.NumBins(), a.NumBins())
 	}
 	pr := projector{
-		fb:     fb,
-		input:  cfg.Input,
-		log:    cfg.Log,
-		offset: float32(cfg.LogOffset),
-		floor:  float32(cfg.LogFloor),
+		fb:       fb,
+		input:    cfg.Input,
+		log:      cfg.Log,
+		offset:   float32(cfg.LogOffset),
+		floor:    float32(cfg.LogFloor),
+		exponent: float32(cfg.PowerExponent),
 	}
-	if cfg.Input == InputMagnitude {
-		pr.mag = make([]float32, a.NumBins())
-		pr.magLo, pr.magHi = fb.activeRange()
+	if cfg.Input == InputMagnitude || cfg.Input == InputReal {
+		pr.src = make([]float32, a.NumBins())
+		pr.lo, pr.hi = fb.activeRange()
+	}
+	if cfg.Input == InputReal {
+		pr.im = make([]float32, pr.hi-pr.lo)
 	}
 	return a, pr, nil
 }
