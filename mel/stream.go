@@ -58,12 +58,25 @@ func (s *ColumnSource) Filterbank() *Filterbank { return s.pr.fb }
 // Allocation-free in the steady state when onColumn does not allocate or let col
 // escape.
 func (s *ColumnSource) Feed(src []float32, onColumn func(col []float32, centerSample int64)) {
+	if s.pr.input == InputReal {
+		s.an.FeedSpectrum(src, func(spec []complex64) {
+			s.pr.fromSpectrum(s.col, spec)
+			s.emit(onColumn)
+		})
+		return
+	}
 	s.an.Feed(src, func(_ []complex64, power []float32) {
-		s.pr.apply(s.col, power)
-		center := s.frames*int64(s.hop) + int64(s.n/2)
-		onColumn(s.col, center)
-		s.frames++
+		s.pr.fromPower(s.col, power)
+		s.emit(onColumn)
 	})
+}
+
+// emit hands the finished column to onColumn with its center sample and advances
+// the frame counter.
+func (s *ColumnSource) emit(onColumn func(col []float32, centerSample int64)) {
+	center := s.frames*int64(s.hop) + int64(s.n/2)
+	onColumn(s.col, center)
+	s.frames++
 }
 
 // Reset clears the analyzer buffer and the frame counter so the next Feed starts a

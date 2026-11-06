@@ -23,7 +23,7 @@ Packages:
 | `gain` | beta | Fixed decibel gain as a streaming block, saturating int16 entry points |
 | `stft` | beta | Shared STFT layer: whole-clip `Plan`, streaming `Analyzer`, overlap-add `Synthesizer`, `EdgeAnalyzer` (sox-schedule frames with edge-adapted windows and a process-wide window cache), windows |
 | `spectrogram` | beta | Magnitude, power or dB spectrogram matrix, whole clip or streaming columns; `Fit`, a sox-compatible fit-to-width producer (step and block geometry, block-mean columns, unclamped dB) |
-| `mel` | beta | Per-frame (log-)mel columns; normalization, stacking and tensor layout are the consumer's job |
+| `mel` | beta | Per-frame mel columns (power, magnitude or signed real-part input; log or power-law compression); normalization, stacking and tensor layout are the consumer's job |
 | `octave` | beta | Streaming 1/3-octave band level meter (a meter, not a `Processor`): ISO 266 / IEC 61260-1 bands, mean square per period, built on `equalizer` filters (RBJ BandPass by default, an optional Butterworth band-pass profile) |
 | `internal/dspshared` | | Helpers shared by `denoiser` and `denoiser/gate` (floor guard, geometry defaults, emission arithmetic, the overlap-add stream driver) so a fix lands once |
 | `internal/audiotest` | | Test-only: synthetic signals, metrics, ffmpeg `afftdn` A/B harness, noise-bed mixing |

@@ -295,7 +295,8 @@ func TestFilterbankFromRowsInvalid(t *testing.T) {
 
 func TestFilterbankActiveRange(t *testing.T) {
 	// Hand-built bank with known spans, including leading and trailing empty rows,
-	// pins the union [lo, hi) the projector uses to bound the InputMagnitude sqrt.
+	// pins the union [lo, hi) the projector uses to bound the InputMagnitude sqrt and
+	// the InputReal deinterleave.
 	fb, err := FilterbankFromRows([][]float32{
 		{0, 0, 0, 0, 0, 0, 0, 0}, // empty
 		{0, 0, 1, 1, 0, 0, 0, 0}, // bins 2..3
@@ -308,7 +309,7 @@ func TestFilterbankActiveRange(t *testing.T) {
 	if lo, hi := fb.activeRange(); lo != 2 || hi != 6 {
 		t.Fatalf("activeRange = [%d, %d), want [2, 6)", lo, hi)
 	}
-	// An all-empty bank returns (0, 0), so apply skips the zero-length sqrt.
+	// An all-empty bank returns (0, 0), so the projector skips the zero-length sqrt and deinterleave.
 	empty, err := FilterbankFromRows([][]float32{{0, 0, 0, 0}, {0, 0, 0, 0}})
 	if err != nil {
 		t.Fatal(err)

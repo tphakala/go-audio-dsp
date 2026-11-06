@@ -1,11 +1,12 @@
 # mel
 
-Per-frame (log-)mel spectrogram columns over the shared `stft` core: STFT
-framing and window, power or magnitude spectrum, a mel filterbank projection, and
-an optional floored log. It is the third analysis block on `stft`, after
-`spectrogram`, and follows the same shape: a whole-clip `Extractor` and a
-streaming `ColumnSource` over one projection stage, so a streamed column equals
-the whole-clip column at the same frame offset bit for bit under `NoPad`.
+Per-frame mel spectrogram columns over the shared `stft` core: STFT framing and
+window, power, magnitude or signed real-part spectrum, a mel filterbank
+projection, and an optional floored log or power-law compression. It is the
+third analysis block on `stft`, after `spectrogram`, and follows the same shape:
+a whole-clip `Extractor` and a streaming `ColumnSource` over one projection
+stage, so a streamed column equals the whole-clip column at the same frame
+offset bit for bit under `NoPad`.
 
 The package is pure audio DSP. It has no model presets and no per-model
 normalization, pitch features, frame stacking, or tensor reshaping; those belong
@@ -50,18 +51,39 @@ cs.Feed(chunk, func(col []float32, centerSample int64) {
 | Transform | `SampleRate`, `FrameSize`, `HopSize`, `Window`, `WindowLength`, `WindowAlign`, `CustomWindow` |
 | Filterbank | `NumMels`, `MinHz`, `MaxHz`, `Scale` (`Slaney`/`HTK`), `Norm` (`NormSlaney`/`NormNone`) |
 | Precomputed bank | `Filterbank` (overrides the filterbank group) |
-| Value | `Input` (`InputPower`/`InputMagnitude`), `Log` (`LogNone`/`Log10`/`LogNatural`), `LogOffset`, `LogFloor` |
+| Value | `Input` (`InputPower`/`InputMagnitude`/`InputReal`), `Log` (`LogNone`/`Log10`/`LogNatural`/`PowerLaw`), `LogOffset`, `LogFloor`, `PowerExponent` |
 
 The zero values of `Scale`, `Norm` and `Input` reproduce librosa's
 `melspectrogram` defaults (Slaney scale, `norm="slaney"`, `power=2.0`). `Log` is
 `LogNone` by default, keeping the log stage opt-in; when set, at least one of
-`LogOffset` and `LogFloor` must be `> 0`, so silence maps to a finite value
-(`y = log(max(x + LogOffset, LogFloor))`) rather than `-Inf`.
+`LogOffset` and `LogFloor` must be `> 0` for `Log10` and `LogNatural`, so silence
+maps to a finite value (`y = log(max(x + LogOffset, LogFloor))`) rather than
+`-Inf`. `PowerLaw` needs neither (see below).
 
 `WindowLength` shorter than `FrameSize` supports a `win_length < n_fft` front end
 (the window is zero-padded into the frame per `WindowAlign`). `MaxHz` above
 Nyquist is rejected, not silently clamped, because a model front end shifted to a
 different band would not match training.
+
+### Real-part projection and power-law compression
+
+`InputReal` projects the signed real part `Re(X)` of the half spectrum instead of
+`|X|^2` or `|X|`, so mel values are signed under `LogNone`. Because the log of a
+signed value is undefined, `InputReal` is rejected with `Log10` and `LogNatural`.
+
+`PowerLaw` compresses each mel value as
+`y = max(|x| + LogOffset, LogFloor)^PowerExponent`, with the absolute value taken
+only for `InputReal` (power and magnitude are already non-negative).
+`PowerExponent` must be in `(0, 1]` for `PowerLaw` and `0` for every other `Log`.
+`0^q = 0`, so no offset or floor is required. A front end that projects the real
+part, squares it, and raises the result to a power `p` is `InputReal` with
+`PowerLaw` and `PowerExponent = 2p`, `LogOffset = LogFloor = 0`; the consumer
+supplies the bank and the exponent.
+
+`Pow` runs a fast kernel while every value in a column is positive and finite; a
+column holding an exact zero (an empty mel row, or a projection that cancels to
+zero) takes the slower exact scalar path, which agrees with the fast kernel within the
+relative error simd documents for `f32.Pow` (about 1.4e-5).
 
 ### Filterbanks
 
@@ -89,11 +111,25 @@ allocation. The streaming path is `NoPad`; a consumer that wants a centered star
 feeds its own leading zeros. `NumFrames` matches `stft.Plan.NumFrames` for every
 mode.
 
+## Frame-parallel extraction
+
+Under `NoPad`, frame `f` depends only on `signal[f*HopSize : f*HopSize+FrameSize]`
+and `ComputeInto` resets its analyzer first, so
+`ComputeInto` on `signal[f0*HopSize : (f0+c-1)*HopSize+FrameSize]` writes exactly
+columns `f0` to `f0+c-1` of the whole-clip matrix, bit for bit. To use several
+cores, give each goroutine its own `Extractor` (they are not safe for concurrent
+use) built from the same `Config`, which shares one immutable `*Filterbank`, and
+have it write a three-index sub-slice of one `Matrix.Data`
+(`Data[f0*Mels : (f0+c)*Mels : (f0+c)*Mels]`). `ExampleExtractor_parallel` shows
+the pattern and checks it against the serial result.
+
 ## Notes
 
 - Filterbank tables are computed in float64 and cast to float32 once; the hot
-  path is float32 in, float32 out. The projection is a sparse per-row
-  `simd.f32.DotProduct`; the input, floor and log stages are `simd` elementwise
+  path is float32 in, float32 out. The projection is sparse per row: a scalar
+  multiply-accumulate loop for rows narrower than 16 bins and
+  `simd.f32.DotProduct` for wider ones; the input (`Sqrt`, or `Deinterleave2` for
+  the real part), offset, floor and log or power (`Abs`, `Pow`) stages are `simd`
   kernels, so the package builds and runs under `SIMD_DISABLE=all` (pure-Go
   fallback) with no CGo and no assembly of its own.
 - Within one build, a streamed column equals the whole-clip `NoPad` column bit

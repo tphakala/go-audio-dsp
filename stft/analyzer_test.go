@@ -193,3 +193,43 @@ func TestAnalyzerResetClearsBuffer(t *testing.T) {
 		}
 	}
 }
+
+// TestAnalyzerFeedSpectrumMatchesFeed: Feed and FeedSpectrum share one buffer and
+// one slide, so alternating them per chunk on a single stream yields the same
+// frames, bit for bit, as feeding the whole signal through Feed.
+func TestAnalyzerFeedSpectrumMatchesFeed(t *testing.T) {
+	const n, hop = 256, 96
+	sig := testSignal(5000)
+	cfg := Config{FrameSize: n, HopSize: hop}
+	ref, err := NewAnalyzer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := collectFrames(ref, sig, len(sig))
+
+	a, err := NewAnalyzer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got [][]complex64
+	for i, chunk := 0, 0; i < len(sig); i, chunk = i+7, chunk+1 {
+		end := min(i+7, len(sig))
+		if chunk%2 == 0 {
+			a.Feed(sig[i:end], func(spec []complex64, _ []float32) {
+				got = append(got, slices.Clone(spec))
+			})
+		} else {
+			a.FeedSpectrum(sig[i:end], func(spec []complex64) {
+				got = append(got, slices.Clone(spec))
+			})
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("mixed feed produced %d frames, want %d", len(got), len(want))
+	}
+	for f := range want {
+		if !slices.Equal(got[f], want[f]) {
+			t.Fatalf("frame %d differs between mixed Feed/FeedSpectrum and one-shot Feed", f)
+		}
+	}
+}

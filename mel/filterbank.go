@@ -271,8 +271,9 @@ func (fb *Filterbank) Dense() [][]float32 {
 
 // activeRange returns [lo, hi), the union of every nonempty row's bin span: lo is
 // the smallest row start and hi the largest row end. The projector uses it to run
-// the InputMagnitude sqrt over only the bins some row reads, skipping the rest. An
-// all-empty bank (every row n == 0) returns (0, 0).
+// the InputMagnitude sqrt and the InputReal deinterleave over only the bins some
+// row reads, skipping the rest. An all-empty bank (every row n == 0) returns
+// (0, 0).
 func (fb *Filterbank) activeRange() (lo, hi int) {
 	lo, hi = fb.numBins, 0
 	for _, r := range fb.rows {

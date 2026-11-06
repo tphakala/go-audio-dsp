@@ -88,21 +88,60 @@ func (a *Analyzer) InFill() int { return a.fill }
 // before Inverse), and nothing reads spec or power after it returns. Frames
 // complete on hop boundaries; a Feed that does not complete a frame calls onFrame
 // zero times. onFrame must not be nil. Allocation-free when onFrame does not
-// allocate or let its arguments escape.
+// allocate or let its arguments escape. A consumer that does not read power should
+// call FeedSpectrum, which skips the power pass.
 func (a *Analyzer) Feed(src []float32, onFrame func(spec []complex64, power []float32)) {
-	for len(src) > 0 {
-		took := copy(a.buf[a.fill:], src) // copies min(a.n-a.fill, len(src))
-		a.fill += took
-		src = src[took:]
-		if a.fill < a.n {
+	for {
+		var ok bool
+		if src, ok = a.next(src); !ok {
 			return
 		}
-		a.p.RFFT(a.spec, a.buf, a.window)
 		c64.AbsSq(a.power, a.spec)
 		onFrame(a.spec, a.power)
-		copy(a.buf, a.buf[a.hop:])
-		a.fill -= a.hop
+		a.slide()
 	}
+}
+
+// FeedSpectrum is Feed without the magnitude-squared pass: it buffers, frames and
+// transforms identically, and calls onFrame with the Hermitian half-spectrum (len
+// NumBins) of every frame that completes. The ownership, ordering, in-place
+// modification, InFill and allocation rules are those of Feed. It suits consumers
+// that read the spectrum itself (for example its real part) and never the power.
+// Feed and FeedSpectrum share the framing state, so they may be mixed on one
+// stream.
+func (a *Analyzer) FeedSpectrum(src []float32, onFrame func(spec []complex64)) {
+	for {
+		var ok bool
+		if src, ok = a.next(src); !ok {
+			return
+		}
+		onFrame(a.spec)
+		a.slide()
+	}
+}
+
+// next copies src into the analysis buffer. When that completes a frame it
+// transforms it into a.spec and returns the unconsumed rest of src with ok true;
+// otherwise it returns ok false and the buffer holds all of src. It is a method
+// rather than a closure-taking helper so the caller's onFrame stays a direct,
+// non-escaping call.
+func (a *Analyzer) next(src []float32) (rest []float32, ok bool) {
+	if len(src) == 0 {
+		return src, false
+	}
+	took := copy(a.buf[a.fill:], src) // copies min(a.n-a.fill, len(src))
+	a.fill += took
+	if a.fill < a.n {
+		return nil, false
+	}
+	a.p.RFFT(a.spec, a.buf, a.window)
+	return src[took:], true
+}
+
+// slide advances the analysis buffer by one hop after a frame was emitted.
+func (a *Analyzer) slide() {
+	copy(a.buf, a.buf[a.hop:])
+	a.fill -= a.hop
 }
 
 // Inverse transforms a Hermitian half-spectrum spec back to at most FrameSize

@@ -78,7 +78,76 @@ func BenchmarkProjectSparse(b *testing.B) {
 			dst := make([]float32, pr.fb.numMels)
 			b.ReportAllocs()
 			for b.Loop() {
-				pr.apply(dst, power)
+				pr.fromPower(dst, power)
+			}
+		})
+	}
+	b.Run("real-n1024", func(b *testing.B) {
+		cfg := Config{SampleRate: 48000, FrameSize: 1024, NumMels: 96, MinHz: 500, MaxHz: 15000, Input: InputReal, Log: PowerLaw, PowerExponent: 0.4}
+		_, pr, err := buildEngine(cfg)
+		if err != nil {
+			b.Fatal(err)
+		}
+		spec := make([]complex64, cfg.FrameSize/2+1)
+		for k := range spec {
+			spec[k] = complex(float32(k%17)*0.01-0.08, float32(k%13)*0.01)
+		}
+		dst := make([]float32, pr.fb.numMels)
+		b.ReportAllocs()
+		for b.Loop() {
+			pr.fromSpectrum(dst, spec)
+		}
+	})
+}
+
+// birdLikeBank builds a synthetic bank of mels rows of narrow triangles spread over
+// the bins [lo, hi) of a numBins-bin spectrum, widths growing from 1 toward maxW.
+func birdLikeBank(b *testing.B, mels, numBins, lo, hi, maxW int) *Filterbank {
+	b.Helper()
+	rows := make([][]float32, mels)
+	for m := range rows {
+		rows[m] = make([]float32, numBins)
+		start := lo + m*(hi-lo-maxW)/mels
+		w := 1 + m*(maxW-1)/mels
+		for k := start; k < start+w && k < hi; k++ {
+			rows[m][k] = 1 / float32(w)
+		}
+	}
+	fb, err := FilterbankFromRows(rows)
+	if err != nil {
+		b.Fatal(err)
+	}
+	return fb
+}
+
+// BenchmarkComputeRealPowerLaw measures a whole 3 s, 48 kHz clip through the
+// signed real-part, power-law path for two synthetic bank shapes: a 2048-point
+// transform with rows over bins [1, 128) and a 1024-point one over [11, 320).
+func BenchmarkComputeRealPowerLaw(b *testing.B) {
+	shapes := []struct {
+		name                 string
+		n, hop, lo, hi, maxW int
+	}{
+		{"n2048h278", 2048, 278, 1, 128, 5},
+		{"n1024h280", 1024, 280, 11, 320, 17},
+	}
+	sig := toneSig(3*48000, 48000, []float64{1200, 4300}, 0.4)
+	for _, sh := range shapes {
+		b.Run(sh.name, func(b *testing.B) {
+			ex, err := New(Config{
+				SampleRate: 48000, FrameSize: sh.n, HopSize: sh.hop,
+				Filterbank: birdLikeBank(b, 96, sh.n/2+1, sh.lo, sh.hi, sh.maxW),
+				Input:      InputReal, Log: PowerLaw, PowerExponent: 0.4,
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			m := Matrix{Data: make([]float32, ex.NumMels()*ex.NumFrames(len(sig), stft.NoPad))}
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := ex.ComputeInto(&m, sig, stft.NoPad); err != nil {
+					b.Fatal(err)
+				}
 			}
 		})
 	}
