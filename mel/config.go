@@ -267,6 +267,7 @@ type projector struct {
 	offset   float32 // LogOffset cast once
 	floor    float32 // LogFloor cast once
 	exponent float32 // PowerExponent cast once
+	abs      bool    // take |x| before the power law; set for the signed InputReal
 }
 
 // fromPower writes one mel column into dst (len NumMels) from a frame's power (len
@@ -348,7 +349,7 @@ func (p *projector) compress(dst []float32) {
 	// validation guarantees offset > 0 or floor > 0. InputReal is signed, which is
 	// why validation rejects the log modes for it; PowerLaw takes |x| first, and
 	// 0^q = 0 for q > 0, so it needs no guard. Either offset or floor may be absent.
-	if p.log == PowerLaw && p.input == InputReal {
+	if p.abs {
 		simdf32.Abs(dst, dst)
 	}
 	if p.offset > 0 {
@@ -405,6 +406,7 @@ func buildEngine(cfg Config) (*stft.Analyzer, projector, error) {
 		offset:   float32(cfg.LogOffset),
 		floor:    float32(cfg.LogFloor),
 		exponent: float32(cfg.PowerExponent),
+		abs:      cfg.Log == PowerLaw && cfg.Input == InputReal,
 	}
 	if cfg.Input == InputMagnitude || cfg.Input == InputReal {
 		pr.src = make([]float32, a.NumBins())

@@ -40,7 +40,7 @@ func refSource(input Input, power []float32, spec []complex64) []float64 {
 			src[k] = math.Sqrt(float64(p))
 		}
 		return src
-	case InputPower:
+	default:
 	}
 	src := make([]float64, len(power))
 	for k, p := range power {
@@ -207,12 +207,14 @@ func runExtractorCase(t *testing.T, cfg Config, sig []float32, pad stft.PadMode)
 	if got := plan.PowerInto(powerRef, sig, pad); got != frames {
 		t.Fatalf("PowerInto wrote %d frames, want %d", got, frames)
 	}
-	specRef := make([][]complex64, frames)
-	for f := range specRef {
-		specRef[f] = make([]complex64, bins)
-	}
-	if got := plan.Spectrum(specRef, sig, pad); got != frames {
-		t.Fatalf("Spectrum wrote %d frames, want %d", got, frames)
+	specRef := make([][]complex64, frames) // only InputReal reads the spectrum
+	if cfg.Input == InputReal {
+		for f := range specRef {
+			specRef[f] = make([]complex64, bins)
+		}
+		if got := plan.Spectrum(specRef, sig, pad); got != frames {
+			t.Fatalf("Spectrum wrote %d frames, want %d", got, frames)
+		}
 	}
 	dense := ex.Filterbank().Dense()
 	m := ex.Compute(sig, pad)
@@ -282,7 +284,7 @@ func compareMelColumn(t *testing.T, col []float32, lin, out []float64, cfg Confi
 			t.Fatalf("frame %d mel %d: non-finite compressed value %g", f, mm, got)
 		}
 		if log == PowerLaw {
-			// x^q amplifies the relative error of a near-zero x, so bands under 60 dB
+			// x^q amplifies the relative error of a near-zero x, so bands under 40 dB
 			// below the peak are only checked for finiteness and sign.
 			if got < 0 {
 				t.Fatalf("frame %d mel %d: power-law value %g is negative", f, mm, got)
@@ -553,17 +555,18 @@ func TestExtractorConfigValidation(t *testing.T) {
 // signed input without compression.
 func TestExtractorConfigAccepted(t *testing.T) {
 	base := Config{SampleRate: 16000, FrameSize: 256, HopSize: 64, NumMels: 20, MinHz: 0, MaxHz: 0}
-	cases := map[string]Config{
-		"powerlaw exponent one":          {Input: InputPower, Log: PowerLaw, PowerExponent: 1},
-		"powerlaw without offset":        {Input: InputMagnitude, Log: PowerLaw, PowerExponent: 0.35},
-		"real input without compression": {Input: InputReal, Log: LogNone},
-		"real input powerlaw":            {Input: InputReal, Log: PowerLaw, PowerExponent: 0.8, LogOffset: 1e-6, LogFloor: 1e-9},
+	cases := map[string]func(*Config){
+		"powerlaw exponent one":          func(c *Config) { c.Log = PowerLaw; c.PowerExponent = 1 },
+		"powerlaw without offset":        func(c *Config) { c.Input = InputMagnitude; c.Log = PowerLaw; c.PowerExponent = 0.35 },
+		"real input without compression": func(c *Config) { c.Input = InputReal },
+		"real input powerlaw": func(c *Config) {
+			c.Input, c.Log, c.PowerExponent, c.LogOffset, c.LogFloor = InputReal, PowerLaw, 0.8, 1e-6, 1e-9
+		},
 	}
-	for name, delta := range cases {
+	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			cfg := base
-			cfg.Input, cfg.Log, cfg.PowerExponent = delta.Input, delta.Log, delta.PowerExponent
-			cfg.LogOffset, cfg.LogFloor = delta.LogOffset, delta.LogFloor
+			mutate(&cfg)
 			if _, err := New(cfg); err != nil {
 				t.Fatalf("New err = %v, want nil", err)
 			}
