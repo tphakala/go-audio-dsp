@@ -133,8 +133,9 @@ func (l Log) String() string {
 
 // Config configures an Extractor or ColumnSource: the short-time transform
 // (shared with package stft), the mel filterbank, the power, magnitude or
-// real-part input, and an optional log or power-law stage. The zero values of Scale, Norm and Input reproduce
-// librosa's melspectrogram defaults (Slaney scale, slaney norm, power input).
+// real-part input, and an optional log or power-law stage. The zero values of
+// Scale, Norm and Input reproduce librosa's melspectrogram defaults (Slaney
+// scale, slaney norm, power input).
 type Config struct {
 	// SampleRate in Hz; required (> 0). Places the mel filters and validates
 	// MinHz/MaxHz against Nyquist.

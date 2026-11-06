@@ -2,10 +2,11 @@
 
 Per-frame mel spectrogram columns over the shared `stft` core: STFT framing and
 window, power, magnitude or signed real-part spectrum, a mel filterbank
-projection, and an optional floored log or power-law compression. It is the third analysis block on `stft`, after
-`spectrogram`, and follows the same shape: a whole-clip `Extractor` and a
-streaming `ColumnSource` over one projection stage, so a streamed column equals
-the whole-clip column at the same frame offset bit for bit under `NoPad`.
+projection, and an optional floored log or power-law compression. It is the
+third analysis block on `stft`, after `spectrogram`, and follows the same shape:
+a whole-clip `Extractor` and a streaming `ColumnSource` over one projection
+stage, so a streamed column equals the whole-clip column at the same frame
+offset bit for bit under `NoPad`.
 
 The package is pure audio DSP. It has no model presets and no per-model
 normalization, pitch features, frame stacking, or tensor reshaping; those belong
