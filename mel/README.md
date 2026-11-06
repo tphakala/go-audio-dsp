@@ -81,7 +81,8 @@ supplies the bank and the exponent.
 
 `Pow` runs a fast kernel while every value in a column is positive and finite; a
 column holding an exact zero (an empty mel row, or a projection that cancels to
-zero) takes the slower exact scalar path, with the same values.
+zero) takes the slower exact scalar path, which agrees with the fast kernel within the
+relative error simd documents for `f32.Pow` (about 1.4e-5).
 
 ### Filterbanks
 
