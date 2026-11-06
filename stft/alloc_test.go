@@ -36,6 +36,20 @@ func TestZeroAlloc(t *testing.T) {
 	}
 	_ = sink
 
+	// FeedSpectrum with the same non-escaping callback shape.
+	feedSpec := func() {
+		a.FeedSpectrum(in, func(spec []complex64) {
+			a.Inverse(synth, spec)
+			sink += float64(real(spec[0]))
+		})
+		a.Reset()
+	}
+	feedSpec() // warm up
+	if got := testing.AllocsPerRun(30, feedSpec); got != 0 {
+		t.Errorf("FeedSpectrum allocated %v times, want 0", got)
+	}
+	_ = sink
+
 	// Whole-clip PowerInto.
 	p, err := New(Config{FrameSize: n, HopSize: hop})
 	if err != nil {

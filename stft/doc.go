@@ -11,7 +11,8 @@
 //   - Analyzer (NewAnalyzer) is the streaming transform. Feed pushes arbitrary
 //     chunks and runs a callback for each frame that completes, handing it the
 //     frame's complex spectrum (which the callback may modify in place) and its
-//     power. Inverse transforms a spectrum back to time samples, so a synthesis
+//     power; FeedSpectrum is the same without the power pass, for consumers that
+//     read only the spectrum. Inverse transforms a spectrum back to time samples, so a synthesis
 //     consumer can filter in the frequency domain and resynthesize.
 //     Streaming is always NoPad; feed leading zeros for a centered or delayed
 //     start.

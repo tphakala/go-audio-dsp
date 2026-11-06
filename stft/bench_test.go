@@ -1,6 +1,9 @@
 package stft
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 // BenchmarkEdgeAnalyzer runs a 15 s, 24 kHz in-memory clip through a 2048-point
 // EdgeAnalyzer at hop 175. "warm" repeats the same geometry on one analyzer;
@@ -86,5 +89,35 @@ func BenchmarkEdgeAnalyzer(b *testing.B) {
 				}
 			})
 		}
+	}
+}
+
+// BenchmarkAnalyzerFeed compares Feed (transform plus power) with FeedSpectrum
+// (transform only) over a 3 s, 48 kHz clip at two frame geometries.
+func BenchmarkAnalyzerFeed(b *testing.B) {
+	sig := testSignal(3 * 48000)
+	for _, g := range []struct{ n, hop int }{{1024, 280}, {2048, 278}} {
+		a, err := NewAnalyzer(Config{FrameSize: g.n, HopSize: g.hop})
+		if err != nil {
+			b.Fatal(err)
+		}
+		var sink float64
+		b.Run(fmt.Sprintf("power/n%dh%d", g.n, g.hop), func(b *testing.B) {
+			onFrame := func(_ []complex64, power []float32) { sink += float64(power[1]) }
+			b.ReportAllocs()
+			for b.Loop() {
+				a.Feed(sig, onFrame)
+				a.Reset()
+			}
+		})
+		b.Run(fmt.Sprintf("spectrum/n%dh%d", g.n, g.hop), func(b *testing.B) {
+			onFrame := func(spec []complex64) { sink += float64(real(spec[1])) }
+			b.ReportAllocs()
+			for b.Loop() {
+				a.FeedSpectrum(sig, onFrame)
+				a.Reset()
+			}
+		})
+		_ = sink
 	}
 }
