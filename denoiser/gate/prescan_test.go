@@ -75,7 +75,7 @@ func testPrescanKeepsDenseSong(t *testing.T, sr, frame, hop int) {
 
 	songSpan := [][2]int{{2 * sr, 3*sr + 3*sr/4}}
 	leadSpan := [][2]int{{sr / 4, 3 * sr / 4}}
-	for _, strength := range []denoiser.Strength{denoiser.Light, denoiser.Medium, denoiser.Heavy} {
+	for _, strength := range []denoiser.Strength{denoiser.Light, denoiser.LightMedium, denoiser.Medium, denoiser.Heavy} {
 		for _, noFreqSmooth := range []bool{false, true} {
 			p := ParamsFor(strength)
 			name := strength.String() + "/tuned"

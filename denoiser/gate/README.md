@@ -124,11 +124,15 @@ stream at a time and is not safe for concurrent use; process stereo as two
 `Config.Strength` selects a tuned knob set; the zero value is `Medium`. It is the
 coarse aggressiveness dial shared with the flagship.
 
-| Strength | Max reduction | Threshold | Notes                                  |
-| -------- | ------------- | --------- | -------------------------------------- |
-| `Light`  | 6 dB          | 3 dB      | Preserves the most detail.             |
-| `Medium` | 12 dB         | 5 dB      | Default, balanced.                     |
-| `Heavy`  | 20 dB         | 8 dB      | Most aggressive; most time smoothing.  |
+| Strength      | Max reduction | Threshold | Notes                                                        |
+| ------------- | ------------- | --------- | ------------------------------------------------------------ |
+| `Light`       | 6 dB          | 3 dB      | Preserves the most detail.                                   |
+| `LightMedium` | 9 dB          | 4 dB      | Interpolated between Light and Medium; not separately tuned. |
+| `Medium`      | 12 dB         | 5 dB      | Default, balanced.                                           |
+| `Heavy`       | 20 dB         | 8 dB      | Most aggressive; most time smoothing.                        |
+
+Strength values are names, not a scale: `LightMedium` has the highest numeric
+value, so do not compare Strengths numerically.
 
 `Config.Params` overrides every knob: the residual gain floor (`MaxAttenuationDB`;
 0 disables the gate, +Inf allows full gating), the gate threshold above the floor

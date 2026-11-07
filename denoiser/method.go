@@ -20,6 +20,10 @@ import "fmt"
 // Each method maps it to its own knobs: the spectral method maps it to a tuned
 // Params set (see ParamsFor); another family might map it to a gate threshold
 // or an ML mixing factor. The zero value is Medium.
+//
+// Strength values are identifiers, not an aggressiveness scale: LightMedium sits
+// between Light and Medium in effect but has the highest value, so never compare
+// Strengths numerically or iterate a numeric range to mean weaker or stronger.
 type Strength int
 
 const (
@@ -29,6 +33,9 @@ const (
 	Light
 	// Heavy is the most aggressive, best on steady broadband noise.
 	Heavy
+	// LightMedium sits between Light and Medium. It is appended after Heavy so
+	// the existing values keep their numbers.
+	LightMedium
 )
 
 // String returns the strength name.
@@ -40,14 +47,16 @@ func (s Strength) String() string {
 		return "light"
 	case Heavy:
 		return "heavy"
+	case LightMedium:
+		return "light-medium"
 	}
 	return fmt.Sprintf("Strength(%d)", int(s))
 }
 
 // Valid reports whether s is one of the defined strengths (Medium, Light,
-// Heavy). It is exported so a sibling method package can range-check a Strength
+// Heavy, LightMedium). It is exported so a sibling method package can range-check a Strength
 // against the shared vocabulary rather than duplicating the bound.
-func (s Strength) Valid() bool { return s >= Medium && s <= Heavy }
+func (s Strength) Valid() bool { return s >= Medium && s <= LightMedium }
 
 // NoiseLearner is a capability interface implemented by denoise methods that
 // can learn their noise estimate from a noise-only excerpt. A consumer

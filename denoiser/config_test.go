@@ -4,6 +4,8 @@ import (
 	"errors"
 	"math"
 	"testing"
+
+	"github.com/tphakala/go-audio-dsp/internal/audiotest"
 )
 
 func TestAutoFrameSize(t *testing.T) {
@@ -71,16 +73,14 @@ func TestConfigInvalid(t *testing.T) {
 }
 
 func TestStrengthsAreOrdered(t *testing.T) {
-	l, m, h := ParamsFor(Light), ParamsFor(Medium), ParamsFor(Heavy)
-	if !(l.MaxAttenuationDB < m.MaxAttenuationDB && m.MaxAttenuationDB < h.MaxAttenuationDB) {
-		t.Errorf("MaxAttenuationDB not increasing: %g %g %g", l.MaxAttenuationDB, m.MaxAttenuationDB, h.MaxAttenuationDB)
+	l, lm, m, h := ParamsFor(Light), ParamsFor(LightMedium), ParamsFor(Medium), ParamsFor(Heavy)
+	if !(l.MaxAttenuationDB < lm.MaxAttenuationDB && lm.MaxAttenuationDB < m.MaxAttenuationDB && m.MaxAttenuationDB < h.MaxAttenuationDB) {
+		t.Errorf("MaxAttenuationDB not increasing: %g %g %g %g", l.MaxAttenuationDB, lm.MaxAttenuationDB, m.MaxAttenuationDB, h.MaxAttenuationDB)
 	}
-	for _, p := range []Strength{Light, Medium, Heavy} {
-		if err := ParamsFor(p).validate(); err != nil {
-			t.Errorf("%v: %v", p, err)
-		}
-		if p.String() == "" {
-			t.Errorf("%d has empty String()", p)
+	// Every strength Valid admits must index a populated table row.
+	for s := Strength(0); s.Valid(); s++ {
+		if err := ParamsFor(s).validate(); err != nil {
+			t.Errorf("%v: %v", s, err)
 		}
 	}
 	if Strength(0) != Medium {
@@ -104,5 +104,40 @@ func TestMaxAttenuationInfAccepted(t *testing.T) {
 	}}
 	if _, _, err := cfg.resolve(); err != nil {
 		t.Fatalf("+Inf MaxAttenuationDB should be accepted, got %v", err)
+	}
+}
+
+// TestLightMediumIsLightWithOverrides pins LightMedium to the configuration
+// that was evaluated on real recordings (Light with seven knobs overridden) and
+// checks the Strength path and the explicit-Params path give bit-identical
+// output through the two-pass learned-profile Denoise.
+func TestLightMediumIsLightWithOverrides(t *testing.T) {
+	want := ParamsFor(Light)
+	want.MaxAttenuationDB = 9
+	want.OverSubtraction = 1.1
+	want.SNRSmoothing = 0.955
+	want.MinPriorSNRDB = -16.5
+	want.FreqSmoothBins = 0
+	want.Estimator = MMSELSA
+	want.TrackWindowSec = 2
+	if got := ParamsFor(LightMedium); got != want {
+		t.Fatalf("ParamsFor(LightMedium) = %+v, want %+v", got, want)
+	}
+	clip := audiotest.MakeSynthClip(48000, -40, -20, false, 7)
+	viaStrength, err := Denoise(clip.Mix, Config{SampleRate: 48000, Strength: LightMedium})
+	if err != nil {
+		t.Fatal(err)
+	}
+	viaParams, err := Denoise(clip.Mix, Config{SampleRate: 48000, Params: &want})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(viaStrength) != len(viaParams) {
+		t.Fatalf("length %d != %d", len(viaStrength), len(viaParams))
+	}
+	for i := range viaParams {
+		if math.Float32bits(viaStrength[i]) != math.Float32bits(viaParams[i]) {
+			t.Fatalf("differs at %d: %g vs %g", i, viaStrength[i], viaParams[i])
+		}
 	}
 }

@@ -50,6 +50,6 @@
 // size and Flush (or FlushInto) at the end. Denoise, DenoiseWithNoise and
 // DenoiseWithFloor wrap that for a clip already in memory. One Gate serves one
 // stream at a time and is not safe for concurrent use; process stereo as two
-// Gates, one per channel. Strength (Light, Medium, Heavy) selects a tuned knob
-// set shared with the flagship's vocabulary; Params overrides every knob.
+// Gates, one per channel. Strength (Light, LightMedium, Medium, Heavy) selects a
+// tuned knob set shared with the flagship's vocabulary; Params overrides every knob.
 package gate

@@ -101,11 +101,19 @@ the coarse aggressiveness dial shared across denoise methods (see the
 pluggable-method note below), and `ParamsFor` returns the `Params` a strength
 maps to so you can start from one and override single knobs.
 
-| Strength | Max reduction | Notes                                              |
-| -------- | ------------- | -------------------------------------------------- |
-| `Light`  | 6 dB          | Preserves the most detail.                         |
-| `Medium` | 12 dB         | Default, balanced.                                 |
-| `Heavy`  | 20 dB         | Aggressive over-subtraction; best on steady noise. |
+| Strength      | Max reduction | Notes                                               |
+| ------------- | ------------- | --------------------------------------------------- |
+| `Light`       | 6 dB          | Preserves the most detail.                          |
+| `LightMedium` | 9 dB          | Between Light and Medium; tuned on real recordings. |
+| `Medium`      | 12 dB         | Default, balanced.                                  |
+| `Heavy`       | 20 dB         | Aggressive over-subtraction; best on steady noise.  |
+
+On 251 user-reviewed bird-clip recordings, `LightMedium` with the learned noise
+profile cut false positives at confidence 0.5 or above from 100 to 44 compared
+with no denoising, kept 23 of 24 correct detections and raised ROC AUC from 0.78
+to 0.85. Strength values are names, not a scale: `LightMedium` has the highest
+numeric value, so do not compare Strengths numerically; use `ParamsFor` to
+inspect what a strength does.
 
 `Config.Params` overrides the strength's knobs entirely for full control: the gain
 estimator (`MMSELSA` by default, `Wiener` and `Subtraction` as alternatives),

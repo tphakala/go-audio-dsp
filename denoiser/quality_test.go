@@ -24,7 +24,7 @@ const minReductionMarginDB = 4
 // noise-region reduction clears the strength's floor, segmental SNR does not
 // degrade, the output stays sample-aligned with the input, and the noise region
 // is not zeroed to the silence sentinel. A monotonic subtest per clip asserts
-// reduction grows with strength (Light < Medium < Heavy).
+// reduction grows with strength (Light < LightMedium < Medium < Heavy).
 func TestStrengthsOnSyntheticClips(t *testing.T) {
 	// A few fixed seeds so the bars are not validated on a single noise
 	// realization (guards against a cherry-picked seed).
@@ -32,8 +32,8 @@ func TestStrengthsOnSyntheticClips(t *testing.T) {
 		for _, pink := range []bool{false, true} {
 			clip := audiotest.MakeSynthClip(48000, -40, -20, pink, seed)
 			// reduction on the same clip per strength, for the monotonicity check.
-			reductionByStrength := make(map[Strength]float64, 3)
-			for _, strength := range []Strength{Light, Medium, Heavy} {
+			reductionByStrength := make(map[Strength]float64, 4)
+			for _, strength := range []Strength{Light, LightMedium, Medium, Heavy} {
 				t.Run(fmt.Sprintf("%v/pink=%v/seed=%d", strength, pink, seed), func(t *testing.T) {
 					p := ParamsFor(strength)
 					out, err := Denoise(clip.Mix, Config{SampleRate: clip.SR, Strength: strength})
@@ -77,20 +77,22 @@ func TestStrengthsOnSyntheticClips(t *testing.T) {
 				})
 			}
 			// Strengths must order by reduction on the same clip: Heavy reduces more
-			// than Medium, which reduces more than Light. The measured gaps are
-			// large (~5-6 dB), so this does not flake on any noise realization; it
+			// than Medium, which reduces more than LightMedium, which reduces more
+			// than Light. The Light to Medium and Medium to Heavy gaps are about 5-7
+			// dB and LightMedium sits 2.5-2.9 dB from each neighbour on these fixed
+			// seeds, so this does not flake on any noise realization; it
 			// catches a strength table wired out of order or a knob change that
 			// inverts the intended ordering. The per-strength subtests above run
 			// before this one (subtests are sequential), so the map is populated.
 			t.Run(fmt.Sprintf("monotonic/pink=%v/seed=%d", pink, seed), func(t *testing.T) {
-				for _, p := range []Strength{Light, Medium, Heavy} {
+				for _, p := range []Strength{Light, LightMedium, Medium, Heavy} {
 					if _, ok := reductionByStrength[p]; !ok {
 						t.Fatalf("no reduction recorded for %v (a strength subtest failed before recording it)", p)
 					}
 				}
-				l, m, h := reductionByStrength[Light], reductionByStrength[Medium], reductionByStrength[Heavy]
-				if !(l < m && m < h) {
-					t.Errorf("reduction not monotonic in strength: Light %.1f, Medium %.1f, Heavy %.1f dB", l, m, h)
+				l, lm, m, h := reductionByStrength[Light], reductionByStrength[LightMedium], reductionByStrength[Medium], reductionByStrength[Heavy]
+				if !(l < lm && lm < m && m < h) {
+					t.Errorf("reduction not monotonic in strength: Light %.1f, LightMedium %.1f, Medium %.1f, Heavy %.1f dB", l, lm, m, h)
 				}
 			})
 		}

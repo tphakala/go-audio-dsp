@@ -15,11 +15,11 @@ import (
 
 // abBars are regression guards, not quality claims. Measured on the synthetic
 // clips and a recorded noise bed the gate lands within about 2 dB of afftdn at
-// light and medium and well ahead at heavy; 3 dB of slack absorbs unpinned host
-// ffmpeg drift while still catching a real regression.
+// light, light-medium and medium and well ahead at heavy; 3 dB of slack absorbs
+// unpinned host ffmpeg drift while still catching a real regression.
 var abBars = audiotest.Bars{ReductionDB: 3, LSDDB: 3}
 
-var abStrengths = []denoiser.Strength{denoiser.Light, denoiser.Medium, denoiser.Heavy}
+var abStrengths = []denoiser.Strength{denoiser.Light, denoiser.LightMedium, denoiser.Medium, denoiser.Heavy}
 
 // abLevels binds each strength to the afftdn preset it is measured against.
 func abLevels() []audiotest.Level {
