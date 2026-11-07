@@ -104,7 +104,7 @@ maps to so you can start from one and override single knobs.
 | Strength      | Max reduction | Notes                                               |
 | ------------- | ------------- | --------------------------------------------------- |
 | `Light`       | 6 dB          | Preserves the most detail.                          |
-| `LightMedium` | 9 dB          | Between Light and Medium; tuned on real recordings. |
+| `LightMedium` | 9 dB          | Between Light and Medium; evaluated on real clips.  |
 | `Medium`      | 12 dB         | Default, balanced.                                  |
 | `Heavy`       | 20 dB         | Aggressive over-subtraction; best on steady noise.  |
 
