@@ -64,9 +64,10 @@ func (p Params) validate() error {
 
 // strengthParams are the soft-gate method's tuned knob sets per Strength. The
 // TimeSmoothFrames column is the full odd width 2L+1 (Light, LightMedium and
-// Medium give L=1, Heavy L=2). MaxAttenuationDB follows the flagship's 6/12/20 so the shared
-// synthetic quality bar (MaxAttenuationDB-4) carries over. These are reasoned
-// starting values, to be tuned on the synthetic harness and then a real corpus.
+// Medium give L=1, Heavy L=2). MaxAttenuationDB follows the flagship's 6/12/20,
+// with 9 for the interpolated LightMedium row, so the shared synthetic quality
+// bar (MaxAttenuationDB-4) carries over. These are reasoned starting values, to
+// be tuned on the synthetic harness and then a real corpus.
 // The LightMedium row is interpolated between Light and Medium and not
 // separately tuned; its FreqSmoothBins is 5, the width the even-rounds-up rule
 // gives the midpoint 4.

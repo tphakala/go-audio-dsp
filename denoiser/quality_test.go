@@ -43,6 +43,7 @@ func TestStrengthsOnSyntheticClips(t *testing.T) {
 					if len(out) != len(clip.Mix) {
 						t.Fatalf("%d samples, want %d", len(out), len(clip.Mix))
 					}
+					audiotest.AssertFinite(t, "output", out)
 					outNoise := audiotest.SpanRMSDB(out, clip.NoiseSpans)
 					red := audiotest.SpanRMSDB(clip.Mix, clip.NoiseSpans) - outNoise
 					reductionByStrength[strength] = red
