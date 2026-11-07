@@ -82,27 +82,20 @@ func TestEveryValidStrengthHasValidParams(t *testing.T) {
 	}
 }
 
-// TestLightMediumConstructsAndStreams pins the LightMedium row and runs it
-// through New and a chunked stream against a one-shot run. The contract
-// mechanics are mostly governed by TimeSmoothFrames (covered by
-// TestMaxOutputLenGuarantee); this exercises them via the LightMedium path.
-func TestLightMediumConstructsAndStreams(t *testing.T) {
+// TestLightMediumConstructs pins the LightMedium row and checks New accepts it
+// through the Strength path, so the shared Strength.Valid bound and this
+// package's table stay in step. Streaming behaviour at these widths is covered
+// by TestMaxOutputLenGuarantee and the chunk-invariance tests.
+func TestLightMediumConstructs(t *testing.T) {
 	want := Params{MaxAttenuationDB: 9, ThresholdDB: 4, TransitionDB: 6, FreqSmoothBins: 5, TimeSmoothFrames: 3, FloorWindowSec: 0.75}
 	if got := ParamsFor(denoiser.LightMedium); got != want {
 		t.Fatalf("ParamsFor(LightMedium) = %+v, want %+v", got, want)
 	}
-	const sr = 48000
-	cfg := Config{SampleRate: sr, FrameSize: 256, HopSize: 64, Strength: denoiser.LightMedium}
-	g, err := New(cfg)
+	g, err := New(Config{SampleRate: 48000, FrameSize: 256, HopSize: 64, Strength: denoiser.LightMedium})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if g.params != want {
 		t.Fatalf("Gate params = %+v, want %+v", g.params, want)
 	}
-	x := whiteNoise(sr, dbToLin(-40), 5)
-	for i, v := range tone(sr, sr, 3000, dbToLin(-20)) {
-		x[i] += v
-	}
-	assertBitExact(t, "chunked vs one-shot", runStream(t, cfg, nil, x, []int{97, 1, 500}), streamAll(t, g, x))
 }
