@@ -14,7 +14,8 @@ type Params struct {
 	// more than this, so nothing gates to digital silence. 0 disables the gate
 	// (unity gain), +Inf allows full gating (floor 0). NaN and negatives are
 	// rejected. It is the analog of ffmpeg afftdn's "nr" and follows the flagship's
-	// 6/12/20 per strength.
+	// per-strength floors (6, 9, 12 and 20 dB for Light, LightMedium, Medium and
+	// Heavy).
 	MaxAttenuationDB float32
 	// ThresholdDB is the gate threshold above the per-bin noise floor, in dB: the
 	// k-sigma margin at which a bin is half open. It must be finite.
@@ -62,14 +63,19 @@ func (p Params) validate() error {
 }
 
 // strengthParams are the soft-gate method's tuned knob sets per Strength. The
-// TimeSmoothFrames column is the full odd width 2L+1 (Light and Medium give L=1,
-// Heavy L=2). MaxAttenuationDB follows the flagship's 6/12/20 so the shared
-// synthetic quality bar (MaxAttenuationDB-4) carries over. These are reasoned
-// starting values, to be tuned on the synthetic harness and then a real corpus.
+// TimeSmoothFrames column is the full odd width 2L+1 (Light, LightMedium and
+// Medium give L=1, Heavy L=2). MaxAttenuationDB follows the flagship's 6/12/20,
+// with 9 for the interpolated LightMedium row, so the shared synthetic quality
+// bar (MaxAttenuationDB-4) carries over. These are reasoned starting values, to
+// be tuned on the synthetic harness and then a real corpus.
+// The LightMedium row is interpolated between Light and Medium and not
+// separately tuned; its FreqSmoothBins is 5, the width the even-rounds-up rule
+// gives the midpoint 4.
 var strengthParams = [...]Params{
-	denoiser.Medium: {MaxAttenuationDB: 12, ThresholdDB: 5, TransitionDB: 6, FreqSmoothBins: 5, TimeSmoothFrames: 3, FloorWindowSec: 0.75},
-	denoiser.Light:  {MaxAttenuationDB: 6, ThresholdDB: 3, TransitionDB: 6, FreqSmoothBins: 3, TimeSmoothFrames: 3, FloorWindowSec: 0.75},
-	denoiser.Heavy:  {MaxAttenuationDB: 20, ThresholdDB: 8, TransitionDB: 5, FreqSmoothBins: 5, TimeSmoothFrames: 5, FloorWindowSec: 0.75},
+	denoiser.Medium:      {MaxAttenuationDB: 12, ThresholdDB: 5, TransitionDB: 6, FreqSmoothBins: 5, TimeSmoothFrames: 3, FloorWindowSec: 0.75},
+	denoiser.Light:       {MaxAttenuationDB: 6, ThresholdDB: 3, TransitionDB: 6, FreqSmoothBins: 3, TimeSmoothFrames: 3, FloorWindowSec: 0.75},
+	denoiser.Heavy:       {MaxAttenuationDB: 20, ThresholdDB: 8, TransitionDB: 5, FreqSmoothBins: 5, TimeSmoothFrames: 5, FloorWindowSec: 0.75},
+	denoiser.LightMedium: {MaxAttenuationDB: 9, ThresholdDB: 4, TransitionDB: 6, FreqSmoothBins: 5, TimeSmoothFrames: 3, FloorWindowSec: 0.75},
 }
 
 // ParamsFor returns the soft-gate method's tuned Params for a Strength (Medium's

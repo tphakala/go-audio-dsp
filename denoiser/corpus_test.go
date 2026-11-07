@@ -8,14 +8,14 @@ import (
 
 // TestCorpusAgainstAfftdn is the real-corpus A/B comparison behind the Taskfile
 // `ab` target. The comparison itself lives in audiotest.RunCorpusAB, shared with
-// denoiser/gate; this only binds the flagship denoiser's three strengths to the
+// denoiser/gate; this only binds the flagship denoiser's four strengths to the
 // afftdn settings they are measured against.
 //
 // The corpus (denoiser/testdata/corpus/*.wav) is user-supplied and gitignored, so
 // this test never runs in CI: it skips when the corpus or ffmpeg is absent.
 func TestCorpusAgainstAfftdn(t *testing.T) {
-	levels := make([]audiotest.Level, 0, 3)
-	for _, s := range []Strength{Light, Medium, Heavy} {
+	levels := make([]audiotest.Level, 0, 4)
+	for _, s := range []Strength{Light, LightMedium, Medium, Heavy} {
 		nrnf := audiotest.AfftdnPreset[s.String()]
 		levels = append(levels, audiotest.Level{
 			Name: s.String(), NR: nrnf[0], NF: nrnf[1],

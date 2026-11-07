@@ -14,7 +14,7 @@ func TestAsGoodAsAfftdnSynthetic(t *testing.T) {
 	audiotest.FFmpegPath(t)
 	for _, pink := range []bool{false, true} {
 		clip := audiotest.MakeSynthClip(48000, -40, -20, pink, 11)
-		for _, strength := range []Strength{Light, Medium, Heavy} {
+		for _, strength := range []Strength{Light, LightMedium, Medium, Heavy} {
 			t.Run(fmt.Sprintf("%v/pink=%v", strength, pink), func(t *testing.T) {
 				ours, err := Denoise(clip.Mix, Config{SampleRate: clip.SR, Strength: strength})
 				if err != nil {

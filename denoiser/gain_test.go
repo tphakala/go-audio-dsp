@@ -113,7 +113,7 @@ func TestGainStateBoundsAndNaN(t *testing.T) {
 	power := make([]float32, bins)
 	noise := make([]float32, bins)
 	gain := make([]float32, bins)
-	for _, strength := range []Strength{Light, Medium, Heavy} {
+	for _, strength := range []Strength{Light, LightMedium, Medium, Heavy} {
 		p := ParamsFor(strength)
 		g := newGainState(bins, p)
 		floor := float32(math.Pow(10, -float64(p.MaxAttenuationDB)/20))

@@ -14,9 +14,10 @@
 // automatically from the quietest part of a clip (EstimateNoiseProfile, or
 // NoiseProfileEstimator for a clip fed in chunks), or an
 // adaptive minima-controlled tracker that runs when no profile is set. The
-// Light, Medium and Heavy strengths map onto the gain floor and aggressiveness,
-// and Params exposes every knob: the estimator, the residual gain floor,
-// decision-directed smoothing and optional smoothing across frequency bins.
+// Light, LightMedium, Medium and Heavy strengths map onto the gain floor and
+// aggressiveness, and Params exposes every knob: the estimator, the residual
+// gain floor, decision-directed smoothing and optional smoothing across
+// frequency bins.
 //
 // A Denoiser streams: call Process (or ProcessInto) with consecutive chunks of
 // any size and Flush (or FlushInto) at the end. Denoise, DenoiseWithNoise and

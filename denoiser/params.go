@@ -88,13 +88,19 @@ func (p Params) validate() error {
 	return nil
 }
 
-// strengthParams are the spectral method's tuned knob sets per Strength, tuned
-// against the synthetic quality harness (see quality_test.go); refinement
-// against a real bird-clip corpus is future work.
+// strengthParams are the spectral method's knob sets per Strength. Light,
+// Medium and Heavy are tuned against the synthetic quality harness (see
+// quality_test.go). LightMedium is the per-knob midpoint of Light and Medium and
+// the first set evaluated on real recordings: on 251 user-reviewed BirdNET-Go
+// clips, denoised with a learned noise profile before Perch v2 scoring, it cut
+// false positives at confidence 0.5 or above from 100 to 44 compared with no
+// denoising, kept 23 of 24 correct detections and raised ROC AUC from 0.78 to
+// 0.85. The adaptive tracker path was not part of that evaluation.
 var strengthParams = [...]Params{
-	Medium: {MaxAttenuationDB: 12, OverSubtraction: 1.2, SNRSmoothing: 0.96, MinPriorSNRDB: -18, FreqSmoothBins: 0, Estimator: MMSELSA, TrackWindowSec: 2},
-	Light:  {MaxAttenuationDB: 6, OverSubtraction: 1.0, SNRSmoothing: 0.95, MinPriorSNRDB: -15, FreqSmoothBins: 0, Estimator: MMSELSA, TrackWindowSec: 2},
-	Heavy:  {MaxAttenuationDB: 20, OverSubtraction: 2.0, SNRSmoothing: 0.97, MinPriorSNRDB: -22, FreqSmoothBins: 0, Estimator: MMSELSA, TrackWindowSec: 2},
+	Medium:      {MaxAttenuationDB: 12, OverSubtraction: 1.2, SNRSmoothing: 0.96, MinPriorSNRDB: -18, FreqSmoothBins: 0, Estimator: MMSELSA, TrackWindowSec: 2},
+	Light:       {MaxAttenuationDB: 6, OverSubtraction: 1.0, SNRSmoothing: 0.95, MinPriorSNRDB: -15, FreqSmoothBins: 0, Estimator: MMSELSA, TrackWindowSec: 2},
+	Heavy:       {MaxAttenuationDB: 20, OverSubtraction: 2.0, SNRSmoothing: 0.97, MinPriorSNRDB: -22, FreqSmoothBins: 0, Estimator: MMSELSA, TrackWindowSec: 2},
+	LightMedium: {MaxAttenuationDB: 9, OverSubtraction: 1.1, SNRSmoothing: 0.955, MinPriorSNRDB: -16.5, FreqSmoothBins: 0, Estimator: MMSELSA, TrackWindowSec: 2},
 }
 
 // ParamsFor returns the spectral method's tuned Params for a Strength (Medium's

@@ -70,3 +70,32 @@ func TestParamsForUnknownIsMedium(t *testing.T) {
 		t.Errorf("ParamsFor(unknown) = %+v, want Medium %+v", got, want)
 	}
 }
+
+// TestEveryValidStrengthHasValidParams guards the shared Strength.Valid range
+// against the gate's table: ParamsFor indexes the table directly, so a strength
+// Valid admits without a populated row would panic or yield a zero Params.
+func TestEveryValidStrengthHasValidParams(t *testing.T) {
+	for s := denoiser.Strength(0); s.Valid(); s++ {
+		if err := ParamsFor(s).validate(); err != nil {
+			t.Errorf("%v: %v", s, err)
+		}
+	}
+}
+
+// TestLightMediumConstructs pins the LightMedium row and checks New accepts it
+// through the Strength path, so the shared Strength.Valid bound and this
+// package's table stay in step. Streaming behaviour at these widths is covered
+// by TestMaxOutputLenGuarantee and the chunk-invariance tests.
+func TestLightMediumConstructs(t *testing.T) {
+	want := Params{MaxAttenuationDB: 9, ThresholdDB: 4, TransitionDB: 6, FreqSmoothBins: 5, TimeSmoothFrames: 3, FloorWindowSec: 0.75}
+	if got := ParamsFor(denoiser.LightMedium); got != want {
+		t.Fatalf("ParamsFor(LightMedium) = %+v, want %+v", got, want)
+	}
+	g, err := New(Config{SampleRate: 48000, FrameSize: 256, HopSize: 64, Strength: denoiser.LightMedium})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.params != want {
+		t.Fatalf("Gate params = %+v, want %+v", g.params, want)
+	}
+}

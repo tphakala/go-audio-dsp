@@ -13,8 +13,8 @@ import (
 
 // TestGateAttenuatesNoiseKeepsTone pins the core gate mechanism: with a learned
 // floor it reduces the noise-only regions by at least MaxAttenuationDB-4 while
-// leaving a loud tone essentially untouched (within 1 dB), at the tuned Medium
-// and Heavy params with frequency smoothing on. A broken sigmoid or power ratio
+// leaving a loud tone essentially untouched (within 1 dB), at the LightMedium,
+// Medium and Heavy params with frequency smoothing on. A broken sigmoid or power ratio
 // fails one side or the other.
 //
 // The tone is 3 kHz at FrameSize 1024 and 48 kHz, which falls exactly on bin 64.
@@ -39,7 +39,7 @@ func TestGateAttenuatesNoiseKeepsTone(t *testing.T) {
 	noiseSpans := [][2]int{{sr / 4, 3 * sr / 4}, {2*sr + sr/4, 3*sr - sr/4}}
 	toneSpans := [][2]int{{sr + sr/4, 2*sr - sr/4}} // interior of the tone region, clear of edges
 
-	for _, strength := range []denoiser.Strength{denoiser.Medium, denoiser.Heavy} {
+	for _, strength := range []denoiser.Strength{denoiser.LightMedium, denoiser.Medium, denoiser.Heavy} {
 		t.Run(strength.String(), func(t *testing.T) {
 			p := ParamsFor(strength)
 			out, err := DenoiseWithNoise(clip, noise[:sr/2], Config{SampleRate: sr, FrameSize: frame, HopSize: hop, Params: &p})
